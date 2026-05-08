@@ -1,2 +1,17 @@
-@import "tailwindcss";
-@import "@heroui/styles";
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: var(--font-family-base);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+#root {
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+}

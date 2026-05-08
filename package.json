@@ -11,13 +11,11 @@
     "tauri": "tauri"
   },
   "dependencies": {
-    "@heroui/react": "^3.0.4",
-    "@heroui/styles": "^3.0.4",
-    "@tailwindcss/vite": "^4.2.4",
+    "@fluentui/react-components": "^9.73.8",
+    "@fluentui/react-icons": "^2.0.325",
     "@tauri-apps/api": "^2.11.0",
     "react": "^19.2.5",
-    "react-dom": "^19.2.5",
-    "tailwindcss": "^4.2.4"
+    "react-dom": "^19.2.5"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
