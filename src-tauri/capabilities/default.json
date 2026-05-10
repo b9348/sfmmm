@@ -15,6 +15,7 @@
     "sql:allow-close",
     "fs:default",
     "fs:allow-exists",
+    "fs:allow-rename",
     "shell:default",
     "shell:allow-open",
     "shell:allow-execute"

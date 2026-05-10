@@ -28,7 +28,7 @@ const useStyles = makeStyles({
   },
 })
 
-export function GameSettings({ config }) {
+export function GameSettings({ config, onConfigChange }) {
   const styles = useStyles()
   const [gamePath, setGamePath] = useState(config?.game_path || '')
 
@@ -62,6 +62,7 @@ export function GameSettings({ config }) {
           [key, String(value)]
         )
       }
+      onConfigChange?.(updates)
     } catch (e) {
       console.error('Failed to save config:', e)
     }

@@ -39,6 +39,8 @@ function appReducer(state, action) {
       return { isFirstRun: true, config: null }
     case 'WELCOME_COMPLETE':
       return { isFirstRun: false, config: action.config }
+    case 'UPDATE_CONFIG':
+      return { ...state, config: { ...state.config, ...action.config } }
     default:
       return state
   }
@@ -55,22 +57,19 @@ function App() {
     const initialize = async () => {
       try {
         const db = await Database.load('sqlite:config.db')
-        const result = await db.select(
-          `SELECT value FROM config WHERE ` + "`key`" + ` = 'initialized'`
-        )
+        const rows = await db.select(`SELECT ` + "`key`" + `, value FROM config`)
 
         if (!isMounted) {
           return
         }
 
-        if (result && result.length > 0 && result[0].value === 'true') {
-          const rows = await db.select(`SELECT ` + "`key`" + `, value FROM config`)
+        const configMap = {}
+        rows.forEach(row => {
+          configMap[row.key] = row.value
+        })
 
-          const configMap = {}
-          rows.forEach(row => {
-            configMap[row.key] = row.value
-          })
-          dispatch({ type: 'INIT_COMPLETE', config: configMap })
+        if (configMap.initialized === 'true' || (configMap.game_path && configMap.exe_path)) {
+          dispatch({ type: 'INIT_COMPLETE', config: { ...configMap, initialized: 'true' } })
         } else {
           dispatch({ type: 'FIRST_RUN' })
         }
@@ -91,6 +90,10 @@ function App() {
 
   const handleWelcomeComplete = async (configData) => {
     dispatch({ type: 'WELCOME_COMPLETE', config: configData })
+  }
+
+  const handleConfigChange = (configData) => {
+    dispatch({ type: 'UPDATE_CONFIG', config: configData })
   }
 
   if (state.isFirstRun === null) {
@@ -118,7 +121,7 @@ function App() {
           {selectedTab === 'mods' && <ModList config={state.config} />}
           {selectedTab === 'saves' && <SaveManagement config={state.config} />}
           {selectedTab === 'import-export' && <ImportExport config={state.config} />}
-          {selectedTab === 'settings' && <GameSettings config={state.config} />}
+          {selectedTab === 'settings' && <GameSettings config={state.config} onConfigChange={handleConfigChange} />}
         </main>
       </div>
     </FluentProvider>
