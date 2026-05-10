@@ -1,2 +1,2 @@
-export { Header, TabNavigation } from './layout'
+export { TabNavigation } from './layout'
 export { WelcomeScreen } from './WelcomeScreen'

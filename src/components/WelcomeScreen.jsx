@@ -98,8 +98,7 @@ export function WelcomeScreen({ onComplete }) {
         ['initialized', 'true']
       )
 
-      await db.close()
-      onComplete({ gamePath, exePath })
+      onComplete({ game_path: gamePath, exe_path: exePath, initialized: 'true' })
     } catch (e) {
       setError('保存配置失败: ' + (e?.message || String(e)))
     }

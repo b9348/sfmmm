@@ -1,7 +1,7 @@
 import { useState, useEffect, useReducer } from 'react'
 import { FluentProvider, webLightTheme } from '@fluentui/react-components'
 import { makeStyles, tokens } from '@fluentui/react-components'
-import { Header, TabNavigation, WelcomeScreen } from './components'
+import { TabNavigation, WelcomeScreen } from './components'
 import { ModList, SaveManagement, ImportExport, GameSettings } from './modules'
 import Database from '@tauri-apps/plugin-sql'
 
@@ -60,13 +60,11 @@ function App() {
         )
 
         if (!isMounted) {
-          await db.close()
           return
         }
 
         if (result && result.length > 0 && result[0].value === 'true') {
           const rows = await db.select(`SELECT ` + "`key`" + `, value FROM config`)
-          await db.close()
 
           const configMap = {}
           rows.forEach(row => {
@@ -74,10 +72,10 @@ function App() {
           })
           dispatch({ type: 'INIT_COMPLETE', config: configMap })
         } else {
-          await db.close()
           dispatch({ type: 'FIRST_RUN' })
         }
-      } catch {
+      } catch (e) {
+        console.error('Failed to initialize app:', e)
         if (isMounted) {
           dispatch({ type: 'FIRST_RUN' })
         }
@@ -115,7 +113,6 @@ function App() {
   return (
     <FluentProvider theme={webLightTheme}>
       <div className={styles.appShell}>
-        <Header />
         <TabNavigation value={selectedTab} onChange={setSelectedTab} />
         <main className={styles.tabContent}>
           {selectedTab === 'mods' && <ModList config={state.config} />}
