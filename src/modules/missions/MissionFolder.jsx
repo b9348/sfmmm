@@ -1,0 +1,415 @@
+import { useState, useEffect, useCallback } from 'react'
+import { makeStyles, tokens, Text, Button, Spinner, Card, CardHeader, Badge, Tooltip } from '@fluentui/react-components'
+import { FolderOpen24Regular, ArrowClockwise24Regular, Document24Regular, Folder24Regular, ChevronRight24Regular, Play24Regular, Pause24Regular } from '@fluentui/react-icons'
+import { invoke } from '@tauri-apps/api/core'
+import { readDir } from '@tauri-apps/plugin-fs'
+import { useInstalledMods } from '../../hooks/useInstalledMods'
+
+const useStyles = makeStyles({
+  root: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '8px',
+    height: '100%',
+    minHeight: 0,
+  },
+  toolbarCard: {
+    padding: '8px',
+    flexShrink: 0,
+  },
+  toolbarRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+  },
+  breadcrumbRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '2px',
+    flex: 1,
+    minWidth: 0,
+    overflow: 'hidden',
+    flexWrap: 'wrap',
+  },
+  breadcrumbBtn: {
+    minWidth: 'unset',
+    padding: '2px 6px',
+    height: '24px',
+    fontSize: tokens.fontSizeSmall,
+    color: tokens.colorNeutralForeground2,
+  },
+  breadcrumbBtnActive: {
+    color: tokens.colorNeutralForeground1,
+    fontWeight: '600',
+  },
+  breadcrumbChevron: {
+    fontSize: '10px',
+    color: tokens.colorNeutralForeground3,
+    display: 'inline-flex',
+    alignItems: 'center',
+  },
+  grid: {
+    flex: 1,
+    minHeight: 0,
+    overflow: 'auto',
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))',
+    gap: '8px',
+    alignContent: 'start',
+  },
+  card: {
+    padding: '12px',
+    cursor: 'pointer',
+    transition: 'box-shadow 0.2s ease',
+    '&:hover': {
+      boxShadow: tokens.shadow4,
+    },
+  },
+  cardBody: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '6px',
+    marginTop: '4px',
+  },
+  fileName: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  emptyState: {
+    display: 'flex',
+    flexDirection: 'column',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: '8px',
+    padding: '32px',
+    textAlign: 'center',
+    flex: 1,
+  },
+  pathText: {
+    color: tokens.colorNeutralForeground2,
+    fontSize: tokens.fontSizeSmall,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  meta: {
+    color: tokens.colorNeutralForeground2,
+    fontSize: tokens.fontSizeSmall,
+  },
+  folderCount: {
+    fontSize: tokens.fontSizeSmall,
+    color: tokens.colorNeutralForeground3,
+    marginTop: '2px',
+  },
+})
+
+let entryCache = {}
+
+async function listFiles(dir) {
+  try {
+    // 将 Windows 反斜杠路径转换为正斜杠，以兼容 Tauri FS API
+    const normalizedDir = dir.replace(/\\/g, '/')
+    const entries = await readDir(normalizedDir)
+    return entries.filter(e => !e.name?.startsWith('.'))
+      .map(e => {
+        const name = e.name
+        // 检测 [ban] 禁用标记：xxx[ban]json 或 xxx[ban]dll
+        const lower = name.toLowerCase()
+        const isBanned = lower.endsWith('[ban]json') || lower.endsWith('[ban]dll')
+        return { name, isDir: e.isDirectory === true || e.children !== undefined, isBanned }
+      })
+      .sort((a, b) => {
+        if (a.isDir !== b.isDir) return a.isDir ? -1 : 1
+        return a.name.localeCompare(b.name)
+      })
+  } catch (e) {
+    console.error('[MissionFolder] listFiles error:', e)
+    return []
+  }
+}
+
+async function getChildCount(dirPath) {
+  if (entryCache[dirPath]) return entryCache[dirPath]
+  try {
+    // 将 Windows 反斜杠路径转换为正斜杠，以兼容 Tauri FS API
+    const normalizedDir = dirPath.replace(/\\/g, '/')
+    const entries = await readDir(normalizedDir)
+    const count = entries.filter(e => !e.name?.startsWith('.')).length
+    const dirs = entries.filter(e => !e.name?.startsWith('.') && (e.isDirectory || e.children !== undefined)).length
+    const result = { total: count, dirs }
+    entryCache[dirPath] = result
+    return result
+  } catch {
+    return { total: 0, dirs: 0 }
+  }
+}
+
+function getExt(name) {
+  const i = name.lastIndexOf('.')
+  return i > 0 ? name.slice(i + 1).toLowerCase() : ''
+}
+
+async function openInExplorer(dir) {
+  try {
+    // Windows 需要原生反斜杠路径
+    const normalized = dir.replace(/\//g, '\\')
+    await invoke('open_folder', { path: normalized })
+  } catch (e) {
+    console.error('Failed to open folder:', e)
+  }
+}
+
+function FolderCard({ name, fullPath, onNavigate, isWorkshop }) {
+  const styles = useStyles()
+  const [childInfo, setChildInfo] = useState(null)
+
+  useEffect(() => {
+    let cancelled = false
+    getChildCount(fullPath).then(info => {
+      if (!cancelled) setChildInfo(info)
+    })
+    return () => { cancelled = true }
+  }, [fullPath])
+
+  return (
+    <Card className={styles.card} appearance="outline" onClick={() => onNavigate(fullPath)}>
+      <CardHeader
+        header={
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <Folder24Regular />
+            <Text size="small" weight="semibold" className={styles.fileName}>{name}</Text>
+            {isWorkshop && <Badge appearance="filled" color="success" size="small">创意工坊</Badge>}
+          </div>
+        }
+        description={
+          childInfo && (
+            <Text size="small" className={styles.meta}>
+              {childInfo.dirs > 0
+                ? `${childInfo.dirs} 个文件夹，${childInfo.total - childInfo.dirs} 个文件`
+                : `${childInfo.total} 项`}
+            </Text>
+          )
+        }
+      />
+    </Card>
+  )
+}
+
+function FileCard({ name, fullPath, isBanned, onToggle, isWorkshop, hasUpdate }) {
+  const styles = useStyles()
+  const ext = getExt(name)
+  return (
+    <Card className={styles.card} appearance="outline" onClick={() => openInExplorer(fullPath)}>
+      <CardHeader
+        header={
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <Document24Regular />
+            <Text size="small" weight="semibold" className={styles.fileName}>{name}</Text>
+          </div>
+        }
+        description={
+          <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+            <Badge appearance="outline" size="small">{ext.toUpperCase()}</Badge>
+            {isBanned && <Badge appearance="filled" color="danger" size="small">已禁用</Badge>}
+            {isWorkshop && <Badge appearance="filled" color="success" size="small">创意工坊</Badge>}
+            {hasUpdate && <Badge appearance="filled" color="warning" size="small">有更新</Badge>}
+          </div>
+        }
+        action={
+          <Tooltip content={isBanned ? '启用' : '禁用'} relationship="label">
+            <Button
+              size="small"
+              icon={isBanned ? <Play24Regular /> : <Pause24Regular />}
+              appearance="subtle"
+              onClick={(e) => { e.stopPropagation(); onToggle(fullPath) }}
+            />
+          </Tooltip>
+        }
+      />
+    </Card>
+  )
+}
+
+export function MissionFolder({ config, subfolder }) {
+  const styles = useStyles()
+  const gamePath = config?.game_path?.replace(/\\/g, '/') || ''
+  const rootDir = gamePath ? `${gamePath}/${subfolder}` : ''
+  const [currentDir, setCurrentDir] = useState('')
+  const [files, setFiles] = useState([])
+  const [loading, setLoading] = useState(false)
+  const [historyStack, setHistoryStack] = useState([])
+  const { installed, updates } = useInstalledMods()
+
+  // 检查文件/文件夹是否是已安装的工坊模组
+  const getWorkshopKey = (name) => name.replace(/\.\w+$/, '').replace(/\/$/, '')
+  const isWorkshopMod = (name) => installed.has(getWorkshopKey(name))
+  const hasUpdate = (name) => updates.has(getWorkshopKey(name))
+
+  // Reset to root when gamePath or subfolder changes
+  useEffect(() => {
+    setCurrentDir(rootDir)
+    setHistoryStack([])
+    entryCache = {}
+    // 直接在 effect 中加载文件，避免 currentDir 状态更新延迟问题
+    if (rootDir) {
+      setLoading(true)
+      listFiles(rootDir).then(list => {
+        setFiles(list)
+        setLoading(false)
+      })
+    }
+  }, [rootDir])
+
+  const loadFiles = useCallback(async () => {
+    if (!currentDir) return
+    setLoading(true)
+    try {
+      const list = await listFiles(currentDir)
+      setFiles(list)
+    } finally {
+      setLoading(false)
+    }
+  }, [currentDir])
+
+  useEffect(() => {
+    // 当 currentDir 改变时加载文件（只要有值就加载）
+    if (currentDir) {
+      loadFiles()
+    }
+  }, [currentDir, loadFiles])
+
+  const navigateTo = useCallback((targetDir) => {
+    setHistoryStack(prev => [...prev, currentDir])
+    setCurrentDir(targetDir)
+  }, [currentDir])
+
+  const navigateBreadcrumb = useCallback((targetDir) => {
+    setCurrentDir(targetDir)
+    // 重新计算 historyStack：从 rootDir 到 targetDir 的路径
+    if (targetDir === rootDir) {
+      setHistoryStack([])
+    } else if (targetDir.startsWith(rootDir)) {
+      const relative = targetDir.slice(rootDir.length + 1)
+      const parts = relative.split('/')
+      const newStack = []
+      let currentPath = rootDir
+      for (let i = 0; i < parts.length - 1; i++) {
+        currentPath = `${currentPath}/${parts[i]}`
+        newStack.push(currentPath)
+      }
+      setHistoryStack(newStack)
+    }
+  }, [rootDir])
+
+  // Build breadcrumb segments: root folder name + subfolder names
+  const breadcrumbSegments = []
+  if (currentDir && currentDir.startsWith(gamePath)) {
+    const relative = currentDir.slice(gamePath.length + 1) // skip trailing /
+    const parts = relative.split('/')
+    // 第一个 segment 是 root（CustomMissions 或 CustomMissions2）
+    for (let i = 0; i < parts.length; i++) {
+      // 构建到当前部分的完整路径
+      const targetPath = `${gamePath}/${parts.slice(0, i + 1).join('/')}`
+      breadcrumbSegments.push({
+        label: parts[i],
+        targetPath,
+        isLast: i === parts.length - 1,
+      })
+    }
+  }
+
+  // Refresh a folder (re-cache and reload)
+  const refresh = useCallback(() => {
+    entryCache = {}
+    loadFiles()
+  }, [loadFiles])
+
+  const toggleItemEnabled = useCallback(async (filePath) => {
+    try {
+      const [newIsBanned, newPath] = await invoke('toggle_mod_enabled', { path: filePath.replace(/\//g, '\\') })
+      // 更新文件列表中的状态
+      setFiles(prev => prev.map(f => {
+        const fullPath = `${currentDir}/${f.name}`
+        if (filePath === fullPath) {
+          // 重命名后文件名变了，从新路径中提取文件名
+          const newName = newPath.split(/[/\\]/).pop()
+          return { ...f, name: newName, isBanned: newIsBanned }
+        }
+        return f
+      }))
+    } catch (e) {
+      console.error('Failed to toggle item:', e)
+    }
+  }, [currentDir, setFiles])
+
+  return (
+    <div className={styles.root}>
+      <Card className={styles.toolbarCard}>
+        <div className={styles.toolbarRow}>
+          {/* Breadcrumb navigation */}
+          <div className={styles.breadcrumbRow}>
+            {breadcrumbSegments.map((seg, idx) => (
+              <span key={idx} style={{ display: 'inline-flex', alignItems: 'center', minWidth: 0 }}>
+                {idx > 0 && (
+                  <span className={styles.breadcrumbChevron}>
+                    <ChevronRight24Regular style={{ fontSize: '10px', verticalAlign: 'middle' }} />
+                  </span>
+                )}
+                <Button
+                  size="small"
+                  appearance="subtle"
+                  className={seg.isLast ? styles.breadcrumbBtnActive : styles.breadcrumbBtn}
+                  onClick={() => navigateBreadcrumb(seg.targetPath)}
+                  title={seg.targetPath}
+                  disabled={seg.isLast}
+                >
+                  {seg.label}
+                </Button>
+              </span>
+            ))}
+          </div>
+
+          <Button size="small" icon={<FolderOpen24Regular />} appearance="subtle" onClick={() => openInExplorer(currentDir)} disabled={!currentDir} />
+          <Button size="small" icon={<ArrowClockwise24Regular />} appearance="subtle" onClick={refresh} disabled={!currentDir || loading} />
+        </div>
+
+        <Text size="small" className={styles.pathText} title={currentDir}>
+          {currentDir || '未配置'}
+        </Text>
+      </Card>
+
+      {currentDir && (
+        <Text size="small" className={styles.meta} style={{ padding: '0 4px' }}>
+          游戏运行时，停用/启用自定义任务需要在游戏中按下组合键 ALT+F9 来更新游戏任务
+        </Text>
+      )}
+
+      {loading && (
+        <div className={styles.emptyState}>
+          <Spinner size="small" label="加载中..." />
+        </div>
+      )}
+
+      {!loading && files.length === 0 && (
+        <div className={styles.emptyState}>
+          <Text weight="semibold">{currentDir ? '文件夹为空' : '尚未配置游戏目录'}</Text>
+          {currentDir && (
+            <Text size="small" className={styles.meta}>此文件夹中没有文件或子文件夹</Text>
+          )}
+        </div>
+      )}
+
+      {!loading && files.length > 0 && (
+        <div className={styles.grid}>
+          {files.map((f, i) => {
+            const fullPath = `${currentDir}/${f.name}`
+            return f.isDir
+              ? <FolderCard key={i} name={f.name} fullPath={fullPath} onNavigate={navigateTo} isWorkshop={isWorkshopMod(f.name)} />
+              : <FileCard key={i} name={f.name} fullPath={fullPath} isBanned={f.isBanned} onToggle={toggleItemEnabled} isWorkshop={isWorkshopMod(f.name)} hasUpdate={hasUpdate(f.name)} />
+          })}
+        </div>
+      )}
+    </div>
+  )
+}

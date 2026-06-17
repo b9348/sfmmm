@@ -1,0 +1,61 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "enables the default permissions",
+  "windows": [
+    "main"
+  ],
+  "permissions": [
+    "core:default",
+    "core:window:default",
+    "core:window:allow-start-dragging",
+    "core:window:allow-minimize",
+    "core:window:allow-maximize",
+    "core:window:allow-toggle-maximize",
+    "core:window:allow-close",
+    "core:window:allow-set-size",
+    "core:window:allow-set-position",
+    "core:window:allow-outer-size",
+    "core:window:allow-outer-position",
+    "core:window:allow-is-maximized",
+    "dialog:default",
+    "sql:default",
+    "sql:allow-execute",
+    "sql:allow-load",
+    "sql:allow-select",
+    "sql:allow-close",
+    "fs:default",
+    "fs:allow-exists",
+    "fs:allow-rename",
+    "fs:allow-read",
+    "fs:allow-read-dir",
+    "fs:allow-stat",
+    "fs:allow-write",
+    "fs:allow-mkdir",
+    "fs:allow-remove",
+    "fs:write-all",
+    {
+      "identifier": "shell:allow-open",
+      "allow": [
+        { "url": "**" }
+      ]
+    },
+    "shell:allow-execute",
+    {
+      "identifier": "http:default",
+      "allow": [
+        { "url": "https://sfm.b9349.dpdns.org/**" },
+        { "url": "http://localhost:8088/**" }
+      ]
+    },
+    {
+      "identifier": "fs:scope",
+      "allow": [
+        { "path": "**" }
+      ]
+    },
+    "updater:default",
+    "updater:allow-check",
+    "updater:allow-download-and-install"
+  ]
+}
