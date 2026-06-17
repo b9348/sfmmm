@@ -6,7 +6,7 @@ import { ModList, SaveManagement, ImportExport, GameSettings, Workshop, MissionF
 import { AuthProvider } from './contexts/AuthContext'
 import { usePersistUI } from './hooks/usePersistUI'
 import Database from '@tauri-apps/plugin-sql'
-import { checkVersion, checkAndUpdate } from './services/updateApi'
+import { checkVersion } from './services/updateApi'
 
 const useStyles = makeStyles({
   root: {
@@ -62,14 +62,11 @@ function App() {
   const [state, dispatch] = useReducer(appReducer, initialState)
   const [updateInfo, setUpdateInfo] = useState({ hasUpdate: false })
 
-  // 启动时自动检测更新（静默安装 + UI 提示）
+  // 启动时自动检测更新
   useEffect(() => {
     let cancelled = false
     const doCheck = async () => {
       try {
-        // 后台自动安装
-        await checkAndUpdate(true)
-        // 同时检查更新信息用于 UI 显示
         const info = await checkVersion('0.1.0')
         if (!cancelled) setUpdateInfo(info)
       } catch {

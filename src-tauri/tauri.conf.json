@@ -52,16 +52,5 @@
     "android": {
       "debugApplicationIdSuffix": ".debug"
     }
-  },
-  "plugins": {
-    "updater": {
-      "pubkey": "",
-      "endpoints": [
-        "https://sfm.b9349.dpdns.org/api/updates/latest"
-      ],
-      "windows": {
-        "installMode": "passive"
-      }
-    }
   }
 }

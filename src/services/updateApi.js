@@ -1,46 +1,11 @@
 /**
  * 更新检查 API 服务
- * 使用 Tauri updater 插件检测和安装更新
+ * 从 sfm-cloud 的 /api/admin/version 接口获取最新版本
  */
 
-import { check } from '@tauri-apps/plugin-updater'
-import { relaunch } from '@tauri-apps/plugin-process'
-
-/**
- * 检测更新并自动安装
- * @param {boolean} autoInstall - 是否自动安装（静默）
- * @returns {{ hasUpdate: boolean, version: string|null }}
- */
-export async function checkAndUpdate(autoInstall = true) {
-  try {
-    const update = await check()
-    if (!update) {
-      return { hasUpdate: false, version: null }
-    }
-
-    if (autoInstall) {
-      await update.downloadAndInstall()
-      await relaunch()
-    }
-
-    return { hasUpdate: true, version: update.version }
-  } catch (e) {
-    console.warn('[Update] 检测更新失败:', e?.message || e)
-    return { hasUpdate: false, version: null }
-  }
-}
-
-/**
- * 仅检测是否有新版本，不安装
- */
-export async function checkForUpdates() {
-  try {
-    const update = await check()
-    return update ? { version: update.version, update_url: '' } : null
-  } catch {
-    return null
-  }
-}
+const API_BASE = import.meta.env.DEV
+  ? 'http://localhost:3000'
+  : 'https://sfm.b9349.dpdns.org'
 
 /**
  * 比较两个语义化版本号
@@ -59,7 +24,24 @@ export function compareVersions(a, b) {
 }
 
 /**
- * 检测是否有新版本（仅检查，兼容旧接口）
+ * 从 sfm-cloud 获取最新版本信息
+ */
+export async function checkForUpdates() {
+  try {
+    const res = await fetch(`${API_BASE}/api/admin/version`)
+    const data = await res.json()
+    if (data.success && data.data) {
+      return data.data  // { version, update_url, updated_at }
+    }
+    return null
+  } catch (e) {
+    console.warn('[Update] 检测更新失败:', e.message)
+    return null
+  }
+}
+
+/**
+ * 检测是否有新版本
  */
 export async function checkVersion(currentVersion) {
   const latest = await checkForUpdates()
