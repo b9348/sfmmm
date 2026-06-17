@@ -1,15 +1,13 @@
 /**
- * 更新检查 API 服务
- * 从 sfm-cloud 的 /api/admin/version 接口获取最新版本
+ * 更新检查与自动安装
  */
+
+import { invoke } from '@tauri-apps/api/core'
 
 const API_BASE = import.meta.env.DEV
   ? 'http://localhost:3000'
   : 'https://sfm.b9349.dpdns.org'
 
-/**
- * 比较两个语义化版本号
- */
 export function compareVersions(a, b) {
   const cleanA = a.replace(/^v/i, '')
   const cleanB = b.replace(/^v/i, '')
@@ -24,14 +22,14 @@ export function compareVersions(a, b) {
 }
 
 /**
- * 从 sfm-cloud 获取最新版本信息
+ * 检测新版本
  */
 export async function checkForUpdates() {
   try {
     const res = await fetch(`${API_BASE}/api/admin/version`)
     const data = await res.json()
     if (data.success && data.data) {
-      return data.data  // { version, update_url, updated_at }
+      return data.data
     }
     return null
   } catch (e) {
@@ -54,4 +52,12 @@ export async function checkVersion(currentVersion) {
     latestVersion: latest.version,
     updateUrl: latest.update_url,
   }
+}
+
+/**
+ * 自动下载并静默安装更新
+ * @param {string} url - 安装包下载地址
+ */
+export async function installUpdate(url) {
+  return await invoke('db_install_update', { url })
 }

@@ -672,6 +672,7 @@ pub fn run() {
             db::db_get_version,
             db::db_add_comment, db::db_get_comments, db::db_get_replies, db::db_delete_comment,
             db::db_check_updates,
+            db::db_install_update,
         ])
         .plugin(
             Builder::default()

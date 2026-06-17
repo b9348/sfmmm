@@ -1013,3 +1013,24 @@ pub async fn db_get_version(
         }
     }).await.map_err(|e| e.to_string())?
 }
+
+/// 下载并静默安装更新
+#[tauri::command]
+pub async fn db_install_update(url: String) -> Result<String, String> {
+    let response = reqwest::get(&url).await.map_err(|e| format!("下载失败: {}", e))?;
+    let bytes = response.bytes().await.map_err(|e| format!("读取响应失败: {}", e))?;
+
+    let temp_dir = std::env::temp_dir();
+    let installer_path = temp_dir.join("sfmmm_update.exe");
+
+    std::fs::write(&installer_path, &bytes)
+        .map_err(|e| format!("写入临时文件失败: {}", e))?;
+
+    // 静默安装（NSIS /S 参数），安装器会等待安装完成后启动新版本
+    std::process::Command::new(&installer_path)
+        .arg("/S")
+        .spawn()
+        .map_err(|e| format!("启动安装程序失败: {}", e))?;
+
+    Ok("安装程序已启动，应用将自动更新".into())
+}
