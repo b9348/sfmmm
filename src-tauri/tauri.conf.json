@@ -46,6 +46,9 @@
         "installerHooks": null
       }
     },
+    "resources": [
+      ".env"
+    ],
     "android": {
       "debugApplicationIdSuffix": ".debug"
     }

@@ -6,8 +6,18 @@ use sha2::{Digest, Sha256};
 // ── 数据库配置 ─────────────────────────────────────────────
 // 优先读 .env 文件或环境变量，找不到则用硬编码默认值
 fn db_url() -> String {
+    // 生产环境：查找 exe 同目录下的 .env
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            let env_path = dir.join(".env");
+            if env_path.exists() {
+                dotenvy::from_path(&env_path).ok();
+            }
+        }
+    }
+    // 开发环境：工作目录下的 .env
     dotenvy::dotenv().ok();
-    std::env::var("DB_URL").expect("DB_URL 未设置：请在 src-tauri/.env 中配置数据库连接")
+    std::env::var("DB_URL").expect("DB_URL 未设置：请在 exe 同目录或 src-tauri/.env 中配置数据库连接")
 }
 
 pub struct DbState {
