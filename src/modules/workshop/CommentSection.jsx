@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { useTranslation } from 'react-i18next'
 import {
   Card, Text, Button, Textarea, Spinner,
   makeStyles, tokens, Avatar,
@@ -31,6 +32,7 @@ const useStyles = makeStyles({
 })
 
 export default function CommentSection({ modId }) {
+  const { t } = useTranslation()
   const styles = useStyles()
   const { user, isLoggedIn } = useAuth()
 
@@ -95,7 +97,7 @@ export default function CommentSection({ modId }) {
       setTotal(prev => prev + 1)
       setNewComment('')
     } catch (e) {
-      alert('评论失败: ' + e.message)
+      alert(t('workshop.commentFailed') + e.message)
     } finally {
       setSubmitting(false)
     }
@@ -143,7 +145,7 @@ export default function CommentSection({ modId }) {
       setReplyText('')
       setReplyTo(null)
     } catch (e) {
-      alert('回复失败: ' + e.message)
+      alert(t('workshop.replyFailed') + e.message)
     } finally {
       setSubmitting(false)
     }
@@ -182,7 +184,7 @@ export default function CommentSection({ modId }) {
         })
       }
     } catch (e) {
-      alert('删除失败: ' + e.message)
+      alert(t('workshop.deleteFailed') + e.message)
     }
   }
 
@@ -211,7 +213,7 @@ export default function CommentSection({ modId }) {
   return (
     <div className={styles.root}>
       <Text weight="semibold" size={400} className={styles.title}>
-        评论 ({total})
+        {t('workshop.comment', { count: total })}
       </Text>
 
       {/* ── 发表评论表单 ── */}
@@ -220,7 +222,7 @@ export default function CommentSection({ modId }) {
           <div className={styles.formRow}>
             <Textarea
               className={styles.textarea}
-              placeholder="写下你的评论... 支持 Markdown 语法"
+              placeholder={t('workshop.commentPlaceholder')}
               value={newComment}
               onChange={(_, d) => setNewComment(d.value)}
               resize="vertical"
@@ -231,21 +233,21 @@ export default function CommentSection({ modId }) {
               disabled={!newComment.trim() || submitting}
               onClick={handleSubmitComment}
             >
-              {submitting ? '发送中...' : '发送'}
+              {submitting ? t('workshop.sending') : t('workshop.send')}
             </Button>
           </div>
         </Card>
       ) : (
         <div className={styles.loginPrompt}>
-          <Text>登录后可发表评论</Text>
+          <Text>{t('workshop.loginToComment')}</Text>
         </div>
       )}
 
       {loading ? (
-        <Spinner size="small" label="加载评论..." />
+        <Spinner size="small" label={t('workshop.loadingComments')} />
       ) : comments.length === 0 ? (
         <div className={styles.emptyText}>
-          <Text>暂无评论，来发表第一条吧</Text>
+          <Text>{t('workshop.noComments')}</Text>
         </div>
       ) : (
         <>
@@ -275,7 +277,7 @@ export default function CommentSection({ modId }) {
                     <Button size="small" appearance="subtle" onClick={() =>
                       setReplyTo(replyTo?.parentId === c.id ? null : { parentId: c.id, authorName: c.author_name })
                     }>
-                      {replyTo?.parentId === c.id ? '取消回复' : '回复'}
+                      {replyTo?.parentId === c.id ? t('workshop.cancelReply') : t('workshop.reply')}
                     </Button>
                   )}
                   {user?.user_id && c.author_name === user.username && (
@@ -301,7 +303,7 @@ export default function CommentSection({ modId }) {
                             <Button size="small" appearance="subtle" onClick={() =>
                               setReplyTo(replyTo?.parentId === r.id ? null : { parentId: r.id, authorName: r.author_name })
                             }>
-                              回复 {r.author_name}
+                              {t('workshop.replyToUser', { name: r.author_name })}
                             </Button>
                           )}
                           {user?.user_id && r.author_name === user.username && (
@@ -315,7 +317,7 @@ export default function CommentSection({ modId }) {
                     {rs.hasMore && (
                       <div className={styles.loadMoreRow}>
                         <Button size="small" appearance="subtle" disabled={rs.loading} onClick={() => handleLoadReplies(c.id)}>
-                          {rs.loading ? '加载中...' : `加载更多回复 (共${c.reply_count}条)`}
+                          {rs.loading ? t('workshop.loading') : t('workshop.loadMoreReplies', { count: c.reply_count })}
                         </Button>
                       </div>
                     )}
@@ -325,7 +327,7 @@ export default function CommentSection({ modId }) {
                       <Button size="small" appearance="subtle" onClick={() =>
                         setReplyState(prev => ({ ...prev, [c.id]: { ...prev[c.id], expanded: false } }))
                       }>
-                        折叠回复
+                        {t('workshop.foldReplies')}
                       </Button>
                     </div>
                   </div>
@@ -337,7 +339,7 @@ export default function CommentSection({ modId }) {
                         setReplyState(prev => ({ ...prev, [c.id]: { ...prev[c.id], expanded: true } }))
                         if (allReplies.length === 0) handleLoadReplies(c.id)
                       }}>
-                        {rs.loading ? '加载中...' : `查看回复 (${c.reply_count}条)`}
+                        {rs.loading ? t('workshop.loading') : t('workshop.viewReplies', { count: c.reply_count })}
                       </Button>
                     </div>
                   </div>
@@ -349,7 +351,7 @@ export default function CommentSection({ modId }) {
                     <div className={styles.formRow}>
                       <Textarea
                         className={styles.textarea}
-                        placeholder={`回复 ${replyTo.authorName}...`}
+                        placeholder={t('workshop.replyToUserPlaceholder', { name: replyTo.authorName })}
                         value={replyText}
                         onChange={(_, d) => setReplyText(d.value)}
                         maxLength={2000}
@@ -360,7 +362,7 @@ export default function CommentSection({ modId }) {
                         disabled={!replyText.trim() || submitting}
                         onClick={handleSubmitReply}
                       >
-                        回复
+                        {t('workshop.reply')}
                       </Button>
                     </div>
                   </Card>
@@ -373,13 +375,13 @@ export default function CommentSection({ modId }) {
           {totalPages > 1 && (
             <div className={styles.pageRow}>
               <Button size="small" appearance="subtle" disabled={page <= 1} onClick={() => fetchComments(page - 1)}>
-                上一页
+                {t('workshop.prevPage')}
               </Button>
               <Text size="small" style={{ padding: '0 8px', lineHeight: '28px' }}>
                 {page} / {totalPages}
               </Text>
               <Button size="small" appearance="subtle" disabled={page >= totalPages} onClick={() => fetchComments(page + 1)}>
-                下一页
+                {t('workshop.nextPage')}
               </Button>
             </div>
           )}

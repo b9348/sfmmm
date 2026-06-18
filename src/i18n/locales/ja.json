@@ -3,7 +3,9 @@
     "title": "SFMMM - Stardew Valley Mod マネージャー",
     "welcome": "SFMMM へようこそ",
     "firstSetup": "初回設定",
-    "getStarted": "使い始める"
+    "getStarted": "使い始める",
+    "updateFound": "新しいバージョン v{{version}} が見つかりました。設定ページで更新してください",
+    "loading": "読み込み中..."
   },
   "window": {
     "minimize": "最小化",
@@ -14,11 +16,17 @@
 
   "nav": {
     "mods": "Mod",
+    "v1": "v1",
+    "v2": "v2",
+    "workshop": "ワークショップ",
+    "settings": "設定",
     "saves": "セーブデータ",
     "importExport": "インポート / エクスポート",
-    "settings": "設定",
     "account": "アカウント設定",
-    "profile": "プロフィール"
+    "profile": "プロフィール",
+    "collapse": "サイドバーを折りたたむ",
+    "expand": "サイドバーを展開",
+    "logout": "ログアウト"
   },
 
   "welcome": {
@@ -28,7 +36,10 @@
     "selectDialogTitle": "SecretFlasherManaka.exe が含まれるゲームディレクトリを選択",
     "errNoGameDir": "ゲームディレクトリを選択してください",
     "errExeNotFound": "SecretFlasherManaka.exe が見つかりません。ゲームのルートディレクトリを選択していることを確認してください。",
-    "errSaveFailed": "設定の保存に失敗しました"
+    "errSaveFailed": "設定の保存に失敗しました",
+    "errDialogFailed": "フォルダ選択ダイアログの起動に失敗しました：{{msg}}",
+    "language": "言語",
+    "languageLabel": "表示言語"
   },
 
   "mods": {
@@ -54,7 +65,19 @@
     "openContainingFolder": "フォルダを開く",
     "folderConfig": "フォルダ設定",
     "disabled": "無効",
-    "status": "合計 {{total}} 個、表示 {{shown}} 個"
+    "status": "合計 {{total}} 個、表示 {{shown}} 個",
+    "dllMod": "DLL Mod",
+    "file": "ファイル",
+    "notScanned": "未スキャン",
+    "notConfigured": "未設定",
+    "pluginDir": "プラグインディレクトリ",
+    "gameDir": "ゲームディレクトリ",
+    "checked": "確認済み",
+    "hasUpdate": "更新あり",
+    "workshopBadge": "ワークショップ",
+    "enable": "有効",
+    "disable": "無効",
+    "unknownError": "不明なエラー"
   },
 
   "saves": {
@@ -90,7 +113,16 @@
     "selectDialogTitle": "ゲームディレクトリを選択",
     "change": "変更",
     "openGameDir": "ゲームディレクトリを開く",
-    "changeHint": "ゲームディレクトリの場所は自由に変更できます"
+    "changeHint": "ゲームディレクトリの場所は自由に変更できます",
+    "updateTitle": "更新を確認",
+    "checking": "確認中...",
+    "checkUpdateBtn": "更新を確認",
+    "downloadUpdate": "更新をダウンロード",
+    "checkFailed": "更新の確認に失敗しました：{{msg}}",
+    "alreadyLatest": "現在最新バージョンです",
+    "currentVersion": "現在のバージョン：v{{version}}。「更新を確認」をクリックしてサーバーから最新バージョンを取得します。",
+    "language": "表示言語",
+    "languageDesc": "アプリケーションの表示言語を選択します（再起動後に完全に反映されます）"
   },
 
   "workshop": {
@@ -135,14 +167,13 @@
     "modCount": "{{username}} · {{count}} 個の Mod",
     "noModsYet": "まだ Mod がありません",
     "uploadHint": "「Mod を公開」をクリックして最初の Mod をアップロードしましょう",
-    "unpublished": "(未公開)",
-    "edit": "編集",
     "addLang": "言語を追加",
     "alreadyUploaded": "アップロード済み",
     "availableVersions": "利用可能なバージョン",
     "back": "戻る",
     "category": "カテゴリ",
     "delete": "削除",
+    "edit": "編集",
     "editMod": "Mod を編集",
     "modFile": "Mod ファイル",
     "save": "保存",
@@ -150,7 +181,83 @@
     "selectFile": "ファイルを選択",
     "selectFileReplace": "ファイルを選択して置換",
     "uncategorized": "未分類",
+    "unpublished": "未公開",
     "upload": "アップロード",
-    "uploading": "アップロード中..."
+    "uploading": "アップロード中...",
+    "logout": "ログアウト",
+    "type": "タイプ",
+    "detailedDesc": "詳細説明",
+    "downloadCount": "{{count}} ダウンロード",
+    "uploadingLang": "{{lang}} バージョンのファイルをアップロード中...",
+    "publishing": "公開中...",
+    "markdown": "Markdown",
+    "richtext": "リッチテキスト",
+    "category_v1": "v1 任務",
+    "category_v2": "v2 任務",
+    "category_dll": "DLL Mod",
+    "category_composite": "複合",
+    "hint_v1": "複数ファイルを選択",
+    "hint_v2": "フォルダを選択",
+    "hint_dll": "DLL ファイルを選択",
+    "hint_composite": "複数選択",
+    "uploadLimitWarning": "現在のサービスは無料枠のため、圧縮後の単一ファイルは 20MB に制限されています。このサイズを超える場合はアップロードできませんので、クラウドストレージにアップロードしてリンクを共有してください。",
+    "modFileSizeWarning": "圧縮後ファイル {{size}}MB が 20MB 制限を超えています。クラウドストレージにアップロードしてリンクを共有してください。",
+    "modIdCreatePlaceholder": "Mod の一意識別子（例：prefect_manaka）",
+    "comment": "コメント（{{count}}）",
+    "commentPlaceholder": "コメントを書く... Markdown 対応",
+    "loginToComment": "ログインしてコメント",
+    "noComments": "コメントはまだありません。最初のコメントをどうぞ！",
+    "loadingComments": "コメントを読み込み中...",
+    "commentFailed": "コメント失敗：",
+    "replyFailed": "返信失敗：",
+    "deleteFailed": "削除失敗：",
+    "reply": "返信",
+    "cancelReply": "返信をキャンセル",
+    "replyToUser": "{{name}} に返信",
+    "replyToUserPlaceholder": "{{name}} に返信...",
+    "foldReplies": "返信を折りたたむ",
+    "viewReplies": "返信を見る（{{count}}）",
+    "loadMoreReplies": "さらに返信を読み込む（全{{count}}件）",
+    "send": "送信",
+    "sending": "送信中...",
+    "getEditDataFailed": "編集データの取得に失敗しました：",
+    "deleteModFailed": "削除失敗：",
+    "fileListTitle": "ファイル一覧（全{{count}}個）",
+    "installing": "インストール中...",
+    "install": "インストール",
+    "installSuccess": "インストール成功！場所：",
+    "openDir": "ディレクトリを開く",
+    "selectFolderErr": "フォルダ選択に失敗しました：{{msg}}",
+    "selectFileErr": "ファイル選択に失敗しました：{{msg}}",
+    "moreFilesCount": "...他 {{count}} ファイル"
+  },
+
+  "editor": {
+    "bold": "太字",
+    "italic": "斜体",
+    "strikethrough": "取り消し線",
+    "inlineCode": "インラインコード",
+    "divider": "区切り線",
+    "heading2": "見出し 2",
+    "heading3": "見出し 3",
+    "bulletList": "箇条書き",
+    "orderedList": "番号付きリスト",
+    "quote": "引用",
+    "undo": "元に戻す",
+    "redo": "やり直し",
+    "edit": "編集",
+    "preview": "プレビュー",
+    "inputPlaceholder": "内容を入力...",
+    "markdownPlaceholder": "Markdown 内容を入力..."
+  },
+
+  "mission": {
+    "folderEmpty": "フォルダは空です",
+    "noGameDir": "ゲームディレクトリが設定されていません",
+    "notConfigured": "未設定",
+    "noFilesInDir": "このディレクトリにファイルやサブフォルダはありません",
+    "reloadTaskHint": "ゲーム実行中にカスタム任務を有効/無効にした後は、ゲーム内で ALT+F9 を押して任務を再読み込みしてください",
+    "folderCount": "{{dirs}} フォルダ、{{files}} ファイル",
+    "itemCount": "{{count}} 項目"
   }
 }

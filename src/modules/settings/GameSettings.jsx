@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import {
   Card,
   CardHeader,
@@ -7,6 +8,7 @@ import {
   Button,
   Input,
   Spinner,
+  Select,
 } from '@fluentui/react-components'
 import {
   Folder24Regular,
@@ -18,6 +20,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { open as openDialog } from '@tauri-apps/plugin-dialog'
 import { open as openUrl } from '@tauri-apps/plugin-shell'
 import Database from '@tauri-apps/plugin-sql'
+import i18n from '../../i18n'
 import { checkVersion } from '../../services/updateApi'
 
 const useStyles = makeStyles({
@@ -66,8 +69,10 @@ const useStyles = makeStyles({
 const CURRENT_VERSION = '0.1.0'
 
 export function GameSettings({ config, onConfigChange }) {
+  const { t, i18n: i18nInstance } = useTranslation()
   const styles = useStyles()
   const [gamePath, setGamePath] = useState(config?.game_path || '')
+  const [language, setLanguage] = useState(config?.language || i18nInstance.language || 'zh')
   const [checking, setChecking] = useState(false)
   const [updateInfo, setUpdateInfo] = useState(null)
 
@@ -75,7 +80,7 @@ export function GameSettings({ config, onConfigChange }) {
     const selected = await openDialog({
       directory: true,
       multiple: false,
-      title: '选择游戏目录',
+      title: t('settings.selectDialogTitle'),
     })
     if (selected) {
       setGamePath(selected)
@@ -127,32 +132,69 @@ export function GameSettings({ config, onConfigChange }) {
     }
   }
 
+  const languageOptions = [
+    { value: 'zh', label: '中文' },
+    { value: 'en', label: 'English' },
+    { value: 'ja', label: '日本語' },
+  ]
+
+  const handleLanguageChange = async (_e, data) => {
+    const newLang = data.value
+    setLanguage(newLang)
+    i18n.changeLanguage(newLang)
+    await saveConfig({ language: newLang })
+  }
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
       <Card appearance="outline">
-        <CardHeader header={<Title2>游戏路径</Title2>} />
+        <CardHeader header={<Title2>{t('settings.language')}</Title2>} />
         <div style={{ padding: '8px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
           <div className={styles.formGrid}>
-            <Text className={styles.formLabel}>游戏目录</Text>
-            <div style={{ display: 'flex', gap: '4px' }}>
-              <Input
-                size="small"
-                value={gamePath}
-                placeholder="请选择游戏目录"
-                style={{ flex: 1 }}
-              />
-              <Button size="small" icon={<Folder24Regular />} onClick={browseGameFolder}>更改</Button>
-              <Button size="small" icon={<Folder24Regular />} onClick={openGameFolder}>打开游戏目录</Button>
+            <Text className={styles.formLabel}>{t('settings.language')}</Text>
+            <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
+              <Select value={language} onChange={(e) => {
+                const newLang = e.target.value
+                setLanguage(newLang)
+                i18n.changeLanguage(newLang)
+                saveConfig({ language: newLang })
+              }} style={{ flex: 1 }}>
+                {languageOptions.map(opt => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
+              </Select>
             </div>
           </div>
           <Text size="small" style={{ color: tokens.colorNeutralForeground3 }}>
-            可自行变更游戏目录位置
+            {t('settings.languageDesc')}
           </Text>
         </div>
       </Card>
 
       <Card appearance="outline">
-        <CardHeader header={<Title2>检查更新</Title2>} />
+        <CardHeader header={<Title2>{t('settings.gamePath')}</Title2>} />
+        <div style={{ padding: '8px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          <div className={styles.formGrid}>
+            <Text className={styles.formLabel}>{t('settings.gameDir')}</Text>
+            <div style={{ display: 'flex', gap: '4px' }}>
+              <Input
+                size="small"
+                value={gamePath}
+                placeholder={t('settings.selectGameDir')}
+                style={{ flex: 1 }}
+              />
+              <Button size="small" icon={<Folder24Regular />} onClick={browseGameFolder}>{t('settings.change')}</Button>
+              <Button size="small" icon={<Folder24Regular />} onClick={openGameFolder}>{t('settings.openGameDir')}</Button>
+            </div>
+          </div>
+          <Text size="small" style={{ color: tokens.colorNeutralForeground3 }}>
+          {t('settings.changeHint')}
+          </Text>
+        </div>
+      </Card>
+
+      <Card appearance="outline">
+        <CardHeader header={<Title2>{t('settings.updateTitle')}</Title2>} />
         <div style={{ padding: '8px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
           <div className={styles.updateRow}>
             <Button
@@ -161,7 +203,7 @@ export function GameSettings({ config, onConfigChange }) {
               onClick={handleCheckUpdate}
               disabled={checking}
             >
-              {checking ? '检查中...' : '检测更新'}
+{checking ? t('settings.checking') : t('settings.checkUpdateBtn')}
             </Button>
             {updateInfo && (
               <div className={styles.updateInfo}>
@@ -176,19 +218,19 @@ export function GameSettings({ config, onConfigChange }) {
                       icon={<ArrowDownload24Regular />}
                       onClick={handleDownloadUpdate}
                     >
-                      下载更新
+                      {t('settings.downloadUpdate')}
                     </Button>
                   </>
                 ) : updateInfo.error ? (
-                  <Text className={styles.noUpdate}>检测失败：{updateInfo.error}</Text>
+                  <Text className={styles.noUpdate}>{t('settings.checkFailed', { msg: updateInfo.error })}</Text>
                 ) : (
-                  <span className={styles.noUpdate}>当前已是最新版本</span>
+                  <span className={styles.noUpdate}>{t('settings.alreadyLatest')}</span>
                 )}
               </div>
             )}
           </div>
           <Text size="small" style={{ color: tokens.colorNeutralForeground3 }}>
-            当前版本：v{CURRENT_VERSION}，点击"检测更新"从服务器获取最新版本
+            {t('settings.currentVersion', { version: CURRENT_VERSION })}
           </Text>
         </div>
       </Card>

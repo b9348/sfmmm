@@ -3,7 +3,9 @@
     "title": "SFMMM - Stardew Valley Mod Manager",
     "welcome": "Welcome to SFMMM",
     "firstSetup": "First-time Setup",
-    "getStarted": "Get Started"
+    "getStarted": "Get Started",
+    "updateFound": "New version v{{version}} found. Click to go to Settings to update",
+    "loading": "Loading..."
   },
   "window": {
     "minimize": "Minimize",
@@ -14,11 +16,17 @@
 
   "nav": {
     "mods": "Mods",
+    "v1": "v1",
+    "v2": "v2",
+    "workshop": "Workshop",
+    "settings": "Settings",
     "saves": "Saves",
     "importExport": "Import / Export",
-    "settings": "Settings",
     "account": "Account Settings",
-    "profile": "Profile"
+    "profile": "Profile",
+    "collapse": "Collapse sidebar",
+    "expand": "Expand sidebar",
+    "logout": "Log out"
   },
 
   "welcome": {
@@ -28,7 +36,10 @@
     "selectDialogTitle": "Select the game directory containing SecretFlasherManaka.exe",
     "errNoGameDir": "Please select a game directory",
     "errExeNotFound": "SecretFlasherManaka.exe not found. Please make sure you selected the game root directory.",
-    "errSaveFailed": "Failed to save configuration"
+    "errSaveFailed": "Failed to save configuration",
+    "errDialogFailed": "Failed to open folder dialog: {{msg}}",
+    "language": "Language",
+    "languageLabel": "Interface Language"
   },
 
   "mods": {
@@ -54,7 +65,19 @@
     "openContainingFolder": "Open containing folder",
     "folderConfig": "Folder Config",
     "disabled": "Disabled",
-    "status": "{{total}} total, {{shown}} shown"
+    "status": "{{total}} total, {{shown}} shown",
+    "dllMod": "DLL mod",
+    "file": "File",
+    "notScanned": "Not scanned",
+    "notConfigured": "Not configured",
+    "pluginDir": "Plugin directory",
+    "gameDir": "Game directory",
+    "checked": "Checked",
+    "hasUpdate": "Has update",
+    "workshopBadge": "Workshop",
+    "enable": "Enable",
+    "disable": "Disable",
+    "unknownError": "Unknown error"
   },
 
   "saves": {
@@ -90,7 +113,16 @@
     "selectDialogTitle": "Select game directory",
     "change": "Change",
     "openGameDir": "Open game directory",
-    "changeHint": "You can change the game directory location freely"
+    "changeHint": "You can change the game directory location freely",
+    "updateTitle": "Check for Updates",
+    "checking": "Checking...",
+    "checkUpdateBtn": "Check update",
+    "downloadUpdate": "Download update",
+    "checkFailed": "Update check failed: {{msg}}",
+    "alreadyLatest": "You're up to date",
+    "currentVersion": "Current version: v{{version}}. Click \"Check update\" to check for the latest version from the server.",
+    "language": "Interface Language",
+    "languageDesc": "Select the display language (restart required to take full effect)"
   },
 
   "workshop": {
@@ -135,14 +167,13 @@
     "modCount": "{{username}} · {{count}} mod(s)",
     "noModsYet": "No mods yet",
     "uploadHint": "Click \"Publish Mod\" to upload your first mod!",
-    "unpublished": "(Unpublished)",
-    "edit": "Edit",
     "addLang": "Add Language",
     "alreadyUploaded": "Already Uploaded",
     "availableVersions": "Available Versions",
     "back": "Back",
     "category": "Category",
     "delete": "Delete",
+    "edit": "Edit",
     "editMod": "Edit Mod",
     "modFile": "Mod File",
     "save": "Save",
@@ -150,7 +181,83 @@
     "selectFile": "Select File",
     "selectFileReplace": "Select File to Replace",
     "uncategorized": "Uncategorized",
+    "unpublished": "(Unpublished)",
     "upload": "Upload",
-    "uploading": "Uploading..."
+    "uploading": "Uploading...",
+    "logout": "Log out",
+    "type": "Type",
+    "detailedDesc": "Detailed Description",
+    "downloadCount": "{{count}} download(s)",
+    "uploadingLang": "Uploading {{lang}} version file...",
+    "publishing": "Publishing...",
+    "markdown": "Markdown",
+    "richtext": "Rich Text",
+    "category_v1": "v1 Mission",
+    "category_v2": "v2 Mission",
+    "category_dll": "DLL Mod",
+    "category_composite": "Composite",
+    "hint_v1": "Select multiple files",
+    "hint_v2": "Select folder",
+    "hint_dll": "Select DLL file",
+    "hint_composite": "Multi-select",
+    "uploadLimitWarning": "The service is a free tier, so the compressed single file is limited to 20MB. Currently, files exceeding this limit cannot be uploaded. You may upload to a cloud drive and share the link instead.",
+    "modFileSizeWarning": "Compressed file {{size}}MB exceeds the 20MB limit. You may upload to a cloud drive and share the link instead.",
+    "modIdCreatePlaceholder": "Unique mod identifier, e.g. prefect_manaka",
+    "comment": "Comments ({{count}})",
+    "commentPlaceholder": "Write a comment... Markdown is supported",
+    "loginToComment": "Login to leave a comment",
+    "noComments": "No comments yet. Be the first to comment!",
+    "loadingComments": "Loading comments...",
+    "commentFailed": "Comment failed: ",
+    "replyFailed": "Reply failed: ",
+    "deleteFailed": "Delete failed: ",
+    "reply": "Reply",
+    "cancelReply": "Cancel reply",
+    "replyToUser": "Reply to {{name}}",
+    "replyToUserPlaceholder": "Reply to {{name}}...",
+    "foldReplies": "Hide replies",
+    "viewReplies": "View replies ({{count}})",
+    "loadMoreReplies": "Load more replies ({{count}} total)",
+    "send": "Send",
+    "sending": "Sending...",
+    "getEditDataFailed": "Failed to get edit data: ",
+    "deleteModFailed": "Delete failed: ",
+    "fileListTitle": "File list ({{count}} files)",
+    "installing": "Installing...",
+    "install": "Install",
+    "installSuccess": "Install successful! Location: ",
+    "openDir": "Open directory",
+    "selectFolderErr": "Failed to select folder: {{msg}}",
+    "selectFileErr": "Failed to select file: {{msg}}",
+    "moreFilesCount": "...{{count}} more file(s)"
+  },
+
+  "editor": {
+    "bold": "Bold",
+    "italic": "Italic",
+    "strikethrough": "Strikethrough",
+    "inlineCode": "Inline Code",
+    "divider": "Divider",
+    "heading2": "Heading 2",
+    "heading3": "Heading 3",
+    "bulletList": "Bullet List",
+    "orderedList": "Ordered List",
+    "quote": "Blockquote",
+    "undo": "Undo",
+    "redo": "Redo",
+    "edit": "Edit",
+    "preview": "Preview",
+    "inputPlaceholder": "Type content...",
+    "markdownPlaceholder": "Type Markdown content..."
+  },
+
+  "mission": {
+    "folderEmpty": "Folder is empty",
+    "noGameDir": "No game directory configured",
+    "notConfigured": "Not configured",
+    "noFilesInDir": "No files or subfolders in this directory",
+    "reloadTaskHint": "While the game is running, press ALT+F9 in-game to reload custom missions after enabling/disabling them.",
+    "folderCount": "{{dirs}} folders, {{files}} files",
+    "itemCount": "{{count}} items"
   }
 }

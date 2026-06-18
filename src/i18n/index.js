@@ -5,16 +5,26 @@ import zh from './locales/zh.json'
 import en from './locales/en.json'
 import ja from './locales/ja.json'
 
+/**
+ * 根据浏览器 navigator.language 检测系统语言，映射到支持的 locale
+ */
+export function detectSystemLanguage() {
+  const lang = (navigator.language || '').toLowerCase()
+  if (lang.startsWith('zh')) return 'zh'
+  if (lang.startsWith('ja')) return 'ja'
+  return 'en'
+}
+
 i18n.use(initReactI18next).init({
   resources: {
     zh: { translation: zh },
     en: { translation: en },
     ja: { translation: ja },
   },
-  lng: 'zh',           // 默认中文
-  fallbackLng: 'zh',   // 找不到 key 时回退中文
+  lng: detectSystemLanguage(),
+  fallbackLng: 'zh',
   interpolation: {
-    escapeValue: false, // React 已经做 XSS 转义
+    escapeValue: false,
   },
 })
 

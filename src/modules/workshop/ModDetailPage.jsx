@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import {
   Card, CardHeader, Text, Button, Badge, Avatar,
   makeStyles, tokens, Spinner,
@@ -62,6 +63,7 @@ const useStyles = makeStyles({
 
 export default function ModDetailPage({ mod, onBack }) {
   const styles = useStyles()
+  const { t } = useTranslation()
   const [installingLang, setInstallingLang] = useState('')
   const [installError, setInstallError] = useState('')
   const [installedDir, setInstalledDir] = useState('')
@@ -88,7 +90,7 @@ export default function ModDetailPage({ mod, onBack }) {
   return (
     <div className={styles.root}>
       <div className={styles.toolbarRow}>
-        <Button size="small" icon={<ArrowLeft24Regular />} appearance="subtle" onClick={onBack}>返回</Button>
+        <Button size="small" icon={<ArrowLeft24Regular />} appearance="subtle" onClick={onBack}>{t('workshop.back')}</Button>
         <Text weight="semibold">{mod.display_name}</Text>
       </div>
       <div className={styles.detailSection}>
@@ -106,7 +108,7 @@ export default function ModDetailPage({ mod, onBack }) {
         )}
         {mod.instructions && (
           <div style={{ borderTop: `1px solid ${tokens.colorNeutralStroke2}`, paddingTop: '8px' }}>
-            <Text size="small" weight="semibold" block style={{ marginBottom: '8px' }}>详细说明</Text>
+            <Text size="small" weight="semibold" block style={{ marginBottom: '8px' }}>{t('workshop.detailedDesc')}</Text>
             {(mod.instructions_format || 'markdown') === 'richtext'
               ? <RichTextContent html={mod.instructions} />
               : <MarkdownContent markdown={mod.instructions} />}
@@ -115,12 +117,12 @@ export default function ModDetailPage({ mod, onBack }) {
         {mod.download_count > 0 && (
           <div className={styles.stats}>
             <ArrowDownload24Regular style={{ fontSize: '14px' }} />
-            <Text size="small">{mod.download_count} 次下载</Text>
+            <Text size="small">{t('workshop.downloadCount', { count: mod.download_count })}</Text>
           </div>
         )}
         {mod.files && mod.files.length > 0 && (
           <div style={{ borderTop: `1px solid ${tokens.colorNeutralStroke2}`, paddingTop: '8px' }}>
-            <Text size="small" weight="semibold" block style={{ marginBottom: '8px' }}>可用版本</Text>
+            <Text size="small" weight="semibold" block style={{ marginBottom: '8px' }}>{t('workshop.availableVersions')}</Text>
             {mod.files.map(f => (
               <div key={f.lang_code} className={styles.fileRow}>
                 <Badge appearance="outline" size="small" style={{ whiteSpace: 'nowrap' }}>{LANG_LABELS[f.lang_code] || f.lang_code}</Badge>
@@ -136,7 +138,7 @@ export default function ModDetailPage({ mod, onBack }) {
                     handleInstall(f)
                   }}
                 >
-                  {installingLang === f.lang_code ? '安装中...' : '安装'}
+{installingLang === f.lang_code ? t('workshop.installing') : t('workshop.install')}
                 </Button>
                 <Text size="small" className={styles.meta}>{f.file_hash?.slice(0, 8)}</Text>
                 <div style={{ flex: 1 }} />
@@ -147,10 +149,10 @@ export default function ModDetailPage({ mod, onBack }) {
         {installedDir && (
           <div style={{ padding: '8px', background: tokens.colorPaletteGreenBackground1, borderRadius: '4px' }}>
             <Text size="small" style={{ color: tokens.colorPaletteGreenForeground1 }}>
-              安装成功！位置：{installedDir}
+              {t('workshop.installSuccess')}{installedDir}
             </Text>
             <Button size="small" appearance="subtle" style={{ marginLeft: '8px' }} onClick={() => invoke('open_folder', { path: installedDir })}>
-              打开目录
+              {t('workshop.openDir')}
             </Button>
           </div>
         )}

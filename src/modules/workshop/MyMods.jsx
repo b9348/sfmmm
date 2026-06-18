@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import { useState, useEffect, useCallback, useRef } from 'react'
 import {
   Card, CardHeader, Text, Button, Spinner,
@@ -132,6 +133,7 @@ const useStyles = makeStyles({
 
 function LoginForm() {
   const styles = useStyles()
+  const { t } = useTranslation()
   const [isRegister, setIsRegister] = useState(false)
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
@@ -156,16 +158,16 @@ function LoginForm() {
   return (
     <Card className={styles.loginCard}>
       <div className={styles.loginTitle}>
-        <Text weight="semibold">{isRegister ? '注册账号' : '登录'}</Text>
+        <Text weight="semibold">{isRegister ? t('workshop.register') : t('workshop.login')}</Text>
         <Text size="small" className={styles.meta} block>
-          登录后可管理你的模组
+          {t('workshop.loginHint')}
         </Text>
       </div>
 
       <div className={styles.loginRow}>
         <Input
           size="small"
-          placeholder="用户名"
+          placeholder={t('workshop.username')}
           value={username}
           onChange={(_, d) => setUsername(d.value)}
         />
@@ -174,7 +176,7 @@ function LoginForm() {
         <Input
           size="small"
           type="password"
-          placeholder="密码"
+          placeholder={t('workshop.password')}
           value={password}
           onChange={(_, d) => setPassword(d.value)}
         />
@@ -184,10 +186,10 @@ function LoginForm() {
 
       <div style={{ display: 'flex', gap: '6px', marginTop: '8px' }}>
         <Button size="small" appearance="primary" onClick={handleSubmit} disabled={busy}>
-          {busy ? '处理中...' : isRegister ? '注册' : '登录'}
+          {busy ? t('workshop.processing') : isRegister ? t('workshop.registerBtn') : t('workshop.login')}
         </Button>
         <Button size="small" appearance="subtle" onClick={() => { setIsRegister(!isRegister); setError('') }}>
-          {isRegister ? '已有账号？登录' : '没有账号？注册'}
+          {isRegister ? t('workshop.hasAccount') : t('workshop.noAccount')}
         </Button>
       </div>
     </Card>
@@ -196,6 +198,7 @@ function LoginForm() {
 
 function CreateModPage({ onClose, onCreated }) {
   const styles = useStyles()
+  const { t } = useTranslation()
   const { user } = useAuth()
   const [modKey, setModKey] = useState('')
   const [category, setCategory] = useState('v1')
@@ -239,8 +242,8 @@ function CreateModPage({ onClose, onCreated }) {
         return { ...prev, [lang]: [...existing, ...files] }
       })
     } catch (e) {
-      const msg = e?.message || (typeof e === 'string' ? e : JSON.stringify(e)) || '未知错误'
-      setError('选择文件夹失败：' + msg)
+      const msg = e?.message || (typeof e === 'string' ? e : JSON.stringify(e)) || t('mods.unknownError')
+      setError(t('workshop.selectFolderErr', { msg }))
     }
   }
 
@@ -309,8 +312,8 @@ function CreateModPage({ onClose, onCreated }) {
         setModFiles(prev => ({ ...prev, [lang]: files }))
       }
     } catch (e) {
-      const msg = e?.message || (typeof e === 'string' ? e : JSON.stringify(e)) || '未知错误'
-      setError('选择文件失败：' + msg)
+      const msg = e?.message || (typeof e === 'string' ? e : JSON.stringify(e)) || t('mods.unknownError')
+      setError(t('workshop.selectFileErr', { msg }))
     }
   }
 
@@ -344,7 +347,7 @@ function CreateModPage({ onClose, onCreated }) {
 
   const handleSubmit = async () => {
     if (!modKey.trim()) {
-      setError('Mod 标识名不能为空')
+      setError(t('workshop.modIdEmpty'))
       return
     }
     setError('')
@@ -363,7 +366,7 @@ function CreateModPage({ onClose, onCreated }) {
         }
         const blob = await zip.generateAsync({ type: 'blob' })
         if (blob.size > MAX_ZIP_SIZE) {
-          setError(`压缩后文件 ${(blob.size / 1024 / 1024).toFixed(1)}MB 超过 20MB 限制，无法上传。可以选择自行上传分享网盘链接。`)
+          setError(t('workshop.modFileSizeWarning', { size: (blob.size / 1024 / 1024).toFixed(1) }))
           setBusy(false)
           return
         }
@@ -385,33 +388,33 @@ function CreateModPage({ onClose, onCreated }) {
     <div className={styles.root}>
       <div className={styles.toolbarRow}>
         <Button size="small" appearance="subtle" onClick={onClose}>
-          返回
+          {t('workshop.back')}
         </Button>
-        <Text weight="semibold">发布模组</Text>
+        <Text weight="semibold">{t('workshop.publishMod')}</Text>
       </div>
       <div style={{ flex: 1, overflow: 'auto', padding: '8px', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
         <div className={styles.formRow}>
-          <Text className={styles.formLabel}>Mod 标识名 *</Text>
+          <Text className={styles.formLabel}>{t('workshop.modId')}</Text>
           <Input
             size="small"
-            placeholder="模组唯一标识，如 prefect_manaka"
+            placeholder={t('workshop.modIdCreatePlaceholder')}
             value={modKey}
             onChange={(_, d) => setModKey(d.value)}
           />
         </div>
 
         <div className={styles.formRow}>
-          <Text className={styles.formLabel}>类型</Text>
+          <Text className={styles.formLabel}>{t('workshop.type')}</Text>
           <Select size="small" value={category} onChange={(_, d) => setCategory(d.value)}>
-            <option value="v1">v1 任务</option>
-            <option value="v2">v2 任务</option>
-            <option value="dll">DLL 模组</option>
-            <option value="composite">组合</option>
+            <option value="v1">{t('workshop.category_v1')}</option>
+            <option value="v2">{t('workshop.category_v2')}</option>
+            <option value="dll">{t('workshop.category_dll')}</option>
+            <option value="composite">{t('workshop.category_composite')}</option>
           </Select>
         </div>
 
         <div className={styles.langHeader}>
-          <Text weight="semibold" size="small">多语言内容</Text>
+          <Text weight="semibold" size="small">{t('workshop.multiLang')}</Text>
               <Select size="small" value={addLang} onChange={(_, d) => setAddLang(d.value)}>
                 {availableLangs.map(l => {
                   const lang = LANGUAGES.find(ll => ll.value === l)
@@ -419,13 +422,13 @@ function CreateModPage({ onClose, onCreated }) {
                 })}
               </Select>
               <Button size="small" onClick={handleAddLang} disabled={!addLang || translations[addLang]}>
-            添加语言
+            {t('workshop.addLang')}
           </Button>
         </div>
 
         {langList.map(lang => {
           const langLabel = LANGUAGES.find(l => l.value === lang)?.label || lang
-          const t = translations[lang]
+          const trans = translations[lang]
           return (
             <div key={lang} style={{ border: `1px solid ${tokens.colorNeutralStroke2}`, borderRadius: '4px', padding: '8px', marginBottom: '8px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
@@ -435,50 +438,49 @@ function CreateModPage({ onClose, onCreated }) {
                 )}
               </div>
               <div className={styles.formRow}>
-                <Text className={styles.formLabel}>名称 *</Text>
-                <Input size="small" placeholder="模组名称" value={t.name} onChange={(_, d) => handleTransChange(lang, 'name', d.value)} />
+                <Text className={styles.formLabel}>{t('workshop.name')}</Text>
+                <Input size="small" placeholder={t('workshop.modName')} value={trans.name} onChange={(_, d) => handleTransChange(lang, 'name', d.value)} />
               </div>
               <div className={styles.formRow}>
-                <Text className={styles.formLabel}>版本</Text>
-                <Input size="small" placeholder="1.0.0" value={t.version || '1.0.0'} onChange={(_, d) => handleTransChange(lang, 'version', d.value)} style={{ width: '100px' }} />
+                <Text className={styles.formLabel}>{t('workshop.version')}</Text>
+                <Input size="small" placeholder="1.0.0" value={trans.version || '1.0.0'} onChange={(_, d) => handleTransChange(lang, 'version', d.value)} style={{ width: '100px' }} />
               </div>
               <div className={styles.formRow}>
-                <Text className={styles.formLabel}>简介</Text>
-                <Textarea size="small" placeholder="简短描述" value={t.description} onChange={(_, d) => handleTransChange(lang, 'description', d.value)} />
+                <Text className={styles.formLabel}>{t('workshop.desc')}</Text>
+                <Textarea size="small" placeholder={t('workshop.briefDesc')} value={trans.description} onChange={(_, d) => handleTransChange(lang, 'description', d.value)} />
               </div>
               <div className={styles.expandableFormRow}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <Text className={styles.formLabel}>详细说明</Text>
+                  <Text className={styles.formLabel}>{t('workshop.detailedDesc')}</Text>
                   <Select
                     size="small"
-                    value={t.instructions_format || 'markdown'}
+                    value={trans.instructions_format || 'markdown'}
                     onChange={(_, d) => handleTransChange(lang, 'instructions_format', d.value)}
                   >
-                    <option value="markdown">Markdown</option>
-                    <option value="richtext">富文本</option>
+                    <option value="markdown">{t('workshop.markdown')}</option>
+                    <option value="richtext">{t('workshop.richtext')}</option>
                   </Select>
                 </div>
-                {(t.instructions_format || 'markdown') === 'richtext' ? (
-                  <RichTextEditor value={t.instructions} onChange={(html) => handleTransChange(lang, 'instructions', html)} placeholder="使用说明、安装方法等" />
+                {(trans.instructions_format || 'markdown') === 'richtext' ? (
+                  <RichTextEditor value={trans.instructions} onChange={(html) => handleTransChange(lang, 'instructions', html)} placeholder={t('workshop.instructions')} />
                 ) : (
-                  <MarkdownEditor value={t.instructions} onChange={(md) => handleTransChange(lang, 'instructions', md)} placeholder="使用说明、安装方法等（支持 Markdown）" />
+                  <MarkdownEditor value={trans.instructions} onChange={(md) => handleTransChange(lang, 'instructions', md)} placeholder={t('workshop.instructions') + '（' + t('workshop.markdown') + '）'} />
                 )}
               </div>
               <div className={styles.formRow}>
-                <Text className={styles.formLabel}>模组文件 {category === 'v2' ? '(选择文件夹)' : category === 'composite' ? '(多选)' : category === 'dll' ? '(选择 DLL 文件)' : '(选择多个文件)'}</Text>
+                <Text className={styles.formLabel}>{t('workshop.modFile')} {category === 'v2' ? `(${t('workshop.hint_v2')})` : category === 'composite' ? `(${t('workshop.hint_composite')})` : category === 'dll' ? `(${t('workshop.hint_dll')})` : `(${t('workshop.hint_v1')})`}</Text>
                 <Text size="small" style={{ color: tokens.colorNeutralForeground3, lineHeight: '1.4', whiteSpace: 'pre-wrap' }}>
-                  由于目前的服务是使用的免费服务，所以限制压缩后的单文件为 20MB，目前暂不支持超过这个大小，
-                  如果超过就不必上传了，可以选择自行上传分享网盘链接。
+                  {t('workshop.uploadLimitWarning')}
                 </Text>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                   {category === 'composite' ? (
                     <>
-                      <Button size="small" icon={<ArrowUpload24Regular />} disabled={!canSelectFile} onClick={() => handleSelectFolders(lang)}>选择文件夹</Button>
-                      <Button size="small" icon={<ArrowUpload24Regular />} disabled={!canSelectFile} onClick={() => handleSelectFiles(lang)}>选择文件</Button>
+                      <Button size="small" icon={<ArrowUpload24Regular />} disabled={!canSelectFile} onClick={() => handleSelectFolders(lang)}>{t('workshop.hint_v2')}</Button>
+                      <Button size="small" icon={<ArrowUpload24Regular />} disabled={!canSelectFile} onClick={() => handleSelectFiles(lang)}>{t('workshop.selectFile')}</Button>
                     </>
                   ) : (
                     <Button size="small" icon={<ArrowUpload24Regular />} disabled={!canSelectFile} onClick={() => handleSelectFiles(lang)}>
-                      {category === 'v2' ? '选择文件夹' : category === 'dll' ? '选择 DLL 文件' : '选择文件'}
+                      {category === 'v2' ? t('workshop.hint_v2') : category === 'dll' ? t('workshop.hint_dll') : t('workshop.selectFile')}
                     </Button>
                   )}
                   {modFiles[lang] && (
@@ -494,7 +496,7 @@ function CreateModPage({ onClose, onCreated }) {
                     ))}
                     {modFiles[lang].length > 5 && (
                       <Text size="small" className={styles.meta} style={{ cursor: 'pointer', textDecoration: 'underline', color: tokens.colorBrandForeground1 }} onClick={() => setFileDialogLang(lang)}>
-                        ...还有 {modFiles[lang].length - 5} 个文件
+                        {t('workshop.moreFilesCount', { count: modFiles[lang].length - 5 })}
                       </Text>
                     )}
                   </div>
@@ -505,21 +507,21 @@ function CreateModPage({ onClose, onCreated }) {
         })}
 
         {uploadingLang && (
-          <Text size="small" className={styles.meta}>正在上传 {uploadingLang} 版本文件...</Text>
+          <Text size="small" className={styles.meta}>{t('workshop.uploadingLang', { lang: uploadingLang })}</Text>
         )}
         {error && <Text size="small" style={{ color: tokens.colorPaletteRedForeground1 }}>{error}</Text>}
       </div>
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '6px', padding: '12px 8px', borderTop: `1px solid ${tokens.colorNeutralStroke2}` }}>
-        <Button size="small" appearance="subtle" onClick={onClose}>取消</Button>
+        <Button size="small" appearance="subtle" onClick={onClose}>{t('workshop.cancel')}</Button>
         <Button size="small" appearance="primary" onClick={handleSubmit} disabled={busy}>
-          {busy ? '发布中...' : '发布'}
+          {busy ? t('workshop.publishing') : t('workshop.publish')}
         </Button>
       </div>
 
       <Dialog open={!!fileDialogLang} onOpenChange={(_, { open }) => !open && setFileDialogLang(null)}>
         <DialogSurface>
           <DialogBody>
-            <DialogTitle>文件列表（{fileDialogLang && modFiles[fileDialogLang]?.length || 0} 个）</DialogTitle>
+            <DialogTitle>{t('workshop.fileListTitle', { count: fileDialogLang && modFiles[fileDialogLang]?.length || 0 })}</DialogTitle>
             <DialogContent>
               <div style={{ maxHeight: '60vh', overflow: 'auto', display: 'flex', flexDirection: 'column', gap: '2px' }}>
                 {fileDialogLang && modFiles[fileDialogLang]?.map((f, i) => (
@@ -530,7 +532,7 @@ function CreateModPage({ onClose, onCreated }) {
               </div>
             </DialogContent>
             <DialogTrigger>
-              <Button size="small">关闭</Button>
+              <Button size="small">{t('window.close')}</Button>
             </DialogTrigger>
           </DialogBody>
         </DialogSurface>
@@ -541,6 +543,7 @@ function CreateModPage({ onClose, onCreated }) {
 
 function EditModPage({ mod: initialMod, onClose, onUpdated }) {
   const styles = useStyles()
+  const { t } = useTranslation()
   const { user } = useAuth()
   const [modKey] = useState(initialMod.mod_key || '')
   const [category, setCategory] = useState(initialMod.category || 'v1')
@@ -624,8 +627,8 @@ function EditModPage({ mod: initialMod, onClose, onUpdated }) {
         return { ...prev, [lang]: [...existing, ...files] }
       })
     } catch (e) {
-      const msg = e?.message || (typeof e === 'string' ? e : JSON.stringify(e)) || '未知错误'
-      setUploadError('选择文件夹失败：' + msg)
+      const msg = e?.message || (typeof e === 'string' ? e : JSON.stringify(e)) || t('mods.unknownError')
+      setUploadError(t('workshop.selectFolderErr', { msg }))
     }
   }
 
@@ -693,8 +696,8 @@ function EditModPage({ mod: initialMod, onClose, onUpdated }) {
         setModFiles(prev => ({ ...prev, [lang]: files }))
       }
     } catch (e) {
-      const msg = e?.message || (typeof e === 'string' ? e : JSON.stringify(e)) || '未知错误'
-      setUploadError('选择文件失败：' + msg)
+      const msg = e?.message || (typeof e === 'string' ? e : JSON.stringify(e)) || t('mods.unknownError')
+      setUploadError(t('workshop.selectFileErr', { msg }))
     }
   }
 
@@ -738,7 +741,7 @@ function EditModPage({ mod: initialMod, onClose, onUpdated }) {
       }
       const blob = await zip.generateAsync({ type: 'blob' })
       if (blob.size > MAX_ZIP_SIZE) {
-        setUploadError(`压缩后文件 ${(blob.size / 1024 / 1024).toFixed(1)}MB 超过 20MB 限制，无法上传。可以选择自行上传分享网盘链接。`)
+        setUploadError(t('workshop.modFileSizeWarning', { size: (blob.size / 1024 / 1024).toFixed(1) }))
         setUploadingLang('')
         return
       }
@@ -771,39 +774,39 @@ function EditModPage({ mod: initialMod, onClose, onUpdated }) {
   return (
     <div className={styles.root}>
       <div className={styles.toolbarRow}>
-        <Button size="small" appearance="subtle" onClick={onClose}>返回</Button>
-        <Text weight="semibold">编辑模组</Text>
+        <Button size="small" appearance="subtle" onClick={onClose}>{t('workshop.back')}</Button>
+        <Text weight="semibold">{t('workshop.editMod')}</Text>
       </div>
       <div style={{ flex: 1, overflow: 'auto', padding: '8px', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
         <div className={styles.formRow}>
-          <Text className={styles.formLabel}>Mod 标识名</Text>
+          <Text className={styles.formLabel}>{t('workshop.modId')}</Text>
           <Input size="small" value={modKey} disabled />
         </div>
 
         <div className={styles.formRow}>
-          <Text className={styles.formLabel}>类型</Text>
+          <Text className={styles.formLabel}>{t('workshop.type')}</Text>
           <Select size="small" value={category} onChange={(_, d) => setCategory(d.value)}>
-            <option value="v1">v1 任务</option>
-            <option value="v2">v2 任务</option>
-            <option value="dll">DLL 模组</option>
-            <option value="composite">组合</option>
+            <option value="v1">{t('workshop.category_v1')}</option>
+            <option value="v2">{t('workshop.category_v2')}</option>
+            <option value="dll">{t('workshop.category_dll')}</option>
+            <option value="composite">{t('workshop.category_composite')}</option>
           </Select>
         </div>
 
         <div className={styles.langHeader}>
-          <Text weight="semibold" size="small">多语言内容</Text>
+          <Text weight="semibold" size="small">{t('workshop.multiLang')}</Text>
           <Select size="small" value={addLang} onChange={(_, d) => setAddLang(d.value)}>
             {availableLangs.map(l => {
               const lang = LANGUAGES.find(ll => ll.value === l)
               return <option key={l} value={l}>{lang?.label || l}</option>
             })}
           </Select>
-          <Button size="small" onClick={handleAddLang} disabled={!addLang || translations[addLang]}>添加语言</Button>
+          <Button size="small" onClick={handleAddLang} disabled={!addLang || translations[addLang]}>{t('workshop.addLang')}</Button>
         </div>
 
         {langList.map(lang => {
           const langLabel = LANGUAGES.find(l => l.value === lang)?.label || lang
-          const t = translations[lang]
+          const trans = translations[lang]
           return (
             <div key={lang} style={{ border: `1px solid ${tokens.colorNeutralStroke2}`, borderRadius: '4px', padding: '8px', marginBottom: '8px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
@@ -813,45 +816,44 @@ function EditModPage({ mod: initialMod, onClose, onUpdated }) {
                 )}
               </div>
               <div className={styles.formRow}>
-                <Text className={styles.formLabel}>名称 *</Text>
-                <Input size="small" placeholder="模组名称" value={t.name} onChange={(_, d) => handleTransChange(lang, 'name', d.value)} />
+                <Text className={styles.formLabel}>{t('workshop.name')}</Text>
+                <Input size="small" placeholder={t('workshop.modName')} value={trans.name} onChange={(_, d) => handleTransChange(lang, 'name', d.value)} />
               </div>
               <div className={styles.formRow}>
-                <Text className={styles.formLabel}>版本</Text>
-                <Input size="small" placeholder="1.0.0" value={t.version || '1.0.0'} onChange={(_, d) => handleTransChange(lang, 'version', d.value)} style={{ width: '100px' }} />
+                <Text className={styles.formLabel}>{t('workshop.version')}</Text>
+                <Input size="small" placeholder="1.0.0" value={trans.version || '1.0.0'} onChange={(_, d) => handleTransChange(lang, 'version', d.value)} style={{ width: '100px' }} />
               </div>
               <div className={styles.formRow}>
-                <Text className={styles.formLabel}>简介</Text>
-                <Textarea size="small" placeholder="简短描述" value={t.description} onChange={(_, d) => handleTransChange(lang, 'description', d.value)} />
+                <Text className={styles.formLabel}>{t('workshop.desc')}</Text>
+                <Textarea size="small" placeholder={t('workshop.briefDesc')} value={trans.description} onChange={(_, d) => handleTransChange(lang, 'description', d.value)} />
               </div>
               <div className={styles.expandableFormRow}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <Text className={styles.formLabel}>详细说明</Text>
+                  <Text className={styles.formLabel}>{t('workshop.detailedDesc')}</Text>
                   <Select
                     size="small"
-                    value={t.instructions_format || 'markdown'}
+                    value={trans.instructions_format || 'markdown'}
                     onChange={(_, d) => handleTransChange(lang, 'instructions_format', d.value)}
                   >
-                    <option value="markdown">Markdown</option>
-                    <option value="richtext">富文本</option>
+                    <option value="markdown">{t('workshop.markdown')}</option>
+                    <option value="richtext">{t('workshop.richtext')}</option>
                   </Select>
                 </div>
-                {(t.instructions_format || 'markdown') === 'richtext' ? (
-                  <RichTextEditor value={t.instructions} onChange={(html) => handleTransChange(lang, 'instructions', html)} placeholder="使用说明、安装方法等" />
+                {(trans.instructions_format || 'markdown') === 'richtext' ? (
+                  <RichTextEditor value={trans.instructions} onChange={(html) => handleTransChange(lang, 'instructions', html)} placeholder={t('workshop.instructions')} />
                 ) : (
-                  <MarkdownEditor value={t.instructions} onChange={(md) => handleTransChange(lang, 'instructions', md)} placeholder="使用说明、安装方法等（支持 Markdown）" />
+                  <MarkdownEditor value={trans.instructions} onChange={(md) => handleTransChange(lang, 'instructions', md)} placeholder={t('workshop.instructions') + '（' + t('workshop.markdown') + '）'} />
                 )}
               </div>
               <div className={styles.formRow}>
-                <Text className={styles.formLabel}>模组文件 {category === 'v2' ? '(选择文件夹)' : category === 'composite' ? '(多选)' : category === 'dll' ? '(选择 DLL 文件)' : '(选择多个文件)'}</Text>
+                <Text className={styles.formLabel}>{t('workshop.modFile')} {category === 'v2' ? `(${t('workshop.hint_v2')})` : category === 'composite' ? `(${t('workshop.hint_composite')})` : category === 'dll' ? `(${t('workshop.hint_dll')})` : `(${t('workshop.hint_v1')})`}</Text>
                 <Text size="small" style={{ color: tokens.colorNeutralForeground3, lineHeight: '1.4', whiteSpace: 'pre-wrap' }}>
-                  由于目前的服务是使用的免费服务，所以限制压缩后的单文件为 20MB，目前暂不支持超过这个大小，
-                  如果超过就不必上传了，可以选择自行上传分享网盘链接。
+                  {t('workshop.uploadLimitWarning')}
                 </Text>
                 {existingFiles[lang] && (
                   <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
                     <Text size="small" className={styles.meta}>
-                      已上传：{existingFiles[lang].file_name} ({(existingFiles[lang].file_size / 1024).toFixed(1)}KB)
+                      {t('workshop.alreadyUploaded')}：{existingFiles[lang].file_name} ({(existingFiles[lang].file_size / 1024).toFixed(1)}KB)
                     </Text>
                     <Text size="small" className={styles.meta}>v{existingFiles[lang].version}</Text>
                   </div>
@@ -859,18 +861,18 @@ function EditModPage({ mod: initialMod, onClose, onUpdated }) {
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                   {category === 'composite' ? (
                     <>
-                      <Button size="small" icon={<ArrowUpload24Regular />} onClick={() => handleSelectFolders(lang)}>选择文件夹</Button>
-                      <Button size="small" icon={<ArrowUpload24Regular />} onClick={() => handleSelectFiles(lang)}>选择文件</Button>
+                      <Button size="small" icon={<ArrowUpload24Regular />} onClick={() => handleSelectFolders(lang)}>{t('workshop.hint_v2')}</Button>
+                      <Button size="small" icon={<ArrowUpload24Regular />} onClick={() => handleSelectFiles(lang)}>{t('workshop.selectFile')}</Button>
                     </>
                   ) : (
                     <Button size="small" icon={<ArrowUpload24Regular />} onClick={() => handleSelectFiles(lang)}>
-                      {category === 'v2' ? '选择文件夹' : category === 'dll' ? '选择 DLL 文件' : '选择文件'}
+                      {category === 'v2' ? t('workshop.hint_v2') : category === 'dll' ? t('workshop.hint_dll') : t('workshop.selectFile')}
                     </Button>
                   )}
                   {modFiles[lang] && (
                     <>
                       <Button size="small" appearance="primary" onClick={() => handleUploadFile(lang)} disabled={uploadingLang === lang}>
-                        {uploadingLang === lang ? '上传中...' : '上传'}
+                        {uploadingLang === lang ? t('workshop.uploading') : t('workshop.upload')}
                       </Button>
                       <Button size="small" icon={<Delete24Regular />} appearance="subtle" onClick={() => setModFiles(prev => { const n = { ...prev }; delete n[lang]; return n })} />
                     </>
@@ -885,7 +887,7 @@ function EditModPage({ mod: initialMod, onClose, onUpdated }) {
                     ))}
                     {modFiles[lang].length > 5 && (
                       <Text size="small" className={styles.meta} style={{ cursor: 'pointer', textDecoration: 'underline', color: tokens.colorBrandForeground1 }} onClick={() => setFileDialogLang(lang)}>
-                        ...还有 {modFiles[lang].length - 5} 个文件
+                        {t('workshop.moreFilesCount', { count: modFiles[lang].length - 5 })}
                       </Text>
                     )}
                   </div>
@@ -919,7 +921,7 @@ function EditModPage({ mod: initialMod, onClose, onUpdated }) {
               </div>
             </DialogContent>
             <DialogTrigger>
-              <Button size="small">关闭</Button>
+              <Button size="small">{t('window.close')}</Button>
             </DialogTrigger>
           </DialogBody>
         </DialogSurface>
@@ -930,6 +932,7 @@ function EditModPage({ mod: initialMod, onClose, onUpdated }) {
 
 export function MyMods() {
   const styles = useStyles()
+  const { t } = useTranslation()
   const { user, isLoggedIn } = useAuth()
   const [mods, setMods] = useState([])
   const [loading, setLoading] = useState(false)
@@ -965,7 +968,7 @@ export function MyMods() {
       const res = await getModForEdit(mod.id, user.user_id)
       setEditingMod(res.data || mod)
     } catch (e) {
-      alert('获取编辑数据失败: ' + e.message)
+      alert(t('workshop.getEditDataFailed') + e.message)
     }
   }
 
@@ -983,7 +986,7 @@ export function MyMods() {
       await deleteMod({ author_id: user.user_id, modId })
       setMods(prev => prev.filter(m => m.id !== modId))
     } catch (e) {
-      alert('删除失败: ' + e.message)
+      alert(t('workshop.deleteModFailed') + e.message)
     }
   }
 
@@ -1022,35 +1025,35 @@ export function MyMods() {
     <div className={styles.root}>
       <div className={styles.toolbarRow}>
         <Text size="small" className={styles.meta} style={{ flex: 1 }}>
-          {user.username} · {mods.length} 个模组
+          {t('workshop.modCount', { username: user.username, count: mods.length })}
         </Text>
         <Button size="small" icon={<Add24Regular />} appearance="primary" onClick={() => setShowCreatePage(true)}>
-          发布模组
+          {t('workshop.publishMod')}
         </Button>
         <Button size="small" icon={<ArrowClockwise24Regular />} onClick={fetchMods} disabled={loading}>
-          刷新
+          {t('workshop.refresh')}
         </Button>
       </div>
 
       {loading && (
         <div className={styles.emptyState}>
-          <Spinner size="small" label="加载中..." />
+          <Spinner size="small" label={t('workshop.loading')} />
         </div>
       )}
 
       {error && (
         <div className={styles.emptyState}>
-          <Text weight="semibold">加载失败</Text>
+          <Text weight="semibold">{t('workshop.loadFailed')}</Text>
           <Text size="small" className={styles.meta}>{error}</Text>
-          <Button size="small" icon={<ArrowClockwise24Regular />} onClick={fetchMods}>重试</Button>
+          <Button size="small" icon={<ArrowClockwise24Regular />} onClick={fetchMods}>{t('workshop.retry')}</Button>
         </div>
       )}
 
       {!loading && !error && mods.length === 0 && (
         <div className={styles.emptyState}>
           <Cloud24Regular style={{ fontSize: '32px' }} />
-          <Text weight="semibold">还没有模组</Text>
-          <Text size="small" className={styles.meta}>点击「发布模组」上传你的第一个模组吧</Text>
+          <Text weight="semibold">{t('workshop.noModsYet')}</Text>
+          <Text size="small" className={styles.meta}>{t('workshop.uploadHint')}</Text>
         </div>
       )}
 
@@ -1071,7 +1074,7 @@ export function MyMods() {
                 action={
                   <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                     <Badge appearance="outline" size="small" style={{ whiteSpace: 'nowrap' }}>
-                      {CATEGORIES.find(c => c.value === mod.category)?.label || mod.category || '未分类'}
+                      {CATEGORIES.find(c => c.value === mod.category)?.label || mod.category || t('workshop.uncategorized')}
                     </Badge>
                     <Button size="small" icon={<Edit24Regular />} appearance="subtle" onClick={(e) => { e.stopPropagation(); handleEdit(mod) }} />
                     <Button size="small" icon={<Delete24Regular />} appearance="subtle" onClick={(e) => { e.stopPropagation(); handleDelete(mod.id) }} />

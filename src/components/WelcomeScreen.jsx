@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import {
   Card,
   CardHeader,
@@ -6,6 +7,7 @@ import {
   Title2,
   Button,
   Input,
+  Select,
 } from '@fluentui/react-components'
 import {
   Folder24Regular,
@@ -16,6 +18,7 @@ import { makeStyles, tokens } from '@fluentui/react-components'
 import { open } from '@tauri-apps/plugin-dialog'
 import { exists } from '@tauri-apps/plugin-fs'
 import Database from '@tauri-apps/plugin-sql'
+import i18n, { detectSystemLanguage } from '../i18n'
 
 const useStyles = makeStyles({
   container: {
@@ -60,13 +63,16 @@ const useStyles = makeStyles({
 })
 
 export function WelcomeScreen({ onComplete }) {
+  const { t } = useTranslation()
   const styles = useStyles()
+  const savedLang = localStorage.getItem('i18nextLng') || detectSystemLanguage()
   const [gamePath, setGamePath] = useState('')
+  const [language, setLanguage] = useState(savedLang)
   const [error, setError] = useState('')
 
   const validateAndSave = async () => {
     if (!gamePath) {
-      setError('请选择游戏目录')
+      setError(t('welcome.errNoGameDir'))
       return
     }
 
@@ -74,7 +80,7 @@ export function WelcomeScreen({ onComplete }) {
 
     const exeExists = await exists(exePath)
     if (!exeExists) {
-      setError('未找到 SecretFlasherManaka.exe，请确认选择的是游戏根目录')
+      setError(t('welcome.errExeNotFound'))
       return
     }
 
@@ -82,7 +88,7 @@ export function WelcomeScreen({ onComplete }) {
       const db = await Database.load('sqlite:config.db')
 
       await db.execute(
-        `DELETE FROM config WHERE ` + "`key`" + ` IN ('game_path', 'exe_path', 'initialized')`
+        `DELETE FROM config WHERE ` + "`key`" + ` IN ('game_path', 'exe_path', 'initialized', 'language')`
       )
 
       await db.execute(
@@ -97,10 +103,14 @@ export function WelcomeScreen({ onComplete }) {
         `INSERT INTO config (` + "`key`" + `, value) VALUES ($1, $2)`,
         ['initialized', 'true']
       )
+      await db.execute(
+        `INSERT INTO config (` + "`key`" + `, value) VALUES ($1, $2)`,
+        ['language', language]
+      )
 
-      onComplete({ game_path: gamePath, exe_path: exePath, initialized: 'true' })
+      onComplete({ game_path: gamePath, exe_path: exePath, initialized: 'true', language })
     } catch (e) {
-      setError('保存配置失败: ' + (e?.message || String(e)))
+      setError(t('welcome.errSaveFailed') + ': ' + (e?.message || String(e)))
     }
   }
 
@@ -110,7 +120,7 @@ export function WelcomeScreen({ onComplete }) {
       const selected = await open({
         directory: true,
         multiple: false,
-        title: '选择包含 SecretFlasherManaka.exe 的游戏目录',
+        title: t('welcome.selectDialogTitle'),
       })
       console.log('[WelcomeScreen] Selected:', selected)
       if (selected) {
@@ -119,8 +129,20 @@ export function WelcomeScreen({ onComplete }) {
       }
     } catch (e) {
       console.error('[WelcomeScreen] Dialog error:', e)
-      setError('打开文件夹选择器失败: ' + (e?.message || String(e)))
+      setError(t('welcome.errDialogFailed', { msg: e?.message || String(e) }))
     }
+  }
+
+  const languageOptions = [
+    { value: 'zh', label: '中文' },
+    { value: 'en', label: 'English' },
+    { value: 'ja', label: '日本語' },
+  ]
+
+  const handleLanguageChange = (_e, data) => {
+    const newLang = data.value
+    setLanguage(newLang)
+    i18n.changeLanguage(newLang)
   }
 
   return (
@@ -128,20 +150,31 @@ export function WelcomeScreen({ onComplete }) {
       <Settings24Regular className={styles.iconLarge} />
 
       <Text size={400} weight="semibold">
-        欢迎使用 SFMMM
+        {t('app.welcome')}
       </Text>
 
       <Card className={styles.card}>
-        <CardHeader header={<Title2>首次设置</Title2>} />
+        <CardHeader header={<Title2>{t('app.firstSetup')}</Title2>} />
 
         <div style={{ padding: '12px' }}>
           <div className={styles.formGrid}>
-            <Text className={styles.formLabel}>游戏目录</Text>
+            <Text className={styles.formLabel}>{t('welcome.languageLabel')}</Text>
+            <Select value={language} onChange={(e, data) => handleLanguageChange(e, { value: e.target.value })}>
+              {languageOptions.map(opt => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
+              ))}
+            </Select>
+          </div>
+
+          <div style={{ height: '12px' }} />
+
+          <div className={styles.formGrid}>
+            <Text className={styles.formLabel}>{t('welcome.gameDir')}</Text>
             <div style={{ display: 'flex', gap: '4px' }}>
               <Input
                 size="small"
                 value={gamePath}
-                placeholder="选择游戏文件夹"
+                placeholder={t('welcome.selectFolder')}
                 style={{ flex: 1, minWidth: 0 }}
               />
               <Button
@@ -153,7 +186,7 @@ export function WelcomeScreen({ onComplete }) {
           </div>
 
           <Text className={styles.hintText}>
-            请选择包含 SecretFlasherManaka.exe 的文件夹
+            {t('welcome.selectFolderHint')}
           </Text>
 
           {error && (
@@ -169,7 +202,7 @@ export function WelcomeScreen({ onComplete }) {
               iconPosition="after"
               onClick={validateAndSave}
             >
-              开始使用
+              {t('app.getStarted')}
             </Button>
           </div>
         </div>

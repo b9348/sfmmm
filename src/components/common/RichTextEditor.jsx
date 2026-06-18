@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Placeholder from '@tiptap/extension-placeholder'
@@ -130,8 +131,10 @@ const useContentStyles = makeStyles({
   },
 })
 
-export function RichTextEditor({ value, onChange, placeholder = '输入内容...' }) {
+export function RichTextEditor({ value, onChange, placeholder }) {
+  const { t } = useTranslation()
   const styles = useStyles()
+  placeholder = placeholder ?? t('editor.inputPlaceholder')
 
   const editor = useEditor({
     extensions: [
@@ -149,33 +152,35 @@ export function RichTextEditor({ value, onChange, placeholder = '输入内容...
   return (
     <div className={styles.editor}>
       <div className={styles.toolbar}>
-        <Tooltip content="粗体" relationship="label"><Button size="small" appearance={editor.isActive('bold') ? 'filled' : 'subtle'} onClick={() => editor.chain().focus().toggleBold().run()}><b>B</b></Button></Tooltip>
-        <Tooltip content="斜体" relationship="label"><Button size="small" appearance={editor.isActive('italic') ? 'filled' : 'subtle'} onClick={() => editor.chain().focus().toggleItalic().run()}><i>I</i></Button></Tooltip>
-        <Tooltip content="删除线" relationship="label"><Button size="small" appearance={editor.isActive('strike') ? 'filled' : 'subtle'} onClick={() => editor.chain().focus().toggleStrike().run()}><s>S</s></Button></Tooltip>
-        <Tooltip content="行内代码" relationship="label"><Button size="small" appearance={editor.isActive('code') ? 'filled' : 'subtle'} onClick={() => editor.chain().focus().toggleCode().run()}>{'</>'}</Button></Tooltip>
-        <Tooltip content="分隔线" relationship="label"><Button size="small" appearance="subtle" onClick={() => editor.chain().focus().setHorizontalRule().run()}>―</Button></Tooltip>
-        <Tooltip content="标题 2" relationship="label"><Button size="small" appearance={editor.isActive('heading', { level: 2 }) ? 'filled' : 'subtle'} onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}>H2</Button></Tooltip>
-        <Tooltip content="标题 3" relationship="label"><Button size="small" appearance={editor.isActive('heading', { level: 3 }) ? 'filled' : 'subtle'} onClick={() => editor.chain().focus().toggleHeading({ level: 3 }).run()}>H3</Button></Tooltip>
-        <Tooltip content="无序列表" relationship="label"><Button size="small" appearance={editor.isActive('bulletList') ? 'filled' : 'subtle'} onClick={() => editor.chain().focus().toggleBulletList().run()}>•</Button></Tooltip>
-        <Tooltip content="有序列表" relationship="label"><Button size="small" appearance={editor.isActive('orderedList') ? 'filled' : 'subtle'} onClick={() => editor.chain().focus().toggleOrderedList().run()}>1.</Button></Tooltip>
-        <Tooltip content="引用" relationship="label"><Button size="small" appearance={editor.isActive('blockquote') ? 'filled' : 'subtle'} onClick={() => editor.chain().focus().toggleBlockquote().run()}>"</Button></Tooltip>
-        <Tooltip content="撤销" relationship="label"><Button size="small" appearance="subtle" onClick={() => editor.chain().focus().undo().run()}>↶</Button></Tooltip>
-        <Tooltip content="重做" relationship="label"><Button size="small" appearance="subtle" onClick={() => editor.chain().focus().redo().run()}>↷</Button></Tooltip>
+        <Tooltip content={t('editor.bold')} relationship="label"><Button size="small" appearance={editor.isActive('bold') ? 'filled' : 'subtle'} onClick={() => editor.chain().focus().toggleBold().run()}><b>B</b></Button></Tooltip>
+        <Tooltip content={t('editor.italic')} relationship="label"><Button size="small" appearance={editor.isActive('italic') ? 'filled' : 'subtle'} onClick={() => editor.chain().focus().toggleItalic().run()}><i>I</i></Button></Tooltip>
+        <Tooltip content={t('editor.strikethrough')} relationship="label"><Button size="small" appearance={editor.isActive('strike') ? 'filled' : 'subtle'} onClick={() => editor.chain().focus().toggleStrike().run()}><s>S</s></Button></Tooltip>
+        <Tooltip content={t('editor.inlineCode')} relationship="label"><Button size="small" appearance={editor.isActive('code') ? 'filled' : 'subtle'} onClick={() => editor.chain().focus().toggleCode().run()}>{'</>'}</Button></Tooltip>
+        <Tooltip content={t('editor.divider')} relationship="label"><Button size="small" appearance="subtle" onClick={() => editor.chain().focus().setHorizontalRule().run()}>―</Button></Tooltip>
+        <Tooltip content={t('editor.heading2')} relationship="label"><Button size="small" appearance={editor.isActive('heading', { level: 2 }) ? 'filled' : 'subtle'} onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}>H2</Button></Tooltip>
+        <Tooltip content={t('editor.heading3')} relationship="label"><Button size="small" appearance={editor.isActive('heading', { level: 3 }) ? 'filled' : 'subtle'} onClick={() => editor.chain().focus().toggleHeading({ level: 3 }).run()}>H3</Button></Tooltip>
+        <Tooltip content={t('editor.bulletList')} relationship="label"><Button size="small" appearance={editor.isActive('bulletList') ? 'filled' : 'subtle'} onClick={() => editor.chain().focus().toggleBulletList().run()}>•</Button></Tooltip>
+        <Tooltip content={t('editor.orderedList')} relationship="label"><Button size="small" appearance={editor.isActive('orderedList') ? 'filled' : 'subtle'} onClick={() => editor.chain().focus().toggleOrderedList().run()}>1.</Button></Tooltip>
+        <Tooltip content={t('editor.quote')} relationship="label"><Button size="small" appearance={editor.isActive('blockquote') ? 'filled' : 'subtle'} onClick={() => editor.chain().focus().toggleBlockquote().run()}>"</Button></Tooltip>
+        <Tooltip content={t('editor.undo')} relationship="label"><Button size="small" appearance="subtle" onClick={() => editor.chain().focus().undo().run()}>↶</Button></Tooltip>
+        <Tooltip content={t('editor.redo')} relationship="label"><Button size="small" appearance="subtle" onClick={() => editor.chain().focus().redo().run()}>↷</Button></Tooltip>
       </div>
       <EditorContent editor={editor} className={styles.editorContent} />
     </div>
   )
 }
 
-export function MarkdownEditor({ value, onChange, placeholder = '输入 Markdown 内容...' }) {
+export function MarkdownEditor({ value, onChange, placeholder }) {
+  const { t } = useTranslation()
   const styles = useStyles()
   const [showPreview, setShowPreview] = useState(false)
+  placeholder = placeholder ?? t('editor.markdownPlaceholder')
 
   return (
     <div className={styles.mdContainer}>
       <div className={styles.toolbar}>
-        <Button size="small" appearance={!showPreview ? 'filled' : 'subtle'} onClick={() => setShowPreview(false)}>编辑</Button>
-        <Button size="small" appearance={showPreview ? 'filled' : 'subtle'} onClick={() => setShowPreview(true)}>预览</Button>
+        <Button size="small" appearance={!showPreview ? 'filled' : 'subtle'} onClick={() => setShowPreview(false)}>{t('editor.edit')}</Button>
+        <Button size="small" appearance={showPreview ? 'filled' : 'subtle'} onClick={() => setShowPreview(true)}>{t('editor.preview')}</Button>
       </div>
       {showPreview ? (
         <div

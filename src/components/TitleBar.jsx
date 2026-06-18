@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useTranslation } from 'react-i18next'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { makeStyles, tokens, Tooltip } from '@fluentui/react-components'
 import {
@@ -85,6 +86,7 @@ const useStyles = makeStyles({
 
 export function TitleBar() {
   const styles = useStyles()
+  const { t } = useTranslation()
   const [isMaximized, setIsMaximized] = useState(false)
 
   useEffect(() => {
@@ -126,23 +128,23 @@ export function TitleBar() {
   return (
     <div className={styles.titleBar}>
       <div data-tauri-drag-region className={styles.dragRegion}>
-        <span className={styles.title}>SFMMM - 星露谷物语 Mod 管理器</span>
+        <span className={styles.title}>{t('app.title')}</span>
       </div>
       <div className={styles.controls}>
-        <Tooltip content="最小化" relationship="label">
+        <Tooltip content={t('window.minimize')} relationship="label">
           <button
             className={styles.controlButton}
             onClick={handleMinimize}
-            aria-label="最小化"
+            aria-label={t('window.minimize')}
           >
             <SubtractRegular className={styles.icon} />
           </button>
         </Tooltip>
-        <Tooltip content={isMaximized ? '还原' : '最大化'} relationship="label">
+        <Tooltip content={isMaximized ? t('window.restore') : t('window.maximize')} relationship="label">
           <button
             className={styles.controlButton}
             onClick={handleMaximize}
-            aria-label={isMaximized ? '还原' : '最大化'}
+            aria-label={isMaximized ? t('window.restore') : t('window.maximize')}
           >
             {isMaximized ? (
               <SquareMultipleRegular className={styles.icon} />
@@ -151,11 +153,11 @@ export function TitleBar() {
             )}
           </button>
         </Tooltip>
-        <Tooltip content="关闭" relationship="label">
+        <Tooltip content={t('window.close')} relationship="label">
           <button
             className={styles.closeButton}
             onClick={handleClose}
-            aria-label="关闭"
+            aria-label={t('window.close')}
           >
             <DismissRegular className={styles.icon} />
           </button>

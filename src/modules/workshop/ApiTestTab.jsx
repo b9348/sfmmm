@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import {
   Button,
   makeStyles,
@@ -136,12 +137,18 @@ function getHttpCodeColor(code) {
 }
 
 function formatHttpCode(code) {
-  if (code === 'NETWORK_ERROR') return '网络错误'
+  if (code === 'NETWORK_ERROR') return t('workshop.loadFailed')
   return code
 }
 
 export function ApiTestTab() {
+  const { t } = useTranslation()
   const styles = useStyles()
+
+  function formatHttpCode(code) {
+    if (code === 'NETWORK_ERROR') return t('workshop.loadFailed')
+    return code
+  }
   const [results, setResults] = useState([])
   const [loading, setLoading] = useState(null)
 

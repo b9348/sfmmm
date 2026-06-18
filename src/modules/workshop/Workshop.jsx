@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useTranslation } from 'react-i18next'
 import { TabList, Tab, makeStyles } from '@fluentui/react-components'
 import { Cloud24Regular, Person24Regular } from '@fluentui/react-icons'
 import { BrowseMods } from './BrowseMods'
@@ -30,6 +31,7 @@ const useStyles = makeStyles({
 })
 
 export function Workshop() {
+  const { t } = useTranslation()
   const styles = useStyles()
 
   // 从 URL hash 恢复 tab（Ctrl+R 刷新后保持）
@@ -57,8 +59,8 @@ export function Workshop() {
         selectedValue={subTab}
         onTabSelect={handleTabSelect}
       >
-        <Tab value="browse" icon={<Cloud24Regular />}>云</Tab>
-        <Tab value="my" icon={<Person24Regular />}>我的</Tab>
+        <Tab value="browse" icon={<Cloud24Regular />}>{t('workshop.cloud')}</Tab>
+        <Tab value="my" icon={<Person24Regular />}>{t('workshop.mine')}</Tab>
       </TabList>
 
       <div className={styles.content}>

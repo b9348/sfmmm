@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import {
   makeStyles,
   tokens,
@@ -243,18 +244,9 @@ const useStyles = makeStyles({
   },
 })
 
-const tabs = [
-  { value: 'mods', label: '模组', icon: BoxMultiple24Regular },
-  { value: 'v1', label: 'v1', icon: Folder24Regular },
-  { value: 'v2', label: 'v2', icon: DocumentFolder24Regular },
-  // { value: 'saves', label: '存档', icon: Save24Regular },
-  // { value: 'import-export', label: '导入/导出', icon: ArrowSwap24Regular },
-  { value: 'workshop', label: '创意工坊', icon: Cloud24Regular },
-  { value: 'settings', label: '设置', icon: Settings24Regular },
-]
-
 export function TabNavigation({ value, onChange, isCollapsed, onToggleCollapse, updateInfo, onNavigateToSettings }) {
   const styles = useStyles()
+  const { t } = useTranslation()
   const { user, isLoggedIn, loginSuccess, logout } = useAuth()
   const [authOpen, setAuthOpen] = useState(false)
   const [isRegister, setIsRegister] = useState(false)
@@ -262,6 +254,16 @@ export function TabNavigation({ value, onChange, isCollapsed, onToggleCollapse, 
   const [password, setPassword] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+
+  const tabs = [
+    { value: 'mods', label: t('nav.mods'), icon: BoxMultiple24Regular },
+    { value: 'v1', label: 'v1', icon: Folder24Regular },
+    { value: 'v2', label: 'v2', icon: DocumentFolder24Regular },
+    // { value: 'saves', label: '存档', icon: Save24Regular },
+    // { value: 'import-export', label: '导入/导出', icon: ArrowSwap24Regular },
+    { value: 'workshop', label: t('nav.workshop'), icon: Cloud24Regular },
+    { value: 'settings', label: t('nav.settings'), icon: Settings24Regular },
+  ]
 
   const handleAuthSubmit = async () => {
     setError('')
@@ -293,7 +295,7 @@ export function TabNavigation({ value, onChange, isCollapsed, onToggleCollapse, 
       {/* Header with collapse button — always top-right */}
       <div className={`${styles.header} ${isCollapsed ? styles.headerCollapsed : ''}`}>
         <Tooltip
-          content={isCollapsed ? '展开侧边栏' : '折叠侧边栏'}
+          content={isCollapsed ? t('nav.expand') : t('nav.collapse')}
           relationship="label"
         >
           <Button
@@ -334,11 +336,11 @@ export function TabNavigation({ value, onChange, isCollapsed, onToggleCollapse, 
             </MenuTrigger>
             <MenuPopover>
               <MenuList>
-                <MenuItem icon={<PersonAccounts24Regular />}>账号设置</MenuItem>
-                <MenuItem icon={<Person24Regular />}>个人资料</MenuItem>
+                <MenuItem icon={<PersonAccounts24Regular />}>{t('nav.account')}</MenuItem>
+                <MenuItem icon={<Person24Regular />}>{t('nav.profile')}</MenuItem>
                 <Divider />
                 <MenuItem icon={<SignOut24Regular />} onClick={handleLogout}>
-                  退出登录
+                  {t('nav.logout')}
                 </MenuItem>
               </MenuList>
             </MenuPopover>
@@ -350,7 +352,7 @@ export function TabNavigation({ value, onChange, isCollapsed, onToggleCollapse, 
             }`}
           >
             {isCollapsed ? (
-              <Tooltip content="登录" relationship="label">
+              <Tooltip content={t('workshop.login')} relationship="label">
                 <Button
                   appearance="subtle"
                   className={styles.collapseButton}
@@ -366,7 +368,7 @@ export function TabNavigation({ value, onChange, isCollapsed, onToggleCollapse, 
                   className={styles.authButton}
                   onClick={() => { setIsRegister(false); setError(''); setAuthOpen(true) }}
                 >
-                  登录
+                  {t('workshop.login')}
                 </Button>
                 <Button
                   appearance="primary"
@@ -374,7 +376,7 @@ export function TabNavigation({ value, onChange, isCollapsed, onToggleCollapse, 
                   className={styles.authButton}
                   onClick={() => { setIsRegister(true); setError(''); setAuthOpen(true) }}
                 >
-                  注册
+                  {t('workshop.register')}
                 </Button>
               </div>
             )}
@@ -419,7 +421,7 @@ export function TabNavigation({ value, onChange, isCollapsed, onToggleCollapse, 
         <div
           className={styles.versionRow}
           onClick={() => onNavigateToSettings?.()}
-          title={updateInfo?.hasUpdate ? `发现新版本 v${updateInfo.latestVersion}，点击前往设置页更新` : ''}
+          title={updateInfo?.hasUpdate ? t('app.updateFound', { version: updateInfo.latestVersion }) : ''}
         >
           <span className={styles.version}>v0.1.0</span>
           {updateInfo?.hasUpdate && (
@@ -432,19 +434,19 @@ export function TabNavigation({ value, onChange, isCollapsed, onToggleCollapse, 
       <Dialog open={authOpen} onOpenChange={(_, d) => { setAuthOpen(d.open); if (!d.open) setError('') }}>
         <DialogSurface>
           <DialogBody>
-            <DialogTitle>{isRegister ? '注册账号' : '登录'}</DialogTitle>
+            <DialogTitle>{isRegister ? t('workshop.register') : t('workshop.login')}</DialogTitle>
             <DialogContent>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '4px' }}>
                 <Input
                   size="small"
-                  placeholder="用户名"
+                  placeholder={t('workshop.username')}
                   value={username}
                   onChange={(_, d) => setUsername(d.value)}
                 />
                 <Input
                   size="small"
                   type="password"
-                  placeholder="密码"
+                  placeholder={t('workshop.password')}
                   value={password}
                   onChange={(_, d) => setPassword(d.value)}
                 />
@@ -455,10 +457,10 @@ export function TabNavigation({ value, onChange, isCollapsed, onToggleCollapse, 
             </DialogContent>
             <DialogActions>
               <DialogTrigger disableButtonEnhancement>
-                <Button size="small" appearance="subtle">取消</Button>
+                <Button size="small" appearance="subtle">{t('workshop.cancel')}</Button>
               </DialogTrigger>
               <Button size="small" appearance="primary" onClick={handleAuthSubmit} disabled={busy}>
-                {busy ? '处理中...' : isRegister ? '注册' : '登录'}
+                {busy ? t('workshop.processing') : isRegister ? t('workshop.registerBtn') : t('workshop.login')}
               </Button>
             </DialogActions>
           </DialogBody>

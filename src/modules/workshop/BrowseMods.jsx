@@ -6,14 +6,15 @@ import {
 import {
   ArrowClockwise24Regular,
 } from '@fluentui/react-icons'
+import { useTranslation } from 'react-i18next'
 import { listMods, getModDetail } from '../../services/workshopApi'
 import ModDetailPage from './ModDetailPage'
 
 const CATEGORIES = [
-  { value: 'v1', label: 'v1 任务' },
-  { value: 'v2', label: 'v2 任务' },
-  { value: 'dll', label: 'DLL 模组' },
-  { value: 'composite', label: '组合' },
+  { value: 'v1', label: 'v1' },
+  { value: 'v2', label: 'v2' },
+  { value: 'dll', label: 'dll' },
+  { value: 'composite', label: 'composite' },
 ]
 
 const LANG_LABELS = { zh: '中文', en: 'English', ja: '日本語' }
@@ -109,6 +110,7 @@ const useStyles = makeStyles({
 
 export function BrowseMods() {
   const styles = useStyles()
+  const { t } = useTranslation()
   const [search, setSearch] = useState('')
   const [mods, setMods] = useState([])
   const [total, setTotal] = useState(0)
@@ -167,7 +169,7 @@ export function BrowseMods() {
   }
 
   if (detailLoading) {
-    return <Spinner size="large" label="加载中..." style={{ marginTop: '40px' }} />
+    return <Spinner size="large" label={t('workshop.loading')} style={{ marginTop: '40px' }} />
   }
 
   const totalPages = Math.ceil(total / 20)
@@ -179,35 +181,35 @@ export function BrowseMods() {
           <SearchBox
             className={styles.search}
             size="small"
-            placeholder="搜索模组"
+            placeholder={t('workshop.searchPlaceholder')}
             value={search}
             onChange={(_, d) => handleSearch(d.value)}
           />
           <Button size="small" icon={<ArrowClockwise24Regular />} onClick={() => fetchMods(1)} disabled={loading}>
-            刷新
+            {t('workshop.refresh')}
           </Button>
         </div>
       </Card>
 
       {loading && (
         <div className={styles.emptyState}>
-          <Spinner size="small" label="加载中..." />
+          <Spinner size="small" label={t('workshop.loading')} />
         </div>
       )}
 
       {error && (
         <div className={styles.emptyState}>
-          <Text weight="semibold">加载失败</Text>
+          <Text weight="semibold">{t('workshop.loadFailed')}</Text>
           <Text size="small" className={styles.meta}>{error}</Text>
-          <Button size="small" icon={<ArrowClockwise24Regular />} onClick={() => fetchMods(1)}>重试</Button>
+          <Button size="small" icon={<ArrowClockwise24Regular />} onClick={() => fetchMods(1)}>{t('workshop.retry')}</Button>
         </div>
       )}
 
       {!loading && !error && mods.length === 0 && (
         <div className={styles.emptyState}>
-          <Text weight="semibold">暂无模组</Text>
+          <Text weight="semibold">{t('workshop.noMods')}</Text>
           <Text size="small" className={styles.meta}>
-            {search ? '没有匹配的模组，试试其他关键词' : '云端还没有人上传模组'}
+            {search ? t('workshop.noMatchHint') : t('workshop.noUploads')}
           </Text>
         </div>
       )}
@@ -231,7 +233,7 @@ export function BrowseMods() {
                   }
                   action={
                     <Badge appearance="outline" size="small" style={{ whiteSpace: 'nowrap' }}>
-                      {cat?.label || mod.category || '未分类'}
+                      {cat ? t(`workshop.category_${cat.value}`) : (mod.category ? t(`workshop.category_${mod.category}`, mod.category) : t('workshop.uncategorized'))}
                     </Badge>
                   }
                 />
@@ -263,9 +265,9 @@ export function BrowseMods() {
 
           {totalPages > 1 && (
             <div className={styles.pagination}>
-              <Button size="small" disabled={page <= 1} onClick={() => fetchMods(page - 1)}>上一页</Button>
+              <Button size="small" disabled={page <= 1} onClick={() => fetchMods(page - 1)}>{t('workshop.prevPage')}</Button>
               <Text size="small">{page} / {totalPages}</Text>
-              <Button size="small" disabled={page >= totalPages} onClick={() => fetchMods(page + 1)}>下一页</Button>
+              <Button size="small" disabled={page >= totalPages} onClick={() => fetchMods(page + 1)}>{t('workshop.nextPage')}</Button>
             </div>
           )}
         </>

@@ -3,7 +3,9 @@
     "title": "SFMMM - 星露谷物语 Mod 管理器",
     "welcome": "欢迎使用 SFMMM",
     "firstSetup": "首次设置",
-    "getStarted": "开始使用"
+    "getStarted": "开始使用",
+    "updateFound": "发现新版本 v{{version}}，点击前往设置页更新",
+    "loading": "加载中..."
   },
   "window": {
     "minimize": "最小化",
@@ -14,11 +16,17 @@
 
   "nav": {
     "mods": "模组",
+    "v1": "v1",
+    "v2": "v2",
+    "workshop": "创意工坊",
+    "settings": "设置",
     "saves": "存档",
     "importExport": "导入/导出",
-    "settings": "设置",
     "account": "账号设置",
-    "profile": "个人资料"
+    "profile": "个人资料",
+    "collapse": "折叠侧边栏",
+    "expand": "展开侧边栏",
+    "logout": "退出登录"
   },
 
   "welcome": {
@@ -28,7 +36,10 @@
     "selectDialogTitle": "选择包含 SecretFlasherManaka.exe 的游戏目录",
     "errNoGameDir": "请选择游戏目录",
     "errExeNotFound": "未找到 SecretFlasherManaka.exe，请确认选择的是游戏根目录",
-    "errSaveFailed": "保存配置失败"
+    "errSaveFailed": "保存配置失败",
+    "errDialogFailed": "打开文件夹选择器失败：{{msg}}",
+    "language": "程序语言",
+    "languageLabel": "界面语言"
   },
 
   "mods": {
@@ -54,7 +65,19 @@
     "openContainingFolder": "打开所在目录",
     "folderConfig": "文件夹配置",
     "disabled": "已禁用",
-    "status": "共 {{total}} 个，显示 {{shown}} 个"
+    "status": "共 {{total}} 个，显示 {{shown}} 个",
+    "dllMod": "DLL 模组",
+    "file": "文件",
+    "notScanned": "未扫描",
+    "notConfigured": "未配置",
+    "pluginDir": "插件目录",
+    "gameDir": "游戏目录",
+    "checked": "已检查",
+    "hasUpdate": "有更新",
+    "workshopBadge": "创意工坊",
+    "enable": "启用",
+    "disable": "禁用",
+    "unknownError": "未知错误"
   },
 
   "saves": {
@@ -90,7 +113,16 @@
     "selectDialogTitle": "选择游戏目录",
     "change": "更改",
     "openGameDir": "打开游戏目录",
-    "changeHint": "可自行变更游戏目录位置"
+    "changeHint": "可自行变更游戏目录位置",
+    "updateTitle": "检查更新",
+    "checking": "检查中...",
+    "checkUpdateBtn": "检测更新",
+    "downloadUpdate": "下载更新",
+    "checkFailed": "检测失败：{{msg}}",
+    "alreadyLatest": "当前已是最新版本",
+    "currentVersion": "当前版本：v{{version}}，点击\"检测更新\"从服务器获取最新版本",
+    "language": "界面语言",
+    "languageDesc": "选择应用程序的显示语言（保存后重启生效）"
   },
 
   "workshop": {
@@ -151,6 +183,81 @@
     "uncategorized": "未分类",
     "unpublished": "未发布",
     "upload": "上传",
-    "uploading": "上传中..."
+    "uploading": "上传中...",
+    "logout": "退出登录",
+    "type": "类型",
+    "detailedDesc": "详细说明",
+    "downloadCount": "{{count}} 次下载",
+    "uploadingLang": "正在上传 {{lang}} 版本文件...",
+    "publishing": "发布中...",
+    "markdown": "Markdown",
+    "richtext": "富文本",
+    "category_v1": "v1 任务",
+    "category_v2": "v2 任务",
+    "category_dll": "DLL 模组",
+    "category_composite": "组合",
+    "hint_v1": "选择多个文件",
+    "hint_v2": "选择文件夹",
+    "hint_dll": "选择 DLL 文件",
+    "hint_composite": "多选",
+    "uploadLimitWarning": "由于目前的服务是使用的免费服务，所以限制压缩后的单文件为 20MB，目前暂不支持超过这个大小，如果超过就不必上传了，可以选择自行上传分享网盘链接。",
+    "modFileSizeWarning": "压缩后文件 {{size}}MB 超过 20MB 限制，无法上传。可以选择自行上传分享网盘链接。",
+    "modIdCreatePlaceholder": "模组唯一标识，如 prefect_manaka",
+    "comment": "评论（{{count}}）",
+    "commentPlaceholder": "写下你的评论... 支持 Markdown 语法",
+    "loginToComment": "登录后可发表评论",
+    "noComments": "暂无评论，来发表第一条吧",
+    "loadingComments": "加载评论...",
+    "commentFailed": "评论失败：",
+    "replyFailed": "回复失败：",
+    "deleteFailed": "删除失败：",
+    "reply": "回复",
+    "cancelReply": "取消回复",
+    "replyToUser": "回复 {{name}}",
+    "replyToUserPlaceholder": "回复 {{name}}...",
+    "foldReplies": "折叠回复",
+    "viewReplies": "查看回复 ({{count}}条)",
+    "loadMoreReplies": "加载更多回复 (共{{count}}条)",
+    "send": "发送",
+    "sending": "发送中...",
+    "getEditDataFailed": "获取编辑数据失败：",
+    "deleteModFailed": "删除失败：",
+    "fileListTitle": "文件列表（共{{count}}个）",
+    "installing": "安装中...",
+    "install": "安装",
+    "installSuccess": "安装成功！位置：",
+    "openDir": "打开目录",
+    "selectFolderErr": "选择文件夹失败：{{msg}}",
+    "selectFileErr": "选择文件失败：{{msg}}",
+    "moreFilesCount": "...还有 {{count}} 个文件"
+  },
+
+  "editor": {
+    "bold": "粗体",
+    "italic": "斜体",
+    "strikethrough": "删除线",
+    "inlineCode": "行内代码",
+    "divider": "分隔线",
+    "heading2": "标题 2",
+    "heading3": "标题 3",
+    "bulletList": "无序列表",
+    "orderedList": "有序列表",
+    "quote": "引用",
+    "undo": "撤销",
+    "redo": "重做",
+    "edit": "编辑",
+    "preview": "预览",
+    "inputPlaceholder": "输入内容...",
+    "markdownPlaceholder": "输入 Markdown 内容..."
+  },
+
+  "mission": {
+    "folderEmpty": "文件夹为空",
+    "noGameDir": "尚未配置游戏目录",
+    "notConfigured": "未配置",
+    "noFilesInDir": "此文件夹中没有文件或子文件夹",
+    "reloadTaskHint": "游戏运行时，停用/启用自定义任务需要在游戏中按下组合键 ALT+F9 来更新游戏任务",
+    "folderCount": "{{dirs}} 个文件夹，{{files}} 个文件",
+    "itemCount": "{{count}} 项"
   }
 }

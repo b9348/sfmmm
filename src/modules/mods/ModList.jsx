@@ -17,6 +17,7 @@ import {
 import { makeStyles, tokens, mergeClasses } from '@fluentui/react-components'
 import { invoke } from '@tauri-apps/api/core'
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { useInstalledMods } from '../../hooks/useInstalledMods'
 
 const useStyles = makeStyles({
@@ -151,9 +152,9 @@ const useStyles = makeStyles({
   },
 })
 
-function formatScanTime(value) {
+function formatScanTime(value, t) {
   if (!value) {
-    return '未扫描'
+    return t('mods.notScanned')
   }
 
   const timestamp = Number(value)
@@ -168,12 +169,13 @@ function formatScanTime(value) {
   })
 }
 
-function getKindLabel(kind) {
-  return kind === 'dll' ? 'DLL 模组' : '文件'
+function getKindLabel(kind, t) {
+  return kind === 'dll' ? t('mods.dllMod') : t('mods.file')
 }
 
 export function ModList({ config }) {
   const styles = useStyles()
+  const { t } = useTranslation()
   const gamePath = config?.game_path || ''
   const [search, setSearch] = useState('')
   const [mods, setMods] = useState([])
@@ -217,9 +219,9 @@ export function ModList({ config }) {
       return mods
     }
 
-    return mods.filter(mod => [mod.name, mod.relativePath, getKindLabel(mod.kind)]
+    return mods.filter(mod => [mod.name, mod.relativePath, getKindLabel(mod.kind, t)]
       .some(value => value.toLowerCase().includes(keyword)))
-  }, [mods, search])
+  }, [mods, search, t])
 
   // 检查是否是已安装的工坊模组
   const workshopInfo = useMemo(() => {
@@ -264,16 +266,16 @@ export function ModList({ config }) {
   const activeDir = scanInfo?.activeDirs?.[0]
   const missingCoreFiles = scanInfo?.missingCoreFiles || []
   const prerequisiteInstalled = scanInfo?.bepinExInstalled === true
-  const pathText = activeDir ? `插件目录：${activeDir}` : `游戏目录：${gamePath || '未配置'}`
-  const prerequisiteText = prerequisiteInstalled ? 'mod 前置已安装' : 'mod 前置未安装'
+  const pathText = activeDir ? `${t('mods.pluginDir')}：${activeDir}` : `${t('mods.gameDir')}：${gamePath || t('mods.notConfigured')}`
+  const prerequisiteText = prerequisiteInstalled ? t('mods.prereqInstalled') : t('mods.prereqNotInstalled')
   const warningText = scanInfo?.warnings?.[0] || ''
-  const checkedText = scanInfo?.checkedDirs?.length ? `已检查：${scanInfo.checkedDirs.join('、')}` : ''
+  const checkedText = scanInfo?.checkedDirs?.length ? `${t('mods.checked')}：${scanInfo.checkedDirs.join('、')}` : ''
 
   const renderEmptyState = () => {
     if (loading) {
       return (
         <div className={styles.emptyState}>
-          <Spinner size="small" label="正在扫描模组目录" />
+          <Spinner size="small" label={t('mods.scanning')} />
         </div>
       )
     }
@@ -281,8 +283,8 @@ export function ModList({ config }) {
     if (!gamePath) {
       return (
         <div className={styles.emptyState}>
-          <Text weight="semibold">尚未配置游戏目录</Text>
-          <Text size="small" className={styles.emptyDetails}>请先在设置页选择游戏目录。</Text>
+          <Text weight="semibold">{t('mods.noGameDir')}</Text>
+          <Text size="small" className={styles.emptyDetails}>{t('mods.noGameDirHint')}</Text>
         </div>
       )
     }
@@ -290,9 +292,9 @@ export function ModList({ config }) {
     if (error) {
       return (
         <div className={styles.emptyState}>
-          <Text weight="semibold">扫描失败</Text>
+          <Text weight="semibold">{t('mods.scanFailed')}</Text>
           <Text size="small" className={styles.emptyDetails} title={error}>{error}</Text>
-          <Button size="small" icon={<ArrowClockwise24Regular />} onClick={scanMods}>重新扫描</Button>
+          <Button size="small" icon={<ArrowClockwise24Regular />} onClick={scanMods}>{t('mods.reScan')}</Button>
         </div>
       )
     }
@@ -300,8 +302,8 @@ export function ModList({ config }) {
     if (mods.length > 0 && filteredMods.length === 0) {
       return (
         <div className={styles.emptyState}>
-          <Text weight="semibold">没有匹配“{search}”的模组</Text>
-          <Button size="small" icon={<Dismiss16Regular />} onClick={() => setSearch('')}>清除搜索</Button>
+          <Text weight="semibold">{t('mods.noMatch', { search })}</Text>
+          <Button size="small" icon={<Dismiss16Regular />} onClick={() => setSearch('')}>{t('mods.clearSearch')}</Button>
         </div>
       )
     }
@@ -309,19 +311,19 @@ export function ModList({ config }) {
     if (missingCoreFiles.length > 0) {
       return (
         <div className={styles.emptyState}>
-          <Text weight="semibold">mod 前置未安装</Text>
-          <Text size="small" className={styles.emptyDetails}>缺少 {missingCoreFiles.length} 个核心文件：</Text>
+          <Text weight="semibold">{t('mods.prereqNotInstalled')}</Text>
+          <Text size="small" className={styles.emptyDetails}>{t('mods.missingFiles', { count: missingCoreFiles.length })}</Text>
           <div className={styles.missingList}>
             {missingCoreFiles.slice(0, 20).map(file => (
-              <div key={file} className={styles.missingItem} title={file}>缺少 {file}</div>
+              <div key={file} className={styles.missingItem} title={file}>{t('mods.missing')} {file}</div>
             ))}
             {missingCoreFiles.length > 20 && (
-              <div className={styles.missingItem}>还有 {missingCoreFiles.length - 20} 个文件未显示</div>
+              <div className={styles.missingItem}>{t('mods.moreFiles', { count: missingCoreFiles.length - 20 })}</div>
             )}
           </div>
           <div className={styles.toolbarRow}>
-            <Button size="small" icon={<ArrowClockwise24Regular />} onClick={scanMods}>重新检测</Button>
-            <Button size="small" icon={<FolderOpen24Regular />} onClick={() => openPath(gamePath)}>打开游戏目录</Button>
+            <Button size="small" icon={<ArrowClockwise24Regular />} onClick={scanMods}>{t('mods.reDetect')}</Button>
+            <Button size="small" icon={<FolderOpen24Regular />} onClick={() => openPath(gamePath)}>{t('mods.openGameDir')}</Button>
           </div>
         </div>
       )
@@ -329,16 +331,16 @@ export function ModList({ config }) {
 
     return (
       <div className={styles.emptyState}>
-        <Text weight="semibold">未找到 DLL 模组</Text>
+        <Text weight="semibold">{t('mods.noDllMods')}</Text>
         <Text size="small" className={styles.emptyDetails} title={warningText || checkedText}>
-          {warningText || '插件目录中没有 DLL 模组'}
+          {warningText || t('mods.noDllInPluginDir')}
         </Text>
         {checkedText && (
           <Text size="small" className={styles.emptyDetails} title={checkedText}>{checkedText}</Text>
         )}
         <div className={styles.toolbarRow}>
-          <Button size="small" icon={<ArrowClockwise24Regular />} onClick={scanMods}>扫描</Button>
-          <Button size="small" icon={<FolderOpen24Regular />} onClick={() => openPath(gamePath)}>打开游戏目录</Button>
+          <Button size="small" icon={<ArrowClockwise24Regular />} onClick={scanMods}>{t('mods.scan')}</Button>
+          <Button size="small" icon={<FolderOpen24Regular />} onClick={() => openPath(gamePath)}>{t('mods.openGameDir')}</Button>
         </div>
       </div>
     )
@@ -351,7 +353,7 @@ export function ModList({ config }) {
           <SearchBox
             className={styles.search}
             size="small"
-            placeholder="搜索模组"
+            placeholder={t('mods.searchPlaceholder')}
             value={search}
             onChange={(_, d) => setSearch(d.value)}
             disabled={!mods.length}
@@ -362,10 +364,10 @@ export function ModList({ config }) {
             </Badge>
           )}
           <Button size="small" icon={<ArrowClockwise24Regular />} onClick={scanMods} disabled={!gamePath || loading}>
-            扫描
+            {t('mods.scan')}
           </Button>
           <Button size="small" icon={<FolderOpen24Regular />} onClick={() => openPath(activeDir || gamePath)} disabled={!gamePath}>
-            打开插件目录
+            {t('mods.openPluginDir')}
           </Button>
         </div>
         <Text size="small" className={styles.pathLine} title={pathText}>{pathText}</Text>
@@ -377,18 +379,18 @@ export function ModList({ config }) {
             <div className={styles.rowInfo}>
               <div className={styles.rowTitle}>
                 <Text size="small" weight="semibold" className={styles.truncatedText} title={mod.name}>{mod.name}</Text>
-                <Badge appearance="outline" size="small">{getKindLabel(mod.kind)}</Badge>
-                {mod.isDirectoryMod && <Badge appearance="filled" color="brand" size="small">文件夹配置</Badge>}
-                {mod.isBanned && <Badge appearance="filled" color="danger" size="small">已禁用</Badge>}
-                {workshopInfo.get(mod.id)?.isWorkshop && <Badge appearance="filled" color="success" size="small">创意工坊</Badge>}
-                {workshopInfo.get(mod.id)?.hasUpdate && <Badge appearance="filled" color="warning" size="small">有更新</Badge>}
+                <Badge appearance="outline" size="small">{getKindLabel(mod.kind, t)}</Badge>
+                {mod.isDirectoryMod && <Badge appearance="filled" color="brand" size="small">{t('mods.folderConfig')}</Badge>}
+                {mod.isBanned && <Badge appearance="filled" color="danger" size="small">{t('mods.disabled')}</Badge>}
+                {workshopInfo.get(mod.id)?.isWorkshop && <Badge appearance="filled" color="success" size="small">{t('mods.workshopBadge')}</Badge>}
+                {workshopInfo.get(mod.id)?.hasUpdate && <Badge appearance="filled" color="warning" size="small">{t('mods.hasUpdate')}</Badge>}
               </div>
               <Text size="small" className={mergeClasses(styles.truncatedText, styles.muted)} title={mod.relativePath}>
                 {mod.relativePath}
               </Text>
             </div>
             <div className={styles.actionRow}>
-              <Tooltip content={mod.isBanned ? '启用' : '禁用'} relationship="label">
+              <Tooltip content={mod.isBanned ? t('mods.enable') : t('mods.disable')} relationship="label">
                 <Button
                   size="small"
                   icon={mod.isBanned ? <Play24Regular /> : <Pause24Regular />}
@@ -397,7 +399,7 @@ export function ModList({ config }) {
                   onClick={() => toggleModEnabled(mod)}
                 />
               </Tooltip>
-              <Tooltip content="打开所在目录" relationship="label">
+              <Tooltip content={t('mods.openContainingFolder')} relationship="label">
                 <Button
                   size="small"
                   icon={<FolderOpen24Regular />}
@@ -411,11 +413,11 @@ export function ModList({ config }) {
       </div>
 
       <div className={styles.statusBar}>
-        <Text size="small" className={styles.statusText}>共 {mods.length} 个，显示 {filteredMods.length} 个</Text>
+        <Text size="small" className={styles.statusText}>{t('mods.status', { total: mods.length, shown: filteredMods.length })}</Text>
         <Text size="small" className={mergeClasses(styles.statusText, styles.spacer)} title={warningText || pathText}>
           {error || warningText || (scanInfo ? `${prerequisiteText} · ${pathText}` : pathText)}
         </Text>
-        <Text size="small">{formatScanTime(scanInfo?.scannedAt)}</Text>
+        <Text size="small">{formatScanTime(scanInfo?.scannedAt, t)}</Text>
       </div>
     </div>
   )

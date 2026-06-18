@@ -7,6 +7,7 @@ import { AuthProvider } from './contexts/AuthContext'
 import { usePersistUI } from './hooks/usePersistUI'
 import Database from '@tauri-apps/plugin-sql'
 import { checkVersion, installUpdate } from './services/updateApi'
+import i18n from './i18n'
 
 const useStyles = makeStyles({
   root: {
@@ -100,6 +101,15 @@ function App() {
         rows.forEach(row => {
           configMap[row.key] = row.value
         })
+
+        // 应用已保存的语言设置（在 dispatch 之前等待完成，避免 UI 渲染时语言正在切换）
+        if (configMap.language) {
+          try {
+            await i18n.changeLanguage(configMap.language)
+          } catch (_e) {
+            // changeLanguage 失败不影响主流程
+          }
+        }
 
         const validTabs = ['mods', 'v1', 'v2', 'saves', 'import-export', 'workshop', 'settings']
         if (configMap.selected_tab && validTabs.includes(configMap.selected_tab)) {
