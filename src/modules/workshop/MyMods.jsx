@@ -2,7 +2,8 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import {
   Card, CardHeader, Text, Button, Spinner,
   Input, Textarea, Select, makeStyles, tokens,
-  Avatar, Badge,
+  Avatar, Badge, Dialog, DialogTrigger, DialogSurface,
+  DialogBody, DialogTitle, DialogContent,
 } from '@fluentui/react-components'
 import {
   Add24Regular, Delete24Regular, Edit24Regular,
@@ -24,12 +25,13 @@ const LANGUAGES = [
 ]
 
 const LANG_LABELS = { zh: '中文', en: 'English', ja: '日本語' }
+const MAX_ZIP_SIZE = 20 * 1024 * 1024 // 20MB 限制
 
 const CATEGORIES = [
   { value: 'v1', label: 'v1 任务' },
   { value: 'v2', label: 'v2 任务' },
   { value: 'dll', label: 'DLL 模组' },
-  { value: 'folder', label: '文件夹模组' },
+  { value: 'composite', label: '组合' },
 ]
 
 const useStyles = makeStyles({
@@ -206,13 +208,46 @@ function CreateModPage({ onClose, onCreated }) {
   const [error, setError] = useState('')
   const [modFiles, setModFiles] = useState({})
   const [uploadingLang, setUploadingLang] = useState('')
+  const [fileDialogLang, setFileDialogLang] = useState(null)
 
   const canSelectFile = modKey.trim() && version.trim()
+
+  const handleSelectFolders = async (lang) => {
+    if (!canSelectFile) return
+    try {
+      const folders = await open({ directory: true, multiple: true })
+      if (!folders || folders.length === 0) return
+      const files = []
+      const collectDir = async (dirPath, prefix) => {
+        const entries = await readDir(dirPath)
+        for (const entry of entries) {
+          const fullPath = prefix ? `${prefix}/${entry.name}` : entry.name
+          if (entry.isDirectory) {
+            await collectDir(`${dirPath}/${entry.name}`, fullPath)
+          } else if (entry.isFile) {
+            const data = await readFile(`${dirPath}/${entry.name}`)
+            files.push({ name: fullPath, data, size: data.byteLength })
+          }
+        }
+      }
+      for (const folder of folders) {
+        const folderName = folder.split(/[/\\]/).pop()
+        await collectDir(folder, folderName)
+      }
+      setModFiles(prev => {
+        const existing = prev[lang] || []
+        return { ...prev, [lang]: [...existing, ...files] }
+      })
+    } catch (e) {
+      const msg = e?.message || (typeof e === 'string' ? e : JSON.stringify(e)) || '未知错误'
+      setError('选择文件夹失败：' + msg)
+    }
+  }
 
   const handleSelectFiles = async (lang) => {
     if (!canSelectFile) return
     try {
-      if (category === 'v2' || category === 'folder') {
+      if (category === 'v2') {
         const folder = await open({ directory: true, multiple: false })
         if (!folder) return
         const files = []
@@ -230,6 +265,28 @@ function CreateModPage({ onClose, onCreated }) {
         }
         await collectDir(folder, '')
         setModFiles(prev => ({ ...prev, [lang]: files }))
+      } else if (category === 'composite') {
+        // 组合：多选文件
+        const selected = await open({ multiple: true, filters: [{ name: 'All Files', extensions: ['*'] }] })
+        if (!selected || selected.length === 0) return
+        const files = []
+        for (const filePath of selected) {
+          try {
+            const data = await readFile(filePath)
+            const parts = filePath.split(/[/\\]/)
+            const fileName = parts.pop()
+            const parentDir = parts.pop() || ''
+            const name = parentDir ? `${parentDir}/${fileName}` : fileName
+            files.push({ name, data, size: data.byteLength })
+          } catch (e) {
+            console.warn(`[MyMods] 跳过无法读取的文件: ${filePath}`, e)
+          }
+        }
+        if (files.length === 0) return
+        setModFiles(prev => {
+          const existing = prev[lang] || []
+          return { ...prev, [lang]: [...existing, ...files] }
+        })
       } else if (category === 'dll') {
         const selected = await open({ multiple: false, filters: [{ name: 'DLL 文件', extensions: ['dll'] }] })
         if (!selected) return
@@ -305,6 +362,11 @@ function CreateModPage({ onClose, onCreated }) {
           zip.file(file.name, file.data)
         }
         const blob = await zip.generateAsync({ type: 'blob' })
+        if (blob.size > MAX_ZIP_SIZE) {
+          setError(`压缩后文件 ${(blob.size / 1024 / 1024).toFixed(1)}MB 超过 20MB 限制，无法上传。可以选择自行上传分享网盘链接。`)
+          setBusy(false)
+          return
+        }
         const zipFile = new File([blob], `${modKey}_${lang}.zip`, { type: 'application/zip' })
         await uploadModFile({ author_id: user.user_id, mod_id: newModId, lang_code: lang, version, file: zipFile })
       }
@@ -344,7 +406,7 @@ function CreateModPage({ onClose, onCreated }) {
             <option value="v1">v1 任务</option>
             <option value="v2">v2 任务</option>
             <option value="dll">DLL 模组</option>
-            <option value="folder">文件夹模组</option>
+            <option value="composite">组合</option>
           </Select>
         </div>
 
@@ -403,16 +465,22 @@ function CreateModPage({ onClose, onCreated }) {
                 )}
               </div>
               <div className={styles.formRow}>
-                <Text className={styles.formLabel}>模组文件 {category === 'v2' || category === 'folder' ? '(选择文件夹)' : category === 'dll' ? '(选择 DLL 文件)' : '(选择多个文件)'}</Text>
+                <Text className={styles.formLabel}>模组文件 {category === 'v2' ? '(选择文件夹)' : category === 'composite' ? '(多选)' : category === 'dll' ? '(选择 DLL 文件)' : '(选择多个文件)'}</Text>
+                <Text size="small" style={{ color: tokens.colorNeutralForeground3, lineHeight: '1.4', whiteSpace: 'pre-wrap' }}>
+                  由于目前的服务是使用的免费服务，所以限制压缩后的单文件为 20MB，目前暂不支持超过这个大小，
+                  如果超过就不必上传了，可以选择自行上传分享网盘链接。
+                </Text>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <Button
-                    size="small"
-                    icon={<ArrowUpload24Regular />}
-                    disabled={!canSelectFile}
-                    onClick={() => handleSelectFiles(lang)}
-                  >
-                    {modFiles[lang] ? `${modFiles[lang].length} 个文件` : category === 'v2' || category === 'folder' ? '选择文件夹' : category === 'dll' ? '选择 DLL 文件' : '选择文件'}
-                  </Button>
+                  {category === 'composite' ? (
+                    <>
+                      <Button size="small" icon={<ArrowUpload24Regular />} disabled={!canSelectFile} onClick={() => handleSelectFolders(lang)}>选择文件夹</Button>
+                      <Button size="small" icon={<ArrowUpload24Regular />} disabled={!canSelectFile} onClick={() => handleSelectFiles(lang)}>选择文件</Button>
+                    </>
+                  ) : (
+                    <Button size="small" icon={<ArrowUpload24Regular />} disabled={!canSelectFile} onClick={() => handleSelectFiles(lang)}>
+                      {category === 'v2' ? '选择文件夹' : category === 'dll' ? '选择 DLL 文件' : '选择文件'}
+                    </Button>
+                  )}
                   {modFiles[lang] && (
                     <Button size="small" icon={<Delete24Regular />} appearance="subtle" onClick={() => setModFiles(prev => { const n = { ...prev }; delete n[lang]; return n })} />
                   )}
@@ -425,7 +493,9 @@ function CreateModPage({ onClose, onCreated }) {
                       </Text>
                     ))}
                     {modFiles[lang].length > 5 && (
-                      <Text size="small" className={styles.meta}>...还有 {modFiles[lang].length - 5} 个文件</Text>
+                      <Text size="small" className={styles.meta} style={{ cursor: 'pointer', textDecoration: 'underline', color: tokens.colorBrandForeground1 }} onClick={() => setFileDialogLang(lang)}>
+                        ...还有 {modFiles[lang].length - 5} 个文件
+                      </Text>
                     )}
                   </div>
                 )}
@@ -445,6 +515,26 @@ function CreateModPage({ onClose, onCreated }) {
           {busy ? '发布中...' : '发布'}
         </Button>
       </div>
+
+      <Dialog open={!!fileDialogLang} onOpenChange={(_, { open }) => !open && setFileDialogLang(null)}>
+        <DialogSurface>
+          <DialogBody>
+            <DialogTitle>文件列表（{fileDialogLang && modFiles[fileDialogLang]?.length || 0} 个）</DialogTitle>
+            <DialogContent>
+              <div style={{ maxHeight: '60vh', overflow: 'auto', display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                {fileDialogLang && modFiles[fileDialogLang]?.map((f, i) => (
+                  <Text key={i} size="small" className={styles.meta}>
+                    {f.name} ({(f.size / 1024).toFixed(1)}KB)
+                  </Text>
+                ))}
+              </div>
+            </DialogContent>
+            <DialogTrigger>
+              <Button size="small">关闭</Button>
+            </DialogTrigger>
+          </DialogBody>
+        </DialogSurface>
+      </Dialog>
     </div>
   )
 }
@@ -506,10 +596,42 @@ function EditModPage({ mod: initialMod, onClose, onUpdated }) {
   const [existingFiles, setExistingFiles] = useState(initFiles)
   const [uploadingLang, setUploadingLang] = useState('')
   const [uploadError, setUploadError] = useState('')
+  const [fileDialogLang, setFileDialogLang] = useState(null)
+
+  const handleSelectFolders = async (lang) => {
+    try {
+      const folders = await open({ directory: true, multiple: true })
+      if (!folders || folders.length === 0) return
+      const files = []
+      const collectDir = async (dirPath, prefix) => {
+        const entries = await readDir(dirPath)
+        for (const entry of entries) {
+          const fullPath = prefix ? `${prefix}/${entry.name}` : entry.name
+          if (entry.isDirectory) {
+            await collectDir(`${dirPath}/${entry.name}`, fullPath)
+          } else if (entry.isFile) {
+            const data = await readFile(`${dirPath}/${entry.name}`)
+            files.push({ name: fullPath, data, size: data.byteLength })
+          }
+        }
+      }
+      for (const folder of folders) {
+        const folderName = folder.split(/[/\\]/).pop()
+        await collectDir(folder, folderName)
+      }
+      setModFiles(prev => {
+        const existing = prev[lang] || []
+        return { ...prev, [lang]: [...existing, ...files] }
+      })
+    } catch (e) {
+      const msg = e?.message || (typeof e === 'string' ? e : JSON.stringify(e)) || '未知错误'
+      setUploadError('选择文件夹失败：' + msg)
+    }
+  }
 
   const handleSelectFiles = async (lang) => {
     try {
-      if (category === 'v2' || category === 'folder') {
+      if (category === 'v2') {
         const folder = await open({ directory: true, multiple: false })
         if (!folder) return
         const files = []
@@ -527,6 +649,28 @@ function EditModPage({ mod: initialMod, onClose, onUpdated }) {
         }
         await collectDir(folder, '')
         setModFiles(prev => ({ ...prev, [lang]: files }))
+      } else if (category === 'composite') {
+        // 组合：多选文件
+        const selected = await open({ multiple: true, filters: [{ name: 'All Files', extensions: ['*'] }] })
+        if (!selected || selected.length === 0) return
+        const files = []
+        for (const filePath of selected) {
+          try {
+            const data = await readFile(filePath)
+            const parts = filePath.split(/[/\\]/)
+            const fileName = parts.pop()
+            const parentDir = parts.pop() || ''
+            const name = parentDir ? `${parentDir}/${fileName}` : fileName
+            files.push({ name, data, size: data.byteLength })
+          } catch (e) {
+            console.warn(`[MyMods] 跳过无法读取的文件: ${filePath}`, e)
+          }
+        }
+        if (files.length === 0) return
+        setModFiles(prev => {
+          const existing = prev[lang] || []
+          return { ...prev, [lang]: [...existing, ...files] }
+        })
       } else if (category === 'dll') {
         const selected = await open({ multiple: false, filters: [{ name: 'DLL 文件', extensions: ['dll'] }] })
         if (!selected) return
@@ -593,6 +737,11 @@ function EditModPage({ mod: initialMod, onClose, onUpdated }) {
         zip.file(file.name, file.data)
       }
       const blob = await zip.generateAsync({ type: 'blob' })
+      if (blob.size > MAX_ZIP_SIZE) {
+        setUploadError(`压缩后文件 ${(blob.size / 1024 / 1024).toFixed(1)}MB 超过 20MB 限制，无法上传。可以选择自行上传分享网盘链接。`)
+        setUploadingLang('')
+        return
+      }
       const zipFile = new File([blob], `${modKey}_${lang}.zip`, { type: 'application/zip' })
       const res = await uploadModFile({ author_id: user.user_id, mod_id: initialMod.id, lang_code: lang, version, file: zipFile })
       setExistingFiles(prev => ({ ...prev, [lang]: res.data }))
@@ -637,7 +786,7 @@ function EditModPage({ mod: initialMod, onClose, onUpdated }) {
             <option value="v1">v1 任务</option>
             <option value="v2">v2 任务</option>
             <option value="dll">DLL 模组</option>
-            <option value="folder">文件夹模组</option>
+            <option value="composite">组合</option>
           </Select>
         </div>
 
@@ -694,7 +843,11 @@ function EditModPage({ mod: initialMod, onClose, onUpdated }) {
                 )}
               </div>
               <div className={styles.formRow}>
-                <Text className={styles.formLabel}>模组文件 {category === 'v2' || category === 'folder' ? '(选择文件夹)' : category === 'dll' ? '(选择 DLL 文件)' : '(选择多个文件)'}</Text>
+                <Text className={styles.formLabel}>模组文件 {category === 'v2' ? '(选择文件夹)' : category === 'composite' ? '(多选)' : category === 'dll' ? '(选择 DLL 文件)' : '(选择多个文件)'}</Text>
+                <Text size="small" style={{ color: tokens.colorNeutralForeground3, lineHeight: '1.4', whiteSpace: 'pre-wrap' }}>
+                  由于目前的服务是使用的免费服务，所以限制压缩后的单文件为 20MB，目前暂不支持超过这个大小，
+                  如果超过就不必上传了，可以选择自行上传分享网盘链接。
+                </Text>
                 {existingFiles[lang] && (
                   <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
                     <Text size="small" className={styles.meta}>
@@ -704,13 +857,16 @@ function EditModPage({ mod: initialMod, onClose, onUpdated }) {
                   </div>
                 )}
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <Button
-                    size="small"
-                    icon={<ArrowUpload24Regular />}
-                    onClick={() => handleSelectFiles(lang)}
-                  >
-                    {modFiles[lang] ? `${modFiles[lang].length} 个文件` : category === 'v2' || category === 'folder' ? '选择文件夹' : category === 'dll' ? '选择 DLL 文件' : '选择文件'}
-                  </Button>
+                  {category === 'composite' ? (
+                    <>
+                      <Button size="small" icon={<ArrowUpload24Regular />} onClick={() => handleSelectFolders(lang)}>选择文件夹</Button>
+                      <Button size="small" icon={<ArrowUpload24Regular />} onClick={() => handleSelectFiles(lang)}>选择文件</Button>
+                    </>
+                  ) : (
+                    <Button size="small" icon={<ArrowUpload24Regular />} onClick={() => handleSelectFiles(lang)}>
+                      {category === 'v2' ? '选择文件夹' : category === 'dll' ? '选择 DLL 文件' : '选择文件'}
+                    </Button>
+                  )}
                   {modFiles[lang] && (
                     <>
                       <Button size="small" appearance="primary" onClick={() => handleUploadFile(lang)} disabled={uploadingLang === lang}>
@@ -728,7 +884,9 @@ function EditModPage({ mod: initialMod, onClose, onUpdated }) {
                       </Text>
                     ))}
                     {modFiles[lang].length > 5 && (
-                      <Text size="small" className={styles.meta}>...还有 {modFiles[lang].length - 5} 个文件</Text>
+                      <Text size="small" className={styles.meta} style={{ cursor: 'pointer', textDecoration: 'underline', color: tokens.colorBrandForeground1 }} onClick={() => setFileDialogLang(lang)}>
+                        ...还有 {modFiles[lang].length - 5} 个文件
+                      </Text>
                     )}
                   </div>
                 )}
@@ -746,6 +904,26 @@ function EditModPage({ mod: initialMod, onClose, onUpdated }) {
           {busy ? '保存中...' : '保存'}
         </Button>
       </div>
+
+      <Dialog open={!!fileDialogLang} onOpenChange={(_, { open }) => !open && setFileDialogLang(null)}>
+        <DialogSurface>
+          <DialogBody>
+            <DialogTitle>文件列表（{fileDialogLang && modFiles[fileDialogLang]?.length || 0} 个）</DialogTitle>
+            <DialogContent>
+              <div style={{ maxHeight: '60vh', overflow: 'auto', display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                {fileDialogLang && modFiles[fileDialogLang]?.map((f, i) => (
+                  <Text key={i} size="small" className={styles.meta}>
+                    {f.name} ({(f.size / 1024).toFixed(1)}KB)
+                  </Text>
+                ))}
+              </div>
+            </DialogContent>
+            <DialogTrigger>
+              <Button size="small">关闭</Button>
+            </DialogTrigger>
+          </DialogBody>
+        </DialogSurface>
+      </Dialog>
     </div>
   )
 }

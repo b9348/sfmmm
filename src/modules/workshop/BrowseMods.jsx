@@ -13,7 +13,7 @@ const CATEGORIES = [
   { value: 'v1', label: 'v1 任务' },
   { value: 'v2', label: 'v2 任务' },
   { value: 'dll', label: 'DLL 模组' },
-  { value: 'folder', label: '文件夹模组' },
+  { value: 'composite', label: '组合' },
 ]
 
 const LANG_LABELS = { zh: '中文', en: 'English', ja: '日本語' }

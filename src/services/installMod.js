@@ -24,7 +24,7 @@ export async function installMod({ modKey, category, fileUrl, version, fileHash 
     targetDir = `${base}\\CustomMissions2\\${modKey}`
   } else if (category === 'dll') {
     targetDir = pluginsDir
-  } else if (category === 'folder') {
+  } else if (category === 'composite') {
     targetDir = `${pluginsDir}\\${modKey}`
   } else {
     // 'v1' 或默认
@@ -88,8 +88,8 @@ export async function installMod({ modKey, category, fileUrl, version, fileHash 
     fileCount++
   }
 
-  // 文件夹模组：解压后删除压缩包（保持路径一致，避免残留）
-  if (category === 'folder') {
+  // 组合：解压后删除压缩包（保持路径一致，避免残留）
+  if (category === 'composite') {
     // 删除 zip 包已无意义(已解压到内存)，保持目标目录干净即可
   }
 
