@@ -229,7 +229,8 @@
     "openDir": "ディレクトリを開く",
     "selectFolderErr": "フォルダ選択に失敗しました：{{msg}}",
     "selectFileErr": "ファイル選択に失敗しました：{{msg}}",
-    "moreFilesCount": "...他 {{count}} ファイル"
+    "moreFilesCount": "...他 {{count}} ファイル",
+    "justNow": "たった今"
   },
 
   "editor": {

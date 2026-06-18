@@ -229,7 +229,8 @@
     "openDir": "打开目录",
     "selectFolderErr": "选择文件夹失败：{{msg}}",
     "selectFileErr": "选择文件失败：{{msg}}",
-    "moreFilesCount": "...还有 {{count}} 个文件"
+    "moreFilesCount": "...还有 {{count}} 个文件",
+    "justNow": "刚刚"
   },
 
   "editor": {

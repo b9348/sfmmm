@@ -89,7 +89,7 @@ export default function CommentSection({ modId }) {
         id: res.data.comment_id,
         content,
         author_name: user.username,
-        created_at: '刚刚',
+        created_at: t('workshop.justNow'),
         replies: [],
         reply_count: 0,
         has_more: false,
@@ -128,7 +128,7 @@ export default function CommentSection({ modId }) {
         id: res.data.comment_id,
         content: prefixedContent,
         author_name: user.username,
-        created_at: '刚刚',
+        created_at: t('workshop.justNow'),
       }
       // 找到所属一楼，只更新它的楼中楼
       setComments(prev => prev.map(c => {

@@ -229,7 +229,8 @@
     "openDir": "Open directory",
     "selectFolderErr": "Failed to select folder: {{msg}}",
     "selectFileErr": "Failed to select file: {{msg}}",
-    "moreFilesCount": "...{{count}} more file(s)"
+    "moreFilesCount": "...{{count}} more file(s)",
+    "justNow": "just now"
   },
 
   "editor": {

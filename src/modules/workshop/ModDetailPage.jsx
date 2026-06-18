@@ -12,13 +12,6 @@ import { RichTextContent, MarkdownContent } from '../../components/common/RichTe
 import { invoke } from '@tauri-apps/api/core'
 import CommentSection from './CommentSection'
 
-const CATEGORIES = [
-  { value: 'v1', label: 'v1 任务' },
-  { value: 'v2', label: 'v2 任务' },
-  { value: 'dll', label: 'DLL 模组' },
-  { value: 'composite', label: '组合' },
-]
-
 const LANG_LABELS = { zh: '中文', en: 'English', ja: '日本語' }
 
 const useStyles = makeStyles({
@@ -99,7 +92,7 @@ export default function ModDetailPage({ mod, onBack }) {
           <Text size="small">{mod.author_name}</Text>
           {mod.category && (
             <Badge appearance="outline" size="small" style={{ whiteSpace: 'nowrap' }}>
-              {CATEGORIES.find(c => c.value === mod.category)?.label || mod.category}
+              {t(`workshop.category_${mod.category}`)}
             </Badge>
           )}
         </div>

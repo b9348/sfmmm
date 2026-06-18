@@ -28,13 +28,6 @@ const LANGUAGES = [
 const LANG_LABELS = { zh: '中文', en: 'English', ja: '日本語' }
 const MAX_ZIP_SIZE = 20 * 1024 * 1024 // 20MB 限制
 
-const CATEGORIES = [
-  { value: 'v1', label: 'v1 任务' },
-  { value: 'v2', label: 'v2 任务' },
-  { value: 'dll', label: 'DLL 模组' },
-  { value: 'composite', label: '组合' },
-]
-
 const useStyles = makeStyles({
   root: {
     display: 'flex',
@@ -901,16 +894,16 @@ function EditModPage({ mod: initialMod, onClose, onUpdated }) {
         {error && <Text size="small" style={{ color: tokens.colorPaletteRedForeground1 }}>{error}</Text>}
       </div>
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '6px', padding: '12px 8px', borderTop: `1px solid ${tokens.colorNeutralStroke2}` }}>
-        <Button size="small" appearance="subtle" onClick={onClose}>取消</Button>
+        <Button size="small" appearance="subtle" onClick={onClose}>{t('workshop.cancel')}</Button>
         <Button size="small" appearance="primary" onClick={handleSubmit} disabled={busy}>
-          {busy ? '保存中...' : '保存'}
+          {busy ? t('workshop.saving') : t('workshop.save')}
         </Button>
       </div>
 
       <Dialog open={!!fileDialogLang} onOpenChange={(_, { open }) => !open && setFileDialogLang(null)}>
         <DialogSurface>
           <DialogBody>
-            <DialogTitle>文件列表（{fileDialogLang && modFiles[fileDialogLang]?.length || 0} 个）</DialogTitle>
+            <DialogTitle>{t('workshop.fileListTitle', { count: fileDialogLang && modFiles[fileDialogLang]?.length || 0 })}</DialogTitle>
             <DialogContent>
               <div style={{ maxHeight: '60vh', overflow: 'auto', display: 'flex', flexDirection: 'column', gap: '2px' }}>
                 {fileDialogLang && modFiles[fileDialogLang]?.map((f, i) => (
@@ -1074,7 +1067,7 @@ export function MyMods() {
                 action={
                   <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                     <Badge appearance="outline" size="small" style={{ whiteSpace: 'nowrap' }}>
-                      {CATEGORIES.find(c => c.value === mod.category)?.label || mod.category || t('workshop.uncategorized')}
+                      {mod.category ? t(`workshop.category_${mod.category}`) : t('workshop.uncategorized')}
                     </Badge>
                     <Button size="small" icon={<Edit24Regular />} appearance="subtle" onClick={(e) => { e.stopPropagation(); handleEdit(mod) }} />
                     <Button size="small" icon={<Delete24Regular />} appearance="subtle" onClick={(e) => { e.stopPropagation(); handleDelete(mod.id) }} />
