@@ -79,9 +79,9 @@ jobs:
           ref: ${{ needs.bump.outputs.tag_name }}
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v2
         with:
-          version: 9
+          version: 8
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
