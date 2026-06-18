@@ -1,0 +1,89 @@
+---
+name: version-bump
+description: Document the auto version bump and GitHub Release workflow for this project. Use when user asks about version bumping, release process, CI/CD, or how to create a new release.
+user_invocable: true
+allowed_tools: Read, Glob, Grep, Bash
+---
+
+# Auto Version Bump & Release
+
+每次 push 到 `main` 分支时，GitHub Actions 自动 bump patch 版本、构建 NSIS 安装包、创建 GitHub Release。
+
+## 工作流文件
+
+`.github/workflows/release.yml`
+
+## 触发条件
+
+- `push` 到 `main` 分支
+
+## 工作流概览
+
+```
+push → [Auto bump version] → [Build NSIS installer] → [Create Release]
+```
+
+### Job 1: Auto bump version (ubuntu-latest)
+
+1. 检查 commit message subject 是否包含 `[skip version]`
+   - 包含 → 跳过 bump（用于文档变更等无需发版的提交）
+2. 从 `src-tauri/tauri.conf.json` 读取当前版本
+3. 解析 semver，patch +1（例如 0.1.0 → 0.1.1）
+4. 更新以下 3 个文件中的版本号：
+
+   | 文件 | 字段 |
+   |------|------|
+   | `src-tauri/tauri.conf.json` | `version` |
+   | `src-tauri/Cargo.toml` | `version` (package) |
+   | `src/modules/settings/GameSettings.jsx` | `CURRENT_VERSION` |
+
+5. commit: `chore: bump version to v{x.y.z} [skip version]`
+6. 创建 git tag: `v{x.y.z}`
+7. `git push origin main --tags`
+
+### Job 2: Build NSIS installer (windows-latest)
+
+- 安装 pnpm、Node.js、Rust
+- 注入 `DB_URL` 环境变量
+- 执行 `pnpm tauri build`
+- 产出的 `.exe` 上传为 artifact
+
+### Job 3: Create Release (ubuntu-latest)
+
+- 使用 `softprops/action-gh-release` 创建 GitHub Release
+- 标题: `v{x.y.z}`
+- 附件: NSIS 安装包
+- 自动生成 release notes
+
+## 跳过版本 Bump
+
+在 commit 的 **subject 行（第一行）** 中包含 `[skip version]`：
+
+```bash
+git commit -m "docs: update readme [skip version]"
+```
+
+适用于：文档变更、CI 配置调整、注释修改等无需发版的提交。
+
+## 手动触发
+
+如果要手动创建一个 release 而不 push 到 main：
+1. 本地修改版本号（3 个文件）
+2. commit + tag: `git tag v{x.y.z}`
+3. `git push origin main --tags`
+
+## 版本号位置
+
+| 位置 | 用途 |
+|------|------|
+| `src-tauri/tauri.conf.json` | Tauri 应用版本（主版本来源） |
+| `src-tauri/Cargo.toml` | Rust crate 版本 |
+| `src/modules/settings/GameSettings.jsx:69` | 前台显示的版本号 |
+| `package.json` | 当前为 `0.0.0`，未使用 |
+
+## gh CLI
+
+已安装 `gh` CLI（v2.83.2），可用于：
+- 查看 workflow 运行状态：`gh run list`
+- 查看 workflow 日志：`gh run view <run-id> --log`
+- 查看 releases：`gh release list`
