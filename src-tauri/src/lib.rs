@@ -668,6 +668,7 @@ pub fn run() {
             db::db_get_mod_detail, db::db_get_mod_for_edit,
             db::db_create_mod, db::db_update_mod, db::db_delete_mod,
             db::db_save_mod_file,
+            db::db_check_mod_key,
             db::db_delete_mod_file,
             db::db_get_imgbed_config,
             db::db_get_version,

@@ -694,6 +694,24 @@ pub async fn db_update_mod(
 }
 
 #[tauri::command(rename_all = "snake_case")]
+pub async fn db_check_mod_key(
+    state: tauri::State<'_, DbState>,
+    mod_key: String,
+) -> Result<ApiResponse, String> {
+    let pool = state.pool.clone();
+    tokio::task::spawn_blocking(move || {
+        let mut conn = pool.get_conn().map_err(|e| e.to_string())?;
+        let exists: Option<(u64,)> = conn.exec_first(
+            "SELECT id FROM mods WHERE mod_id = ?",
+            (&mod_key,),
+        ).map_err(|e| e.to_string())?;
+        Ok(ApiResponse::ok_val(serde_json::json!({
+            "exists": exists.is_some()
+        }), "OK"))
+    }).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command(rename_all = "snake_case")]
 pub async fn db_delete_mod(
     state: tauri::State<'_, DbState>,
     mod_id: u64,

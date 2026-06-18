@@ -11,13 +11,14 @@ import {
   ArrowClockwise24Regular, Cloud24Regular,
   ArrowUpload24Regular,
 } from '@fluentui/react-icons'
-import { listMyMods, createMod, updateMod, deleteMod, uploadModFile, deleteModFile, login, register, getModForEdit, getModDetail } from '../../services/workshopApi'
+import { listMyMods, createMod, updateMod, deleteMod, uploadModFile, deleteModFile, login, register, getModForEdit, getModDetail, deleteModWithFiles, checkModKey } from '../../services/workshopApi'
 import { useAuth } from '../../contexts/AuthContext'
 import { RichTextEditor, MarkdownEditor } from '../../components/common/RichTextEditor'
 import JSZip from 'jszip'
 import { open } from '@tauri-apps/plugin-dialog'
 import { readFile, readDir } from '@tauri-apps/plugin-fs'
 import ModDetailPage from './ModDetailPage'
+import { ConfirmDialog } from '../../components'
 
 const LANGUAGES = [
   { value: 'zh', label: '中文' },
@@ -194,6 +195,9 @@ function CreateModPage({ onClose, onCreated }) {
   const { t } = useTranslation()
   const { user } = useAuth()
   const [modKey, setModKey] = useState('')
+  const [modKeyValidated, setModKeyValidated] = useState(false)
+  const [modKeyChecking, setModKeyChecking] = useState(false)
+  const [modKeyChecked, setModKeyChecked] = useState(false)
   const [category, setCategory] = useState('v1')
   const [translations, setTranslations] = useState({ zh: { name: '', description: '', instructions: '', instructions_format: 'markdown', changelog: '', version: '1.0.0' } })
   const allLangs = LANGUAGES.map(l => l.value)
@@ -323,7 +327,6 @@ function CreateModPage({ onClose, onCreated }) {
   }
 
   const handleRemoveLang = (lang) => {
-    if (lang === 'zh') return
     setTranslations(prev => {
       const next = { ...prev }
       delete next[lang]
@@ -340,9 +343,28 @@ function CreateModPage({ onClose, onCreated }) {
     }))
   }
 
+  const handleCheckModKey = async () => {
+    if (!modKey.trim()) return
+    setModKeyChecking(true)
+    setModKeyValidated(false)
+    try {
+      const res = await checkModKey(modKey.trim())
+      setModKeyValidated(!res.exists)
+      setModKeyChecked(true)
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setModKeyChecking(false)
+    }
+  }
+
   const handleSubmit = async () => {
     if (!modKey.trim()) {
       setError(t('workshop.modIdEmpty'))
+      return
+    }
+    if (!modKeyValidated) {
+      setError('请先检查 Mod 标识名是否可用')
       return
     }
     setError('')
@@ -390,12 +412,20 @@ function CreateModPage({ onClose, onCreated }) {
       <div style={{ flex: 1, overflow: 'auto', padding: '8px', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
         <div className={styles.formRow}>
           <Text className={styles.formLabel}>{t('workshop.modId')}</Text>
-          <Input
-            size="small"
-            placeholder={t('workshop.modIdCreatePlaceholder')}
-            value={modKey}
-            onChange={(_, d) => setModKey(d.value)}
-          />
+          <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+            <Input
+              size="small"
+              placeholder={t('workshop.modIdCreatePlaceholder')}
+              value={modKey}
+              onChange={(_, d) => { setModKey(d.value); setModKeyValidated(false); setModKeyChecked(false) }}
+              style={{ flex: 1 }}
+            />
+            <Button size="small" appearance="outline" onClick={handleCheckModKey} disabled={modKeyChecking || !modKey.trim()}>
+              {modKeyChecking ? t('workshop.checking') : t('workshop.check')}
+            </Button>
+          </div>
+          {modKeyChecked && modKeyValidated && <Text size="small" style={{ color: tokens.colorPaletteGreenForeground1 }}>可用</Text>}
+          {modKeyChecked && !modKeyValidated && <Text size="small" style={{ color: tokens.colorPaletteRedForeground1 }}>已存在，请前往更新对应语言文件</Text>}
         </div>
 
         <div className={styles.formRow}>
@@ -428,9 +458,7 @@ function CreateModPage({ onClose, onCreated }) {
             <div key={lang} style={{ border: `1px solid ${tokens.colorNeutralStroke2}`, borderRadius: '4px', padding: '8px', marginBottom: '8px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
                 <Text weight="semibold" size="small">{langLabel} ({lang})</Text>
-                {lang !== 'zh' && (
-                  <Button size="small" icon={<Delete24Regular />} appearance="subtle" onClick={() => handleRemoveLang(lang)} />
-                )}
+                <Button size="small" icon={<Delete24Regular />} appearance="subtle" onClick={() => handleRemoveLang(lang)} />
               </div>
               <div className={styles.formRow}>
                 <Text className={styles.formLabel}>{t('workshop.name')}</Text>
@@ -595,6 +623,7 @@ function EditModPage({ mod: initialMod, onClose, onUpdated }) {
   const [uploadingLang, setUploadingLang] = useState('')
   const [uploadError, setUploadError] = useState('')
   const [fileDialogLang, setFileDialogLang] = useState(null)
+  const [confirmRemoveLang, setConfirmRemoveLang] = useState(null)
 
   const handleSelectFolders = async (lang) => {
     try {
@@ -705,9 +734,18 @@ function EditModPage({ mod: initialMod, onClose, onUpdated }) {
       return next
     })
   }
-
-  const handleRemoveLang = (lang) => {
-    if (lang === 'zh') return
+  const handleConfirmRemoveLang = async () => {
+    const lang = confirmRemoveLang
+    if (!lang) return
+    // 如果有已上传的文件，从图床和 DB 删除
+    if (existingFiles[lang]) {
+      try {
+        await deleteModFile({ author_id: user.user_id, mod_id: initialMod.id, lang_code: lang, fileUrl: existingFiles[lang].file_url })
+        setExistingFiles(prev => { const n = { ...prev }; delete n[lang]; return n })
+      } catch (e) {
+        console.warn('删除语言文件失败:', e)
+      }
+    }
     setTranslations(prev => {
       const next = { ...prev }
       delete next[lang]
@@ -715,6 +753,7 @@ function EditModPage({ mod: initialMod, onClose, onUpdated }) {
       setAddLang(remaining[0] || '')
       return next
     })
+    setConfirmRemoveLang(null)
   }
 
   const handleTransChange = (lang, field, value) => {
@@ -730,6 +769,10 @@ function EditModPage({ mod: initialMod, onClose, onUpdated }) {
     setUploadError('')
     setUploadingLang(lang)
     try {
+      // 先删旧文件
+      if (existingFiles[lang]) {
+        await deleteModFile({ author_id: user.user_id, mod_id: initialMod.id, lang_code: lang, fileUrl: existingFiles[lang].file_url })
+      }
       const zip = new JSZip()
       for (const file of files) {
         zip.file(file.name, file.data)
@@ -756,14 +799,25 @@ function EditModPage({ mod: initialMod, onClose, onUpdated }) {
     setError('')
     setBusy(true)
     try {
-      // 1. 处理所有待上传文件：先删旧文件，再传新文件
-      const fileLangs = Object.keys(modFiles).filter(lang => modFiles[lang] && modFiles[lang].length > 0)
-      for (const lang of fileLangs) {
-        // 如果该语言已有旧文件，先从 ImgBed 和 DB 删除
+      // 1. 收集需要处理的语言
+      const pendingLangs = Object.keys(modFiles).filter(lang => modFiles[lang] && modFiles[lang].length > 0)
+      
+      // 检查版本变更但没有新文件的语言（用户需要重新选文件）
+      const versionChangedOnly = Object.keys(existingFiles).filter(lang => {
+        const ef = existingFiles[lang]
+        return ef && translations[lang] && translations[lang].version !== ef.version && (!modFiles[lang] || modFiles[lang].length === 0)
+      })
+      if (versionChangedOnly.length > 0) {
+        setError(t('workshop.versionChangedHint', { lang: versionChangedOnly[0] }))
+        setBusy(false)
+        return
+      }
+
+      // 处理所有有待上传文件的语言
+      for (const lang of pendingLangs) {
         if (existingFiles[lang]) {
           await deleteModFile({ author_id: user.user_id, mod_id: initialMod.id, lang_code: lang, fileUrl: existingFiles[lang].file_url })
         }
-        // 上传新文件
         setUploadingLang(lang)
         const files = modFiles[lang]
         const zip = new JSZip()
@@ -835,9 +889,7 @@ function EditModPage({ mod: initialMod, onClose, onUpdated }) {
             <div key={lang} style={{ border: `1px solid ${tokens.colorNeutralStroke2}`, borderRadius: '4px', padding: '8px', marginBottom: '8px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
                 <Text weight="semibold" size="small">{langLabel} ({lang})</Text>
-                {lang !== 'zh' && (
-                  <Button size="small" icon={<Delete24Regular />} appearance="subtle" onClick={() => handleRemoveLang(lang)} />
-                )}
+                <Button size="small" icon={<Delete24Regular />} appearance="subtle" onClick={() => setConfirmRemoveLang(lang)} />
               </div>
               <div className={styles.formRow}>
                 <Text className={styles.formLabel}>{t('workshop.name')}</Text>
@@ -955,6 +1007,20 @@ function EditModPage({ mod: initialMod, onClose, onUpdated }) {
           </DialogBody>
         </DialogSurface>
       </Dialog>
+
+      <ConfirmDialog
+        open={!!confirmRemoveLang}
+        onClose={() => setConfirmRemoveLang(null)}
+        title={t('workshop.removeLang')}
+        onConfirm={handleConfirmRemoveLang}
+      >
+        <Text>{t('workshop.confirmRemoveLang', { lang: confirmRemoveLang })}</Text>
+        {confirmRemoveLang && existingFiles[confirmRemoveLang] && (
+          <Text as="p" size="small" style={{ color: tokens.colorPaletteRedForeground1, marginTop: '8px' }}>
+            {t('workshop.removeLangFileHint')}
+          </Text>
+        )}
+      </ConfirmDialog>
     </div>
   )
 }
@@ -969,6 +1035,7 @@ export function MyMods() {
   const [showCreatePage, setShowCreatePage] = useState(false)
   const [editingMod, setEditingMod] = useState(null)
   const [detailMod, setDetailMod] = useState(null)
+  const [confirmDeleteModId, setConfirmDeleteModId] = useState(null)
   const initialFetch = useRef(false)
 
   const fetchMods = useCallback(async () => {
@@ -1010,12 +1077,17 @@ export function MyMods() {
     }
   }
 
-  const handleDelete = async (modId) => {
+  const handleDelete = (modId) => setConfirmDeleteModId(modId)
+
+  const handleConfirmDelete = async () => {
     try {
-      await deleteMod({ author_id: user.user_id, modId })
-      setMods(prev => prev.filter(m => m.id !== modId))
+      const files = mods.find(m => m.id === confirmDeleteModId)?.files || []
+      await deleteModWithFiles({ author_id: user.user_id, modId: confirmDeleteModId, files })
+      setMods(prev => prev.filter(m => m.id !== confirmDeleteModId))
     } catch (e) {
       alert(t('workshop.deleteModFailed') + e.message)
+    } finally {
+      setConfirmDeleteModId(null)
     }
   }
 
@@ -1136,6 +1208,15 @@ export function MyMods() {
           ))}
         </div>
       )}
+
+      <ConfirmDialog
+        open={!!confirmDeleteModId}
+        onClose={() => setConfirmDeleteModId(null)}
+        title={t('workshop.deleteMod')}
+        onConfirm={handleConfirmDelete}
+      >
+        <Text>确定要删除这个模组吗？所有关联文件将从图床移除</Text>
+      </ConfirmDialog>
     </div>
   )
 }

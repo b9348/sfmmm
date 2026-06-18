@@ -119,6 +119,14 @@ export async function deleteMod({ author_id, modId }) {
   return { success: true }
 }
 
+export async function deleteModWithFiles({ author_id, modId, files }) {
+  for (const file of files) {
+    await deleteModFile({ author_id, mod_id: Number(modId), lang_code: file.lang_code, fileUrl: file.file_url })
+  }
+  const res = await dbCall('db_delete_mod', { author_id, mod_id: Number(modId) })
+  return { success: true }
+}
+
 export async function listMyMods({ author_id, lang = 'zh', page = 1, page_size = 20 } = {}) {
   const res = await dbCall('db_list_my_mods', { author_id, lang, page, page_size })
   return {
@@ -128,6 +136,11 @@ export async function listMyMods({ author_id, lang = 'zh', page = 1, page_size =
     page: res.page || 1,
     page_size: res.page_size || page_size,
   }
+}
+
+export async function checkModKey(mod_key) {
+  const res = await dbCall('db_check_mod_key', { mod_key })
+  return res.data
 }
 
 // ── 文件上传（直传 ImgBed，然后存 URL 到 MySQL） ──
