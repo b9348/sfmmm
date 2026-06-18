@@ -169,33 +169,23 @@ jobs:
           fi
           echo "Download URL: $DOWNLOAD_URL"
 
-          # 2. 登录 Cloud API 获取 JWT
-          echo "::group::Login to Cloud API"
-          LOGIN_RESP=$(curl -s -X POST "https://sfm.b9349.dpdns.org/api/auth/login" \
-            -H "Content-Type: application/json" \
-            -d "{\"username\":\"sfmUploader\",\"password\":\"${{ secrets.CLOUD_PASSWORD }}\"}")
-          echo "Login response: $LOGIN_RESP"
+          # 2. 通过 DB_URL 直连 MySQL 更新 version_config
+          #（Cloud API sfm.b9349.dpdns.org 在 CI 中不可达，故用直连方式）
+          echo "::group::Update version_config via MySQL"
+          apt-get update -qq && apt-get install -y -qq default-mysql-client 2>&1 | tail -2
+
+          RAW="${{ secrets.DB_URL }}"
+          RAW="${RAW#mysql://}"
+          DB_USER="${RAW%%:*}"
+          REST="${RAW#*:}"
+          DB_PASS="${REST%%@*}"
+          REST="${REST#*@}"
+          DB_HOST="${REST%%:*}"
+          REST="${REST#*:}"
+          DB_PORT="${REST%%/*}"
+          DB_NAME="${REST#*/}"
+
+          mysql -h "$DB_HOST" -P "$DB_PORT" -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" \
+            -e "UPDATE version_config SET version='${NEW_VERSION}', update_url='${DOWNLOAD_URL}' WHERE id=1"
+          echo "✅ Cloud version config updated to v${NEW_VERSION} — ${DOWNLOAD_URL}"
           echo "::endgroup::"
-
-          JWT_TOKEN=$(echo "$LOGIN_RESP" | jq -r '.data.token // empty')
-          if [ -z "$JWT_TOKEN" ]; then
-            echo "::error::Failed to login to Cloud API"
-            echo "$LOGIN_RESP"
-            exit 1
-          fi
-
-          # 3. 更新 version_config 表
-          echo "::group::Update Version Config"
-          UPDATE_RESP=$(curl -s -X POST "https://sfm.b9349.dpdns.org/api/admin/version" \
-            -H "Content-Type: application/json" \
-            -H "Authorization: Bearer ${JWT_TOKEN}" \
-            -d "{\"version\":\"${NEW_VERSION}\",\"update_url\":\"${DOWNLOAD_URL}\"}")
-          echo "Update response: $UPDATE_RESP"
-          echo "::endgroup::"
-
-          SUCCESS=$(echo "$UPDATE_RESP" | jq -r '.success // false')
-          if [ "$SUCCESS" != "true" ]; then
-            echo "::error::Failed to update cloud version config"
-            exit 1
-          fi
-          echo "✅ Cloud version config updated to v${NEW_VERSION}"
