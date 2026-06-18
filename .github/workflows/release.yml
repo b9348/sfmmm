@@ -16,8 +16,9 @@ jobs:
       - name: Bump patch version
         id: bump
         run: |
-          # 如果上次提交是 bump 提交则跳过，防止循环
-          if echo "${{ github.event.head_commit.message }}" | grep -q '\[skip version\]'; then
+          # 只检查 subject（第一行），避免 body 中的说明文字误匹配
+          SUBJECT="$(echo "${{ github.event.head_commit.message }}" | head -1)"
+          if echo "$SUBJECT" | grep -q '\[skip version\]'; then
             echo "检测到 [skip version]，跳过 bump"
             echo "new_version=" >> "$GITHUB_OUTPUT"
             exit 0
