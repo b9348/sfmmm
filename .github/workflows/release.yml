@@ -2,12 +2,70 @@ name: Build & Release
 
 on:
   push:
-    tags:
-      - 'v*'
+    branches: [main]
 
 jobs:
+  bump:
+    name: Auto bump version
+    runs-on: ubuntu-latest
+    outputs:
+      new_version: ${{ steps.bump.outputs.new_version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Bump patch version
+        id: bump
+        run: |
+          # 如果上次提交是 bump 提交则跳过，防止循环
+          if echo "${{ github.event.head_commit.message }}" | grep -q '\[skip version\]'; then
+            echo "检测到 [skip version]，跳过 bump"
+            echo "new_version=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          VERSION=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION"
+          # 去除前导零（如果有）
+          PATCH=$((10#$PATCH))
+          NEW_VERSION="$MAJOR.$MINOR.$((PATCH + 1))"
+          echo "Bumping $VERSION → $NEW_VERSION"
+
+          # 更新 tauri.conf.json
+          node -e "
+            const fs = require('fs');
+            const p = 'src-tauri/tauri.conf.json';
+            const c = JSON.parse(fs.readFileSync(p, 'utf-8'));
+            c.version = '$NEW_VERSION';
+            fs.writeFileSync(p, JSON.stringify(c, null, 2) + '\n');
+          "
+
+          # 更新 Cargo.toml
+          sed -i "s/^version = \"$VERSION\"/version = \"$NEW_VERSION\"/" src-tauri/Cargo.toml
+
+          # 更新 GameSettings.jsx 中的 CURRENT_VERSION
+          sed -i "s/CURRENT_VERSION = '$VERSION'/CURRENT_VERSION = '$NEW_VERSION'/" src/modules/settings/GameSettings.jsx
+
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git add -A
+          git commit -m "chore: bump version to v$NEW_VERSION [skip version]"
+
+          echo "new_version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Push commit & tag
+        if: steps.bump.outputs.new_version != ''
+        run: |
+          git tag "v${{ steps.bump.outputs.new_version }}"
+          git push origin main --tags
+        env:
+          # 用 gh CLI 的 token 推送，确保后续 workflow 能触发
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   build:
     name: Build NSIS installer
+    needs: bump
+    # 只有 bump 了版本才构建（跳过 [skip version] 的推送）
+    if: needs.bump.outputs.new_version != ''
     runs-on: windows-latest
     timeout-minutes: 30
 
@@ -52,7 +110,8 @@ jobs:
 
   release:
     name: Create Release
-    needs: build
+    needs: [bump, build]
+    if: needs.bump.outputs.new_version != ''
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -63,18 +122,14 @@ jobs:
         with:
           name: nsis-installer
 
-      - name: Get version from tag
-        id: version
-        run: echo "tag=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
-
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_name }}
-          name: v${{ steps.version.outputs.tag }}
+          tag_name: v${{ needs.bump.outputs.new_version }}
+          name: v${{ needs.bump.outputs.new_version }}
           body: |
-            ## v${{ steps.version.outputs.tag }}
-            
+            ## v${{ needs.bump.outputs.new_version }}
+
             自动构建安装包，下载后运行即可更新。
           files: |
             *.exe
