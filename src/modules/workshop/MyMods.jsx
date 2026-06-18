@@ -206,6 +206,8 @@ function CreateModPage({ onClose, onCreated }) {
   const [uploadingLang, setUploadingLang] = useState('')
   const [fileDialogLang, setFileDialogLang] = useState(null)
 
+  const firstLang = Object.keys(translations)[0]
+  const version = translations[firstLang]?.version || ''
   const canSelectFile = modKey.trim() && version.trim()
 
   const handleSelectFolders = async (lang) => {

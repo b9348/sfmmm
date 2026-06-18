@@ -66,7 +66,7 @@ const useStyles = makeStyles({
   },
 })
 
-const CURRENT_VERSION = '0.1.7'
+import APP_VERSION from '../../version.js'
 
 export function GameSettings({ config, onConfigChange }) {
   const { t, i18n: i18nInstance } = useTranslation()
@@ -116,7 +116,7 @@ export function GameSettings({ config, onConfigChange }) {
     setChecking(true)
     setUpdateInfo(null)
     try {
-      const info = await checkVersion(CURRENT_VERSION)
+      const info = await checkVersion(APP_VERSION)
       setUpdateInfo(info)
     } catch (e) {
       console.error('[Update] 检测失败:', e)
@@ -209,7 +209,7 @@ export function GameSettings({ config, onConfigChange }) {
               <div className={styles.updateInfo}>
                 {updateInfo.hasUpdate ? (
                   <>
-                    <span className={styles.currentTag}>v{CURRENT_VERSION}</span>
+                    <span className={styles.currentTag}>v{APP_VERSION}</span>
                     <Text>→</Text>
                     <span className={styles.newTag}>v{updateInfo.latestVersion}</span>
                     <Button
@@ -230,7 +230,7 @@ export function GameSettings({ config, onConfigChange }) {
             )}
           </div>
           <Text size="small" style={{ color: tokens.colorNeutralForeground3 }}>
-            {t('settings.currentVersion', { version: CURRENT_VERSION })}
+            {t('settings.currentVersion', { version: APP_VERSION })}
           </Text>
         </div>
       </Card>

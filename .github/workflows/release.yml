@@ -46,8 +46,8 @@ jobs:
           # 更新 Cargo.toml
           sed -i "s/^version = \"$VERSION\"/version = \"$NEW_VERSION\"/" src-tauri/Cargo.toml
 
-          # 更新 GameSettings.jsx 中的 CURRENT_VERSION
-          sed -i "s/CURRENT_VERSION = '$VERSION'/CURRENT_VERSION = '$NEW_VERSION'/" src/modules/settings/GameSettings.jsx
+          # 更新 src/version.js 中的 APP_VERSION
+          sed -i "s/APP_VERSION = '$VERSION'/APP_VERSION = '$NEW_VERSION'/" src/version.js
 
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"

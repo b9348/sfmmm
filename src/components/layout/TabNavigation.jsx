@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import APP_VERSION from '../../version.js'
 import {
   makeStyles,
   tokens,
@@ -423,7 +424,7 @@ export function TabNavigation({ value, onChange, isCollapsed, onToggleCollapse, 
           onClick={() => onNavigateToSettings?.()}
           title={updateInfo?.hasUpdate ? t('app.updateFound', { version: updateInfo.latestVersion }) : ''}
         >
-          <span className={styles.version}>v0.1.0</span>
+          <span className={styles.version}>v{APP_VERSION}</span>
           {updateInfo?.hasUpdate && (
             <span className={styles.badge}>NEW</span>
           )}
