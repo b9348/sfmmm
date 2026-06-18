@@ -8,8 +8,11 @@ jobs:
   bump:
     name: Auto bump version
     runs-on: ubuntu-latest
+    permissions:
+      contents: write  # 需要写入权限才能 push commit & tag
     outputs:
       new_version: ${{ steps.bump.outputs.new_version }}
+      tag_name: ${{ steps.bump.outputs.tag_name }}
     steps:
       - uses: actions/checkout@v4
 
@@ -51,16 +54,15 @@ jobs:
           git add -A
           git commit -m "chore: bump version to v$NEW_VERSION [skip version]"
 
+          # 创建 tag
+          git tag "v$NEW_VERSION"
+
           echo "new_version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag_name=v$NEW_VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Push commit & tag
         if: steps.bump.outputs.new_version != ''
-        run: |
-          git tag "v${{ steps.bump.outputs.new_version }}"
-          git push origin main --tags
-        env:
-          # 用 gh CLI 的 token 推送，确保后续 workflow 能触发
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: git push origin main --tags
 
   build:
     name: Build NSIS installer
@@ -71,8 +73,10 @@ jobs:
     timeout-minutes: 30
 
     steps:
-      - name: Checkout
+      - name: Checkout tag
         uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.bump.outputs.tag_name }}
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
