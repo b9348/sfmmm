@@ -92,7 +92,8 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm install
+        shell: bash
 
       - name: Create .env
         run: |
