@@ -114,7 +114,7 @@ jobs:
           if-no-files-found: error
 
   release:
-    name: Create Release
+    name: Create Release & Update Cloud
     needs: [bump, build]
     if: needs.bump.outputs.new_version != ''
     runs-on: ubuntu-latest
@@ -139,3 +139,63 @@ jobs:
           files: |
             *.exe
           generate_release_notes: true
+
+      - name: Upload to ImgBed & Update Cloud Version
+        shell: bash
+        run: |
+          EXE_FILE=$(ls *.exe | head -1)
+          if [ -z "$EXE_FILE" ]; then
+            echo "::error::No .exe installer found in workspace"
+            exit 1
+          fi
+          echo "Found installer: $EXE_FILE"
+
+          NEW_VERSION="${{ needs.bump.outputs.new_version }}"
+
+          # 1. 上传安装包到 ImgBed（图床 CDN）
+          echo "::group::Upload to ImgBed"
+          UPLOAD_RESP=$(curl -s -X POST \
+            "https://img.b9349.dpdns.org/upload?uploadChannel=telegram&uploadFolder=sfm/installer/v${NEW_VERSION}&returnFormat=full" \
+            -H "Authorization: Bearer ${{ secrets.IMGBED_TOKEN }}" \
+            -F "file=@${EXE_FILE}")
+          echo "ImgBed response: $UPLOAD_RESP"
+          echo "::endgroup::"
+
+          DOWNLOAD_URL=$(echo "$UPLOAD_RESP" | jq -r '.[0].src // empty')
+          if [ -z "$DOWNLOAD_URL" ]; then
+            echo "::error::Failed to upload to ImgBed"
+            echo "$UPLOAD_RESP"
+            exit 1
+          fi
+          echo "Download URL: $DOWNLOAD_URL"
+
+          # 2. 登录 Cloud API 获取 JWT
+          echo "::group::Login to Cloud API"
+          LOGIN_RESP=$(curl -s -X POST "https://sfm.b9349.dpdns.org/api/auth/login" \
+            -H "Content-Type: application/json" \
+            -d "{\"username\":\"sfmUploader\",\"password\":\"${{ secrets.CLOUD_PASSWORD }}\"}")
+          echo "Login response: $LOGIN_RESP"
+          echo "::endgroup::"
+
+          JWT_TOKEN=$(echo "$LOGIN_RESP" | jq -r '.data.token // empty')
+          if [ -z "$JWT_TOKEN" ]; then
+            echo "::error::Failed to login to Cloud API"
+            echo "$LOGIN_RESP"
+            exit 1
+          fi
+
+          # 3. 更新 version_config 表
+          echo "::group::Update Version Config"
+          UPDATE_RESP=$(curl -s -X POST "https://sfm.b9349.dpdns.org/api/admin/version" \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer ${JWT_TOKEN}" \
+            -d "{\"version\":\"${NEW_VERSION}\",\"update_url\":\"${DOWNLOAD_URL}\"}")
+          echo "Update response: $UPDATE_RESP"
+          echo "::endgroup::"
+
+          SUCCESS=$(echo "$UPDATE_RESP" | jq -r '.success // false')
+          if [ "$SUCCESS" != "true" ]; then
+            echo "::error::Failed to update cloud version config"
+            exit 1
+          fi
+          echo "✅ Cloud version config updated to v${NEW_VERSION}"
