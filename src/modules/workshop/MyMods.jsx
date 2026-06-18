@@ -11,7 +11,7 @@ import {
   ArrowClockwise24Regular, Cloud24Regular,
   ArrowUpload24Regular,
 } from '@fluentui/react-icons'
-import { listMyMods, createMod, updateMod, deleteMod, uploadModFile, login, register, getModForEdit, getModDetail } from '../../services/workshopApi'
+import { listMyMods, createMod, updateMod, deleteMod, uploadModFile, deleteModFile, login, register, getModForEdit, getModDetail } from '../../services/workshopApi'
 import { useAuth } from '../../contexts/AuthContext'
 import { RichTextEditor, MarkdownEditor } from '../../components/common/RichTextEditor'
 import JSZip from 'jszip'
@@ -366,7 +366,7 @@ function CreateModPage({ onClose, onCreated }) {
           return
         }
         const zipFile = new File([blob], `${modKey}_${lang}.zip`, { type: 'application/zip' })
-        await uploadModFile({ author_id: user.user_id, mod_id: newModId, lang_code: lang, version, file: zipFile })
+        await uploadModFile({ author_id: user.user_id, mod_id: newModId, lang_code: lang, version: translations[lang]?.version, file: zipFile })
       }
       setUploadingLang('')
 
@@ -741,7 +741,7 @@ function EditModPage({ mod: initialMod, onClose, onUpdated }) {
         return
       }
       const zipFile = new File([blob], `${modKey}_${lang}.zip`, { type: 'application/zip' })
-      const res = await uploadModFile({ author_id: user.user_id, mod_id: initialMod.id, lang_code: lang, version, file: zipFile })
+      const res = await uploadModFile({ author_id: user.user_id, mod_id: initialMod.id, lang_code: lang, version: translations[lang]?.version, file: zipFile })
       setExistingFiles(prev => ({ ...prev, [lang]: res.data }))
       setModFiles(prev => { const n = { ...prev }; delete n[lang]; return n })
       onUpdated()
@@ -756,6 +756,35 @@ function EditModPage({ mod: initialMod, onClose, onUpdated }) {
     setError('')
     setBusy(true)
     try {
+      // 1. 处理所有待上传文件：先删旧文件，再传新文件
+      const fileLangs = Object.keys(modFiles).filter(lang => modFiles[lang] && modFiles[lang].length > 0)
+      for (const lang of fileLangs) {
+        // 如果该语言已有旧文件，先从 ImgBed 和 DB 删除
+        if (existingFiles[lang]) {
+          await deleteModFile({ author_id: user.user_id, mod_id: initialMod.id, lang_code: lang, fileUrl: existingFiles[lang].file_url })
+        }
+        // 上传新文件
+        setUploadingLang(lang)
+        const files = modFiles[lang]
+        const zip = new JSZip()
+        for (const file of files) {
+          zip.file(file.name, file.data)
+        }
+        const blob = await zip.generateAsync({ type: 'blob' })
+        if (blob.size > MAX_ZIP_SIZE) {
+          setError(t('workshop.modFileSizeWarning', { size: (blob.size / 1024 / 1024).toFixed(1) }))
+          setBusy(false)
+          return
+        }
+        const zipFile = new File([blob], `${modKey}_${lang}.zip`, { type: 'application/zip' })
+        const res = await uploadModFile({ author_id: user.user_id, mod_id: initialMod.id, lang_code: lang, version: translations[lang]?.version, file: zipFile })
+        setExistingFiles(prev => ({ ...prev, [lang]: res.data }))
+      }
+      // 清空待上传队列
+      setModFiles({})
+      setUploadingLang('')
+
+      // 2. 更新翻译信息
       await updateMod({ author_id: user.user_id, mod_id: initialMod.id, category, translations })
       onUpdated()
       onClose()
@@ -846,11 +875,16 @@ function EditModPage({ mod: initialMod, onClose, onUpdated }) {
                   {t('workshop.uploadLimitWarning')}
                 </Text>
                 {existingFiles[lang] && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px', flexWrap: 'wrap' }}>
                     <Text size="small" className={styles.meta}>
                       {t('workshop.alreadyUploaded')}：{existingFiles[lang].file_name} ({(existingFiles[lang].file_size / 1024).toFixed(1)}KB)
                     </Text>
                     <Text size="small" className={styles.meta}>v{existingFiles[lang].version}</Text>
+                    {existingFiles[lang].file_url && (
+                      <a href={existingFiles[lang].file_url} target="_blank" rel="noreferrer" style={{ fontSize: '12px', color: tokens.colorBrandForeground1 }}>
+                        {existingFiles[lang].file_url}
+                      </a>
+                    )}
                   </div>
                 )}
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>

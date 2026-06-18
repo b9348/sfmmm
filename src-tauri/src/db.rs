@@ -248,6 +248,32 @@ pub async fn db_list_mods(
             }).map_err(|e| e.to_string())?;
         }
 
+        // 收集 mod_id → 翻译
+        let mut trans_by_mod: std::collections::HashMap<u64, serde_json::Value> = std::collections::HashMap::new();
+        if !mod_ids.is_empty() {
+            let ph: Vec<String> = mod_ids.iter().map(|_| "?".to_string()).collect();
+            let trans_sql = format!(
+                "SELECT mod_id, lang_code, name, description, instructions, instructions_format, changelog, version FROM mod_translations WHERE mod_id IN ({})",
+                ph.join(",")
+            );
+            let id_params: Vec<Value> = mod_ids.iter().map(|&id| Value::UInt(id)).collect();
+            conn.exec_map(&trans_sql, id_params, |row: Row| {
+                let vals: Vec<Value> = row.unwrap();
+                let mid = val_to_i64(&vals[0]) as u64;
+                let entry = trans_by_mod.entry(mid).or_insert_with(|| serde_json::json!({}));
+                if let Some(obj) = entry.as_object_mut() {
+                    obj.insert(val_to_string(vals[1].clone()), serde_json::json!({
+                        "name": val_to_string(vals[2].clone()),
+                        "description": val_to_string(vals[3].clone()),
+                        "instructions": val_to_string(vals[4].clone()),
+                        "instructions_format": val_to_string(vals[5].clone()),
+                        "changelog": val_to_string(vals[6].clone()),
+                        "version": val_to_string(vals[7].clone()),
+                    }));
+                }
+            }).map_err(|e| e.to_string())?;
+        }
+
         let items: Vec<serde_json::Value> = mod_rows.into_iter().map(|r| {
             let mid = val_to_i64(&r[0]) as u64;
             serde_json::json!({
@@ -263,6 +289,7 @@ pub async fn db_list_mods(
                 "download_count": val_to_i64(&r[4]),
                 "language": val_to_string(r[13].clone()),
                 "files": files_by_mod.remove(&mid).unwrap_or_default(),
+                "translations": trans_by_mod.remove(&mid).unwrap_or_default(),
                 "created_at": val_to_string(r[5].clone()),
                 "updated_at": val_to_string(r[6].clone()),
             })
@@ -349,6 +376,32 @@ pub async fn db_list_my_mods(
             }).map_err(|e| e.to_string())?;
         }
 
+        // 收集 mod_id → 翻译
+        let mut trans_by_mod: std::collections::HashMap<u64, serde_json::Value> = std::collections::HashMap::new();
+        if !mod_ids.is_empty() {
+            let ph: Vec<String> = mod_ids.iter().map(|_| "?".to_string()).collect();
+            let trans_sql = format!(
+                "SELECT mod_id, lang_code, name, description, instructions, instructions_format, changelog, version FROM mod_translations WHERE mod_id IN ({})",
+                ph.join(",")
+            );
+            let id_params: Vec<Value> = mod_ids.iter().map(|&id| Value::UInt(id)).collect();
+            conn.exec_map(&trans_sql, id_params, |row: Row| {
+                let vals: Vec<Value> = row.unwrap();
+                let mid = val_to_i64(&vals[0]) as u64;
+                let entry = trans_by_mod.entry(mid).or_insert_with(|| serde_json::json!({}));
+                if let Some(obj) = entry.as_object_mut() {
+                    obj.insert(val_to_string(vals[1].clone()), serde_json::json!({
+                        "name": val_to_string(vals[2].clone()),
+                        "description": val_to_string(vals[3].clone()),
+                        "instructions": val_to_string(vals[4].clone()),
+                        "instructions_format": val_to_string(vals[5].clone()),
+                        "changelog": val_to_string(vals[6].clone()),
+                        "version": val_to_string(vals[7].clone()),
+                    }));
+                }
+            }).map_err(|e| e.to_string())?;
+        }
+
         let items: Vec<serde_json::Value> = mod_rows.into_iter().map(|r| {
             let mid = val_to_i64(&r[0]) as u64;
             serde_json::json!({
@@ -360,6 +413,7 @@ pub async fn db_list_my_mods(
                 "author_name": val_to_string(r[7].clone()),
                 "download_count": val_to_i64(&r[4]),
                 "files": files_by_mod.remove(&mid).unwrap_or_default(),
+                "translations": trans_by_mod.remove(&mid).unwrap_or_default(),
                 "created_at": val_to_string(r[5].clone()),
             })
         }).collect();
@@ -478,6 +532,24 @@ pub async fn db_get_mod_for_edit(
                     }
                 ).map_err(|e| e.to_string())?;
 
+                // 获取文件
+                let mut files: Vec<serde_json::Value> = Vec::new();
+                conn.exec_map(
+                    "SELECT lang_code, file_url, file_name, file_size, file_hash, version, created_at FROM mod_files WHERE mod_id = ?", (id,),
+                    |row: Row| {
+                        let r: Vec<Value> = row.unwrap();
+                        files.push(serde_json::json!({
+                            "lang_code": val_to_string(r[0].clone()),
+                            "file_url": val_to_string(r[1].clone()),
+                            "file_name": val_to_string(r[2].clone()),
+                            "file_size": val_to_i64(&r[3]),
+                            "file_hash": match r[4].clone() { Value::Bytes(b) if !b.is_empty() => Some(String::from_utf8_lossy(&b).to_string()), _ => None },
+                            "version": val_to_string(r[5].clone()),
+                            "created_at": val_to_string(r[6].clone()),
+                        }));
+                    }
+                ).map_err(|e| e.to_string())?;
+
                 // 获取 mod 基本信息
                 let info: Option<(String, String, String,)> = conn.exec_first(
                     "SELECT mod_id, version, category FROM mods WHERE id = ?", (id,)
@@ -488,6 +560,7 @@ pub async fn db_get_mod_for_edit(
                         "id": id,
                         "mod_key": mk,
                         "category": cat,
+                        "files": files,
                         "translations": translations,
                     }), "OK")),
                     None => Ok(ApiResponse::err("Mod not found")),
@@ -698,6 +771,37 @@ pub async fn db_save_mod_file(
                 }), "File saved"))
             }
             Some(_) => Ok(ApiResponse::err("You can only upload files for your own mods")),
+            None => Ok(ApiResponse::err("Mod not found")),
+        }
+    }).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn db_delete_mod_file(
+    state: tauri::State<'_, DbState>,
+    mod_id: u64,
+    author_id: u64,
+    lang_code: String,
+) -> Result<ApiResponse, String> {
+    let pool = state.pool.clone();
+    tokio::task::spawn_blocking(move || {
+        let mut conn = pool.get_conn().map_err(|e| e.to_string())?;
+
+        // 验证作者
+        let owner: Option<(u64,)> = conn.exec_first(
+            "SELECT author_id FROM mods WHERE id = ?", (mod_id,)
+        ).map_err(|e| e.to_string())?;
+
+        match owner {
+            Some((aid,)) if aid == author_id => {
+                conn.exec_drop(
+                    "DELETE FROM mod_files WHERE mod_id = ? AND lang_code = ?",
+                    (mod_id, &lang_code),
+                ).map_err(|e| e.to_string())?;
+
+                Ok(ApiResponse::ok_msg("File deleted"))
+            }
+            Some(_) => Ok(ApiResponse::err("You can only delete files for your own mods")),
             None => Ok(ApiResponse::err("Mod not found")),
         }
     }).await.map_err(|e| e.to_string())?

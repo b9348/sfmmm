@@ -165,8 +165,8 @@ export async function uploadModFile({ author_id, mod_id, lang_code, version, fil
 
   const { src, publicUrl } = uploadData[0]
 
-  // 3. 计算 MD5（浏览器端）
-  const fileHash = await computeMd5(file)
+  // 3. 计算文件哈希（浏览器端）
+  const fileHash = await computeFileHash(file)
 
   // 4. 保存 URL 到 MySQL
   const saveRes = await dbCall('db_save_mod_file', {
@@ -192,6 +192,25 @@ export async function uploadModFile({ author_id, mod_id, lang_code, version, fil
       reused: false,
     },
   }
+}
+
+export async function deleteModFile({ author_id, mod_id, lang_code, fileUrl }) {
+  // 1. 删除 ImgBed CDN 文件
+  const imgbed = await getImgbedConfig()
+  const deleteUrl = `${imgbed.url}/delete?fileUrl=${encodeURIComponent(fileUrl)}`
+  const deleteRes = await fetch(deleteUrl, {
+    method: 'DELETE',
+    headers: { 'Authorization': `Bearer ${imgbed.token}` },
+  })
+  if (!deleteRes.ok) {
+    const text = await deleteRes.text()
+    throw new Error(`ImgBed delete failed: HTTP ${deleteRes.status} - ${text.slice(0, 200)}`)
+  }
+
+  // 2. 删除数据库记录
+  await dbCall('db_delete_mod_file', { mod_id: Number(mod_id), author_id, lang_code })
+
+  return { success: true }
 }
 
 // ── 评论系统 ──
@@ -228,16 +247,15 @@ export async function deleteComment({ comment_id, author_id }) {
   return { success: true }
 }
 
-// ── 浏览器端 MD5（使用 SubtleCrypto） ──
+// ── 浏览器端 SHA-256（使用 SubtleCrypto） ──
 
-async function computeMd5(file) {
+async function computeFileHash(file) {
   try {
     const buffer = await file.arrayBuffer()
-    const hashBuffer = await crypto.subtle.digest('MD5', buffer)
+    const hashBuffer = await crypto.subtle.digest('SHA-256', buffer)
     const hashArray = Array.from(new Uint8Array(hashBuffer))
     return hashArray.map(b => b.toString(16).padStart(2, '0')).join('')
   } catch {
-    // 如果不支持 MD5 则返回空字符串
     return ''
   }
 }

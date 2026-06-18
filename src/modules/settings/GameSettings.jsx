@@ -22,6 +22,7 @@ import { open as openUrl } from '@tauri-apps/plugin-shell'
 import Database from '@tauri-apps/plugin-sql'
 import i18n from '../../i18n'
 import { checkVersion } from '../../services/updateApi'
+import APP_VERSION from '../../version.js'
 
 const useStyles = makeStyles({
   formGrid: {
@@ -65,8 +66,6 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground3,
   },
 })
-
-import APP_VERSION from '../../version.js'
 
 export function GameSettings({ config, onConfigChange }) {
   const { t, i18n: i18nInstance } = useTranslation()
