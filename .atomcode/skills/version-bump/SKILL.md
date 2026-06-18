@@ -7,7 +7,7 @@ allowed_tools: Read, Glob, Grep, Bash
 
 # Auto Version Bump & Release
 
-每次 push 到 `main` 分支时，GitHub Actions 自动 bump patch 版本、构建 NSIS 安装包、创建 GitHub Release。
+每次 push 到 `main` 分支时，GitHub Actions 自动 bump patch 版本、构建 NSIS 安装包、上传到图床 CDN、创建 GitHub Release，并将版本号和下载链接写入云端数据库 `version_config` 表。
 
 ## 工作流文件
 
@@ -20,8 +20,10 @@ allowed_tools: Read, Glob, Grep, Bash
 ## 工作流概览
 
 ```
-push → [Auto bump version] → [Build NSIS installer] → [Create Release]
+push → [Auto bump version] → [Build NSIS installer] → [Create Release & Update Cloud]
 ```
+                                                                       ↓
+                                                             ImgBed CDN 上传 + MySQL 直连更新
 
 ### Job 1: Auto bump version (ubuntu-latest)
 
@@ -48,12 +50,21 @@ push → [Auto bump version] → [Build NSIS installer] → [Create Release]
 - 执行 `pnpm tauri build`
 - 产出的 `.exe` 上传为 artifact
 
-### Job 3: Create Release (ubuntu-latest)
+### Job 3: Create Release & Update Cloud (ubuntu-latest)
 
-- 使用 `softprops/action-gh-release` 创建 GitHub Release
-- 标题: `v{x.y.z}`
-- 附件: NSIS 安装包
-- 自动生成 release notes
+1. 使用 `softprops/action-gh-release` 创建 GitHub Release
+   - 标题: `v{x.y.z}`
+   - 附件: NSIS 安装包
+   - 自动生成 release notes
+2. 将 `.exe` 上传到 **ImgBed 图床 CDN**（`img.b9349.dpdns.org`），通过 Telegram 渠道分发
+   - 上传路径: `sfm/installer/v{x.y.z}/`
+   - 授权方式: `Authorization: Bearer ${{ secrets.IMGBED_TOKEN }}`
+3. 通过 **`DB_URL` 直连 MySQL**，更新 `version_config` 表：
+   - 版本号 → `version` 字段
+   - ImgBed 直链 → `update_url` 字段
+
+> ⚠️ `sfm.b9349.dpdns.org` 从 GitHub Actions 网络不可达（ETIMEDOUT），
+> 因此不通过 Cloud API 更新版本配置，改用 MySQL 直连。
 
 ## 跳过版本 Bump
 
@@ -72,6 +83,13 @@ git commit -m "docs: update readme [skip version]"
 2. commit + tag: `git tag v{x.y.z}`
 3. `git push origin main --tags`
 
+## 所需的 GitHub Secrets
+
+| Secret | 用途 |
+|--------|------|
+| `DB_URL` | 构建时生成 `.env`；Release 时直连 MySQL 更新 `version_config` |
+| `IMGBED_TOKEN` | 上传安装包到图床 CDN（`img.b9349.dpdns.org`） |
+
 ## 版本号位置
 
 | 位置 | 用途 |
@@ -80,6 +98,37 @@ git commit -m "docs: update readme [skip version]"
 | `src-tauri/Cargo.toml` | Rust crate 版本 |
 | `src/modules/settings/GameSettings.jsx:69` | 前台显示的版本号 |
 | `package.json` | 当前为 `0.0.0`，未使用 |
+| MySQL `version_config.version` | 云端最新版本（供桌面端检测更新） |
+
+## 更新检测链路
+
+```
+桌面端 (用户)
+  │  GET https://sfm.b9349.dpdns.org/api/admin/version  (公开接口，无需认证)
+  │  返回 { version, update_url }
+  ↓
+比较本地 CURRENT_VERSION vs 云端 version
+  │
+  ├─ 无更新 → 提示"已是最新版"
+  └─ 有新版本 → 显示"下载更新"按钮，链接到 ImgBed 直链
+
+ImgBed 直链格式:
+  https://img.b9349.dpdns.org/file/sfm/installer/v{x.y.z}/{timestamp}_sfmmm_{x.y.z}_x64-setup.exe
+```
+
+## 云端数据库 `version_config` 表
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `id` | INT PK | 始终为 1（只有一条记录） |
+| `version` | VARCHAR(20) | 最新版本号，如 `0.1.7` |
+| `update_url` | VARCHAR(500) | 安装包下载直链（ImgBed CDN） |
+| `updated_at` | TIMESTAMP | 最后更新时间（自动） |
+
+## 本地更新检测代码
+
+- `src/services/updateApi.js` — `checkVersion(currentVersion)` 调云端 API 比较版本
+- `src/modules/settings/GameSettings.jsx` — 显示更新面板和下载按钮
 
 ## gh CLI
 
