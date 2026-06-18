@@ -66,7 +66,7 @@ const useStyles = makeStyles({
   },
 })
 
-const CURRENT_VERSION = '0.1.1'
+const CURRENT_VERSION = '0.1.2'
 
 export function GameSettings({ config, onConfigChange }) {
   const { t, i18n: i18nInstance } = useTranslation()
