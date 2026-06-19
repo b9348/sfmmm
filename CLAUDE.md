@@ -7,12 +7,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - 安装依赖：`pnpm install`
 - 仅运行 Vite 前端：`pnpm dev`
 - 构建 Vite 前端：`pnpm build`
-- 检查 JavaScript/JSX 代码：`pnpm lint`
-- 预览构建后的前端：`pnpm preview`
-- 运行 Tauri CLI 命令：`pnpm tauri <command>`
 - 以开发模式运行桌面应用：`pnpm tauri dev`
 - 构建桌面应用安装包：`pnpm tauri build`
-- 检查 Tauri Rust crate：`cargo check --manifest-path src-tauri/Cargo.toml`
 
 ## 架构概览
 
