@@ -214,6 +214,7 @@
     "commentFailed": "Comment failed: ",
     "replyFailed": "Reply failed: ",
     "deleteFailed": "Delete failed: ",
+    "editFailed": "Edit failed: ",
     "reply": "Reply",
     "cancelReply": "Cancel reply",
     "replyToUser": "Reply to {{name}}",

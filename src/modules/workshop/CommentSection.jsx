@@ -5,9 +5,9 @@ import {
   makeStyles, tokens, Avatar,
 } from '@fluentui/react-components'
 import {
-  Send24Regular, Delete24Regular,
+  Send24Regular, Delete24Regular, Edit24Regular,
 } from '@fluentui/react-icons'
-import { addComment, getComments, getCommentReplies, deleteComment } from '../../services/workshopApi'
+import { addComment, getComments, getCommentReplies, deleteComment, editComment } from '../../services/workshopApi'
 import { useAuth } from '../../contexts/AuthContext'
 import { MarkdownContent } from '../../components/common/RichTextEditor'
 
@@ -50,6 +50,10 @@ export default function CommentSection({ modId, scrollToCommentId }) {
   // 楼中楼 replyTo = { parentId, authorName } | null
   const [replyTo, setReplyTo] = useState(null)
   const [replyText, setReplyText] = useState('')
+
+  // 编辑状态
+  const [editingId, setEditingId] = useState(null)
+  const [editText, setEditText] = useState('')
 
   // 每楼的回复加载状态
   const [replyState, setReplyState] = useState({})
@@ -209,6 +213,45 @@ export default function CommentSection({ modId, scrollToCommentId }) {
     }
   }
 
+  const handleEdit = async (commentId) => {
+    const content = editText.trim()
+    if (!content || !user) return
+    try {
+      await editComment({ comment_id: commentId, author_id: user.user_id, content })
+      // 更新一楼
+      setComments(prev => prev.map(c => {
+        if (c.id === commentId) {
+          return { ...c, content }
+        }
+        // 更新楼中楼
+        if (c.replies?.some(r => r.id === commentId)) {
+          return {
+            ...c,
+            replies: c.replies.map(r => r.id === commentId ? { ...r, content } : r),
+          }
+        }
+        return c
+      }))
+      // 更新 replyState 中已加载的
+      setReplyState(prev => {
+        const next = { ...prev }
+        for (const key of Object.keys(next)) {
+          if (next[key].replies?.some(r => r.id === commentId)) {
+            next[key] = {
+              ...next[key],
+              replies: next[key].replies.map(r => r.id === commentId ? { ...r, content } : r),
+            }
+          }
+        }
+        return next
+      })
+      setEditingId(null)
+      setEditText('')
+    } catch (e) {
+      alert(t('workshop.editFailed') + e.message)
+    }
+  }
+
   const handleLoadReplies = async (commentId) => {
     const rs = replyState[commentId] || { page: 0, replies: [], hasMore: true }
     const nextPage = rs.page + 1
@@ -289,20 +332,46 @@ export default function CommentSection({ modId, scrollToCommentId }) {
 
                 {/* 一楼内容（Markdown） */}
                 <div className={styles.commentContent}>
-                  <MarkdownContent markdown={c.content} />
+                  {editingId === c.id ? (
+                    <Textarea
+                      className={styles.textarea}
+                      value={editText}
+                      onChange={(_, d) => setEditText(d.value)}
+                      maxLength={2000}
+                      resize="vertical"
+                    />
+                  ) : (
+                    <MarkdownContent markdown={c.content} />
+                  )}
                 </div>
 
                 {/* 一楼操作 */}
                 <div className={styles.actions}>
-                  {isLoggedIn && (
+                  {isLoggedIn && editingId !== c.id && (
                     <Button size="small" appearance="subtle" onClick={() =>
                       setReplyTo(replyTo?.parentId === c.id ? null : { parentId: c.id, authorName: c.author_name })
                     }>
                       {replyTo?.parentId === c.id ? t('workshop.cancelReply') : t('workshop.reply')}
                     </Button>
                   )}
+                  {user?.user_id && c.author_name === user.username && editingId !== c.id && (
+                    <Button size="small" appearance="subtle" icon={<Edit24Regular />} onClick={() => {
+                      setEditingId(c.id)
+                      setEditText(c.content)
+                    }} />
+                  )}
                   {user?.user_id && c.author_name === user.username && (
                     <Button size="small" appearance="subtle" icon={<Delete24Regular />} onClick={() => handleDelete(c.id)} />
+                  )}
+                  {editingId === c.id && (
+                    <>
+                      <Button size="small" appearance="primary" disabled={!editText.trim()} onClick={() => handleEdit(c.id)}>
+                        {t('workshop.save')}
+                      </Button>
+                      <Button size="small" appearance="subtle" onClick={() => { setEditingId(null); setEditText('') }}>
+                        {t('workshop.cancel')}
+                      </Button>
+                    </>
                   )}
                 </div>
 
@@ -317,18 +386,44 @@ export default function CommentSection({ modId, scrollToCommentId }) {
                           <Text className={styles.commentTime}>{r.created_at}</Text>
                         </div>
                         <div className={styles.commentContent}>
-                          <MarkdownContent markdown={r.content} />
+                          {editingId === r.id ? (
+                            <Textarea
+                              className={styles.textarea}
+                              value={editText}
+                              onChange={(_, d) => setEditText(d.value)}
+                              maxLength={2000}
+                              resize="vertical"
+                            />
+                          ) : (
+                            <MarkdownContent markdown={r.content} />
+                          )}
                         </div>
                         <div className={styles.actions}>
-                          {isLoggedIn && (
+                          {isLoggedIn && editingId !== r.id && (
                             <Button size="small" appearance="subtle" onClick={() =>
                               setReplyTo(replyTo?.parentId === r.id ? null : { parentId: r.id, authorName: r.author_name })
                             }>
                               {t('workshop.replyToUser', { name: r.author_name })}
                             </Button>
                           )}
+                          {user?.user_id && r.author_name === user.username && editingId !== r.id && (
+                            <Button size="small" appearance="subtle" icon={<Edit24Regular />} onClick={() => {
+                              setEditingId(r.id)
+                              setEditText(r.content)
+                            }} />
+                          )}
                           {user?.user_id && r.author_name === user.username && (
                             <Button size="small" appearance="subtle" icon={<Delete24Regular />} onClick={() => handleDelete(r.id)} />
+                          )}
+                          {editingId === r.id && (
+                            <>
+                              <Button size="small" appearance="primary" disabled={!editText.trim()} onClick={() => handleEdit(r.id)}>
+                                {t('workshop.save')}
+                              </Button>
+                              <Button size="small" appearance="subtle" onClick={() => { setEditingId(null); setEditText('') }}>
+                                {t('workshop.cancel')}
+                              </Button>
+                            </>
                           )}
                         </div>
                       </Card>

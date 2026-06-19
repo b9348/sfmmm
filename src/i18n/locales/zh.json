@@ -214,6 +214,7 @@
     "commentFailed": "评论失败：",
     "replyFailed": "回复失败：",
     "deleteFailed": "删除失败：",
+    "editFailed": "编辑失败：",
     "reply": "回复",
     "cancelReply": "取消回复",
     "replyToUser": "回复 {{name}}",

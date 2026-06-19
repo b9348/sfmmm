@@ -1214,6 +1214,43 @@ pub async fn db_get_replies(
 }
 
 #[tauri::command(rename_all = "snake_case")]
+pub async fn db_edit_comment(
+    state: tauri::State<'_, DbState>,
+    comment_id: u64,
+    author_id: u64,
+    content: String,
+) -> Result<ApiResponse, String> {
+    let pool = state.pool.clone();
+    tokio::task::spawn_blocking(move || {
+        let mut conn = pool.get_conn().map_err(|e| e.to_string())?;
+        let content = content.trim().to_string();
+
+        if content.is_empty() || content.len() > 2000 {
+            return Ok(ApiResponse::err("Comment must be between 1 and 2000 characters"));
+        }
+
+        let owner: Option<(u64,)> = conn.exec_first(
+            "SELECT author_id FROM mod_comments WHERE id = ?", (comment_id,)
+        ).map_err(|e| e.to_string())?;
+
+        match owner {
+            Some((aid,)) if aid == author_id => {
+                conn.exec_drop(
+                    "UPDATE mod_comments SET content = ? WHERE id = ?",
+                    (&content, comment_id),
+                ).map_err(|e| e.to_string())?;
+                Ok(ApiResponse::ok_val(serde_json::json!({
+                    "comment_id": comment_id,
+                    "content": content,
+                }), "Comment updated"))
+            }
+            Some(_) => Ok(ApiResponse::err("You can only edit your own comments")),
+            None => Ok(ApiResponse::err("Comment not found")),
+        }
+    }).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command(rename_all = "snake_case")]
 pub async fn db_delete_comment(
     state: tauri::State<'_, DbState>,
     comment_id: u64,

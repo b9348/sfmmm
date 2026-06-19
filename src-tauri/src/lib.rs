@@ -672,7 +672,7 @@ pub fn run() {
             db::db_delete_mod_file,
             db::db_get_imgbed_config,
             db::db_get_version,
-            db::db_add_comment, db::db_get_comments, db::db_get_replies, db::db_delete_comment,
+            db::db_add_comment, db::db_get_comments, db::db_get_replies, db::db_edit_comment, db::db_delete_comment,
             db::db_check_updates,
             db::db_install_update,
             // 权限系统

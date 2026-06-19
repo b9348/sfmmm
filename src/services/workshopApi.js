@@ -260,6 +260,11 @@ export async function deleteComment({ comment_id, author_id }) {
   return { success: true }
 }
 
+export async function editComment({ comment_id, author_id, content }) {
+  const res = await dbCall('db_edit_comment', { comment_id, author_id, content })
+  return { success: true, data: res.data }
+}
+
 // ── 权限系统 ──
 
 export async function setModPermissions({ author_id, mod_id, mode, open_langs, allow_mod_info, allow_lang, apply_langs }) {

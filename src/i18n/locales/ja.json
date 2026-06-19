@@ -214,6 +214,7 @@
     "commentFailed": "コメント失敗：",
     "replyFailed": "返信失敗：",
     "deleteFailed": "削除失敗：",
+    "editFailed": "編集失敗：",
     "reply": "返信",
     "cancelReply": "返信をキャンセル",
     "replyToUser": "{{name}} に返信",
