@@ -7,7 +7,26 @@ allowed_tools: Read, Glob, Grep, Bash
 
 # Auto Version Bump & Release
 
-每次 push 到 `main` 分支时，GitHub Actions 自动 bump patch 版本、构建 NSIS 安装包、上传到图床 CDN、创建 GitHub Release，并将版本号和下载链接写入云端数据库 `version_config` 表。
+**版本号由本地 pre-commit hook 自动更新**，push 到 `main` 分支后 GitHub Actions 自动构建 NSIS 安装包、上传到图床 CDN、创建 GitHub Release，并将版本号和下载链接写入云端数据库 `version_config` 表。
+
+## 版本号更新机制
+
+### 本地 pre-commit hook（自动 bump）
+
+每次 commit 时，`.git/hooks/pre-commit` 会自动：
+1. 从 `src-tauri/tauri.conf.json` 读取当前版本
+2. 解析 semver，patch +1（例如 0.1.0 → 0.1.1）
+3. 更新以下 3 个文件中的版本号：
+
+   | 文件 | 字段 |
+   |------|------|
+   | `src-tauri/tauri.conf.json` | `version` |
+   | `src-tauri/Cargo.toml` | `version` (package) |
+   | `src/version.js` | `APP_VERSION` |
+
+4. 将更新的文件加入 staging area
+
+**跳过版本更新**：commit message 包含 `[skip version]` 即可跳过（适用于文档变更等无需发版的提交）。
 
 ## 工作流文件
 
@@ -20,37 +39,21 @@ allowed_tools: Read, Glob, Grep, Bash
 ## 工作流概览
 
 ```
-push → [Auto bump version] → [Build NSIS installer] → [Create Release & Update Cloud]
+push → [Build NSIS installer] → [Create Release & Update Cloud]
+                                 ↓
+                       ImgBed CDN 上传 + MySQL 直连更新
 ```
-                                                                       ↓
-                                                             ImgBed CDN 上传 + MySQL 直连更新
 
-### Job 1: Auto bump version (ubuntu-latest)
+### Job 1: Build NSIS installer (windows-latest)
 
-1. 检查 commit message subject 是否包含 `[skip version]`
-   - 包含 → 跳过 bump（用于文档变更等无需发版的提交）
-2. 从 `src-tauri/tauri.conf.json` 读取当前版本
-3. 解析 semver，patch +1（例如 0.1.0 → 0.1.1）
-4. 更新以下 3 个文件中的版本号：
+1. 从 `src-tauri/tauri.conf.json` 读取当前版本
+2. 创建 git tag（如不存在）
+3. 安装 pnpm、Node.js、Rust
+4. 注入 `DB_URL` 环境变量
+5. 执行 `pnpm tauri build`
+6. 产出的 `.exe` 上传为 artifact
 
-   | 文件 | 字段 |
-   |------|------|
-   | `src-tauri/tauri.conf.json` | `version` |
-   | `src-tauri/Cargo.toml` | `version` (package) |
-   | `src/modules/settings/GameSettings.jsx` | `CURRENT_VERSION` |
-
-5. commit: `chore: bump version to v{x.y.z} [skip version]`
-6. 创建 git tag: `v{x.y.z}`
-7. `git push origin main --tags`
-
-### Job 2: Build NSIS installer (windows-latest)
-
-- 安装 pnpm、Node.js、Rust
-- 注入 `DB_URL` 环境变量
-- 执行 `pnpm tauri build`
-- 产出的 `.exe` 上传为 artifact
-
-### Job 3: Create Release & Update Cloud (ubuntu-latest)
+### Job 2: Create Release & Update Cloud (ubuntu-latest)
 
 1. 使用 `softprops/action-gh-release` 创建 GitHub Release
    - 标题: `v{x.y.z}`
@@ -82,6 +85,13 @@ git commit -m "docs: update readme [skip version]"
 1. 本地修改版本号（3 个文件）
 2. commit + tag: `git tag v{x.y.z}`
 3. `git push origin main --tags`
+
+## 版本号同步
+
+由于版本号由本地 pre-commit hook 自动更新，本地和远程始终保持一致：
+- 每次 commit 时自动 bump patch 版本号
+- push 到 main 后 CI 直接构建发布
+- 不会再有 CI 创建额外 commit 导致的版本差异
 
 ## 所需的 GitHub Secrets
 
