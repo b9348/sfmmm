@@ -20,6 +20,7 @@ jobs:
 
       - name: Get version
         id: get_version
+        shell: bash
         run: |
           VERSION=$(node -p "require('./src-tauri/tauri.conf.json').version")
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
@@ -27,6 +28,7 @@ jobs:
           echo "Detected version: v$VERSION"
 
       - name: Create tag if not exists
+        shell: bash
         run: |
           TAG="${{ steps.get_version.outputs.tag_name }}"
           if ! git rev-parse "$TAG" >/dev/null 2>&1; then
