@@ -11,7 +11,7 @@ import {
   ArrowClockwise24Regular, Cloud24Regular,
   ArrowUpload24Regular,
 } from '@fluentui/react-icons'
-import { listMyMods, createMod, updateMod, deleteMod, uploadModFile, deleteModFile, login, register, getModForEdit, getModDetail, deleteModWithFiles, checkModKey } from '../../services/workshopApi'
+import { listMyMods, createMod, updateMod, deleteMod, uploadModFile, deleteModFile, login, register, getModForEdit, getModDetail, deleteModWithFiles, checkModKey, setModPermissions } from '../../services/workshopApi'
 import { useAuth } from '../../contexts/AuthContext'
 import { RichTextEditor, MarkdownEditor } from '../../components/common/RichTextEditor'
 import JSZip from 'jszip'
@@ -19,8 +19,9 @@ import { open } from '@tauri-apps/plugin-dialog'
 import { readFile, readDir } from '@tauri-apps/plugin-fs'
 import ModDetailPage from './ModDetailPage'
 import { ConfirmDialog } from '../../components'
+import PermissionSettings from './PermissionSettings'
 
-const LANGUAGES = [
+export const LANGUAGES = [
   { value: 'zh', label: '中文' },
   { value: 'en', label: 'English' },
   { value: 'ja', label: '日本語' },
@@ -209,6 +210,7 @@ function CreateModPage({ onClose, onCreated }) {
   const [modFiles, setModFiles] = useState({})
   const [uploadingLang, setUploadingLang] = useState('')
   const [fileDialogLang, setFileDialogLang] = useState(null)
+  const [permissions, setPermissions] = useState({ mode: 'author_only', open_langs: [], allow_mod_info: true, allow_lang: true, apply_langs: [] })
 
   const firstLang = Object.keys(translations)[0]
   const version = translations[firstLang]?.version || ''
@@ -373,6 +375,15 @@ function CreateModPage({ onClose, onCreated }) {
       const createResult = await createMod({ author_id: user.user_id, mod_key: modKey.trim(), translations, category })
       const newModId = createResult.data.mod_id
 
+      // 保存权限设置
+      if (permissions.mode !== 'author_only') {
+        try {
+          await setModPermissions({ author_id: user.user_id, mod_id: newModId, ...permissions })
+        } catch (e) {
+          console.warn('Failed to save permissions:', e)
+        }
+      }
+
       const fileLangs = Object.keys(modFiles).filter(lang => modFiles[lang] && modFiles[lang].length > 0)
       for (const lang of fileLangs) {
         setUploadingLang(lang)
@@ -437,6 +448,8 @@ function CreateModPage({ onClose, onCreated }) {
             <option value="composite">{t('workshop.category_composite')}</option>
           </Select>
         </div>
+
+        <PermissionSettings value={permissions} onChange={setPermissions} disabled={busy} />
 
         <div className={styles.langHeader}>
           <Text weight="semibold" size="small">{t('workshop.multiLang')}</Text>
@@ -564,7 +577,7 @@ function CreateModPage({ onClose, onCreated }) {
   )
 }
 
-function EditModPage({ mod: initialMod, onClose, onUpdated }) {
+export function EditModPage({ mod: initialMod, onClose, onUpdated }) {
   const styles = useStyles()
   const { t } = useTranslation()
   const { user } = useAuth()
@@ -624,6 +637,11 @@ function EditModPage({ mod: initialMod, onClose, onUpdated }) {
   const [uploadError, setUploadError] = useState('')
   const [fileDialogLang, setFileDialogLang] = useState(null)
   const [confirmRemoveLang, setConfirmRemoveLang] = useState(null)
+
+  // 权限设置
+  const pc = initialMod.perm_config || { mode: 'author_only', open_langs: [], allow_mod_info: true, allow_lang: true, apply_langs: [] }
+  const [permissions, setPermissions] = useState({ ...pc })
+  const userPermissions = initialMod.user_permissions || {}
 
   const handleSelectFolders = async (lang) => {
     try {
@@ -840,6 +858,23 @@ function EditModPage({ mod: initialMod, onClose, onUpdated }) {
 
       // 2. 更新翻译信息
       await updateMod({ author_id: user.user_id, mod_id: initialMod.id, category, translations })
+
+      // 3. 保存权限设置
+      if (userPermissions?.is_author && permissions.mode !== 'author_only') {
+        try {
+          await setModPermissions({ author_id: user.user_id, mod_id: initialMod.id, ...permissions })
+        } catch (e) {
+          console.warn('Failed to save permissions:', e)
+        }
+      } else if (userPermissions?.is_author) {
+        // 切回仅作者时，更新权限
+        try {
+          await setModPermissions({ author_id: user.user_id, mod_id: initialMod.id, mode: 'author_only', open_langs: null, allow_mod_info: true, allow_lang: true, apply_langs: null })
+        } catch (e) {
+          console.warn('Failed to reset permissions:', e)
+        }
+      }
+
       onUpdated()
       onClose()
     } catch (e) {
@@ -870,6 +905,8 @@ function EditModPage({ mod: initialMod, onClose, onUpdated }) {
             <option value="composite">{t('workshop.category_composite')}</option>
           </Select>
         </div>
+
+        <PermissionSettings value={permissions} onChange={setPermissions} disabled={busy || !userPermissions?.is_author} />
 
         <div className={styles.langHeader}>
           <Text weight="semibold" size="small">{t('workshop.multiLang')}</Text>

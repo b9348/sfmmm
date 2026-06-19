@@ -31,10 +31,11 @@ const useStyles = makeStyles({
   pageRow: { display: 'flex', justifyContent: 'center', gap: '6px', marginTop: '12px', flexWrap: 'wrap' },
 })
 
-export default function CommentSection({ modId }) {
+export default function CommentSection({ modId, scrollToCommentId }) {
   const { t } = useTranslation()
   const styles = useStyles()
   const { user, isLoggedIn } = useAuth()
+  const commentRefs = useRef({})
 
   // 一楼分页
   const [comments, setComments] = useState([])
@@ -77,6 +78,26 @@ export default function CommentSection({ modId }) {
       fetchComments(1)
     }
   }, [fetchComments])
+
+  // 滚动到指定评论/回复
+  const scrollTimerRef = useRef(null)
+  useEffect(() => {
+    if (!scrollToCommentId || loading) return
+    // 延迟等待 DOM 渲染完成
+    const tryScroll = (retries = 8) => {
+      const el = document.getElementById(`comment-${scrollToCommentId}`) || document.getElementById(`reply-${scrollToCommentId}`)
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+        el.style.transition = 'background-color 1s ease'
+        el.style.backgroundColor = tokens.colorBrandBackground2Hover
+        setTimeout(() => { el.style.backgroundColor = '' }, 2000)
+      } else if (retries > 0) {
+        scrollTimerRef.current = setTimeout(() => tryScroll(retries - 1), 300)
+      }
+    }
+    tryScroll()
+    return () => { if (scrollTimerRef.current) clearTimeout(scrollTimerRef.current) }
+  }, [scrollToCommentId, loading])
 
   const handleSubmitComment = async () => {
     const content = newComment.trim()
@@ -258,7 +279,7 @@ export default function CommentSection({ modId }) {
             const isExpanded = rs.expanded
 
             return (
-              <Card key={c.id} className={styles.commentItem}>
+              <Card key={c.id} id={`comment-${c.id}`} className={styles.commentItem}>
                 {/* ── 一楼头部 ── */}
                 <div className={styles.commentHeader}>
                   <Avatar name={c.author_name} size={20} />
@@ -289,7 +310,7 @@ export default function CommentSection({ modId }) {
                 {isExpanded && allReplies.length > 0 && (
                   <div className={styles.replyList}>
                     {allReplies.map(r => (
-                      <Card key={r.id} className={styles.replyItem}>
+                      <Card key={r.id} id={`reply-${r.id}`} className={styles.replyItem}>
                         <div className={styles.commentHeader}>
                           <Avatar name={r.author_name} size={16} />
                           <Text weight="semibold" size={200}>{r.author_name}</Text>

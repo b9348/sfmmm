@@ -93,6 +93,124 @@ fn val_to_i64(v: &Value) -> i64 {
     }
 }
 
+// ── 权限辅助 ──────────────────────────────────────────────
+
+/// 查询用户对某个 mod 的编辑权限
+/// 返回 JSON: { is_author, can_edit_mod_info, can_edit_all_langs, editable_langs, can_apply_mod_info, can_apply_lang, applyable_langs, mode }
+fn get_user_permissions<C: Queryable>(
+    conn: &mut C,
+    mod_id: u64,
+    user_id: u64,
+) -> Result<serde_json::Value, String> {
+    let owner: Option<(u64,)> = conn.exec_first(
+        "SELECT author_id FROM mods WHERE id = ?", (mod_id,)
+    ).map_err(|e| e.to_string())?;
+    let (author_id,) = owner.ok_or("Mod not found")?;
+
+    let is_author = author_id == user_id;
+    if is_author {
+        return Ok(serde_json::json!({
+            "is_author": true,
+            "can_edit_mod_info": true,
+            "can_edit_all_langs": true,
+            "editable_langs": null,
+            "can_apply_mod_info": false,
+            "can_apply_lang": false,
+            "applyable_langs": null,
+            "mode": "author"
+        }));
+    }
+
+    // 读取权限设置（不存在则默认仅作者）
+    let perm: Option<(String, Option<String>, bool, bool, Option<String>)> = conn.exec_first(
+        "SELECT mode, open_langs, allow_mod_info, allow_lang, apply_langs FROM mod_permissions WHERE mod_id = ?",
+        (mod_id,)
+    ).map_err(|e| e.to_string())?;
+
+    let (mode, open_langs_json, allow_mod_info, allow_lang, apply_langs_json) = match perm {
+        Some(p) => p,
+        None => return Ok(serde_json::json!({
+            "is_author": false,
+            "can_edit_mod_info": false,
+            "can_edit_all_langs": false,
+            "editable_langs": null,
+            "can_apply_mod_info": false,
+            "can_apply_lang": false,
+            "applyable_langs": null,
+            "mode": "author_only"
+        })),
+    };
+
+    // 查询协作者记录
+    let mut collab_rows: Vec<Vec<Value>> = Vec::new();
+    conn.exec_map(
+        "SELECT scope, target_lang FROM mod_collaborators WHERE mod_id = ? AND user_id = ?",
+        (mod_id, user_id),
+        |row: Row| { collab_rows.push(row.unwrap()); }
+    ).map_err(|e| e.to_string())?;
+
+    let mut can_edit_info = false;
+    let mut can_edit_all_langs = false;
+    let mut editable_langs: Vec<String> = Vec::new();
+
+    for row in &collab_rows {
+        let scope = val_to_string(row[0].clone());
+        match scope.as_str() {
+            "mod_info" => can_edit_info = true,
+            "lang_all" => can_edit_all_langs = true,
+            "lang_specific" => {
+                let lang = val_to_string(row[1].clone());
+                if !lang.is_empty() && !editable_langs.contains(&lang) {
+                    editable_langs.push(lang);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    match mode.as_str() {
+        "open" => Ok(serde_json::json!({
+            "is_author": false, "can_edit_mod_info": true, "can_edit_all_langs": true,
+            "editable_langs": null, "can_apply_mod_info": false, "can_apply_lang": false,
+            "applyable_langs": null, "mode": "open"
+        })),
+        "open_lang" => {
+            let open_langs: Vec<String> = open_langs_json
+                .and_then(|j| serde_json::from_str::<Vec<String>>(&j).ok())
+                .unwrap_or_default();
+            Ok(serde_json::json!({
+                "is_author": false,
+                "can_edit_mod_info": can_edit_info,
+                "can_edit_all_langs": open_langs.is_empty(),
+                "editable_langs": if open_langs.is_empty() { serde_json::Value::Null } else { serde_json::json!(open_langs) },
+                "can_apply_mod_info": false, "can_apply_lang": false,
+                "applyable_langs": null, "mode": "open_lang"
+            }))
+        }
+        "apply" | _ => {
+            let apply_langs: Vec<String> = apply_langs_json
+                .and_then(|j| serde_json::from_str::<Vec<String>>(&j).ok())
+                .unwrap_or_default();
+            Ok(serde_json::json!({
+                "is_author": false,
+                "can_edit_mod_info": can_edit_info,
+                "can_edit_all_langs": can_edit_all_langs,
+                "editable_langs": if editable_langs.is_empty() && !can_edit_all_langs {
+                    serde_json::Value::Null
+                } else if can_edit_all_langs {
+                    serde_json::Value::Null
+                } else {
+                    serde_json::json!(editable_langs)
+                },
+                "can_apply_mod_info": allow_mod_info && !can_edit_info,
+                "can_apply_lang": allow_lang && !can_edit_all_langs,
+                "applyable_langs": if apply_langs.is_empty() { serde_json::Value::Null } else { serde_json::json!(apply_langs) },
+                "mode": "apply"
+            }))
+        }
+    }
+}
+
 // ── Tauri 命令 ──────────────────────────────────────────────
 
 #[tauri::command(rename_all = "snake_case")]
@@ -427,6 +545,7 @@ pub async fn db_get_mod_detail(
     state: tauri::State<'_, DbState>,
     id: u64,
     lang: Option<String>,
+    user_id: Option<u64>,
 ) -> Result<ApiResponse, String> {
     let pool = state.pool.clone();
     tokio::task::spawn_blocking(move || {
@@ -472,6 +591,13 @@ pub async fn db_get_mod_detail(
                 ).map_err(|e| e.to_string())?;
 
                 let mid = val_to_i64(&vals[0]) as u64;
+
+                let user_permissions = if let Some(uid) = user_id {
+                    get_user_permissions(&mut conn, mid, uid)?
+                } else {
+                    serde_json::json!({ "is_author": false, "can_edit_mod_info": false, "can_edit_all_langs": false, "editable_langs": null, "can_apply_mod_info": false, "can_apply_lang": false, "applyable_langs": null, "mode": "author_only" })
+                };
+
                 Ok(ApiResponse::ok_val(serde_json::json!({
                     "mod": {
                         "id": mid,
@@ -488,6 +614,7 @@ pub async fn db_get_mod_detail(
                         "files": files,
                         "created_at": val_to_string(vals[5].clone()),
                         "updated_at": val_to_string(vals[6].clone()),
+                        "user_permissions": user_permissions,
                     }
                 }), "OK"))
             }
@@ -500,75 +627,100 @@ pub async fn db_get_mod_detail(
 pub async fn db_get_mod_for_edit(
     state: tauri::State<'_, DbState>,
     id: u64,
-    author_id: u64,
+    user_id: u64,
 ) -> Result<ApiResponse, String> {
     let pool = state.pool.clone();
     tokio::task::spawn_blocking(move || {
         let mut conn = pool.get_conn().map_err(|e| e.to_string())?;
 
-        // 检查作者
-        let owner: Option<(u64,)> = conn.exec_first(
-            "SELECT author_id FROM mods WHERE id = ?", (id,)
+        // 检查 mod 存在
+        let mod_row: Option<(u64, String, String, String)> = conn.exec_first(
+            "SELECT author_id, mod_id, version, category FROM mods WHERE id = ?", (id,)
         ).map_err(|e| e.to_string())?;
 
-        match owner {
-            Some((aid,)) if aid == author_id => {
-                // 获取所有翻译
-                let mut translations: Vec<serde_json::Value> = Vec::new();
-                conn.exec_map(
-                    "SELECT lang_code, name, description, instructions, instructions_format, changelog, version FROM mod_translations WHERE mod_id = ?",
-                    (id,),
-                    |row: Row| {
-                        let r: Vec<Value> = row.unwrap();
-                        translations.push(serde_json::json!({
-                            "lang": val_to_string(r[0].clone()),
-                            "name": val_to_string(r[1].clone()),
-                            "description": val_to_string(r[2].clone()),
-                            "instructions": val_to_string(r[3].clone()),
-                            "instructions_format": val_to_string(r[4].clone()),
-                            "changelog": val_to_string(r[5].clone()),
-                            "version": val_to_string(r[6].clone()),
-                        }));
-                    }
-                ).map_err(|e| e.to_string())?;
+        let (author_id, mod_key, _ver, cat) = match mod_row {
+            Some(r) => r,
+            None => return Ok(ApiResponse::err("Mod not found")),
+        };
 
-                // 获取文件
-                let mut files: Vec<serde_json::Value> = Vec::new();
-                conn.exec_map(
-                    "SELECT lang_code, file_url, file_name, file_size, file_hash, version, created_at FROM mod_files WHERE mod_id = ?", (id,),
-                    |row: Row| {
-                        let r: Vec<Value> = row.unwrap();
-                        files.push(serde_json::json!({
-                            "lang_code": val_to_string(r[0].clone()),
-                            "file_url": val_to_string(r[1].clone()),
-                            "file_name": val_to_string(r[2].clone()),
-                            "file_size": val_to_i64(&r[3]),
-                            "file_hash": match r[4].clone() { Value::Bytes(b) if !b.is_empty() => Some(String::from_utf8_lossy(&b).to_string()), _ => None },
-                            "version": val_to_string(r[5].clone()),
-                            "created_at": val_to_string(r[6].clone()),
-                        }));
-                    }
-                ).map_err(|e| e.to_string())?;
+        // 查权限
+        let user_permissions = get_user_permissions(&mut conn, id, user_id)?;
+        let can_edit = user_permissions["can_edit_mod_info"].as_bool().unwrap_or(false)
+            || user_permissions["can_edit_all_langs"].as_bool().unwrap_or(false)
+            || user_permissions["editable_langs"].as_array().map(|a| !a.is_empty()).unwrap_or(false);
 
-                // 获取 mod 基本信息
-                let info: Option<(String, String, String,)> = conn.exec_first(
-                    "SELECT mod_id, version, category FROM mods WHERE id = ?", (id,)
-                ).map_err(|e| e.to_string())?;
-
-                match info {
-                    Some((mk, _ver, cat)) => Ok(ApiResponse::ok_val(serde_json::json!({
-                        "id": id,
-                        "mod_key": mk,
-                        "category": cat,
-                        "files": files,
-                        "translations": translations,
-                    }), "OK")),
-                    None => Ok(ApiResponse::err("Mod not found")),
-                }
-            }
-            Some(_) => Ok(ApiResponse::err("You can only edit your own mods")),
-            None => Ok(ApiResponse::err("Mod not found")),
+        if author_id != user_id && !can_edit {
+            return Ok(ApiResponse::err("You don't have permission to edit this mod"));
         }
+
+        // 获取权限配置
+        let perm_config: serde_json::Value = {
+            let perm_row: Option<(String, Option<String>, bool, bool, Option<String>)> = conn.exec_first(
+                "SELECT mode, open_langs, allow_mod_info, allow_lang, apply_langs FROM mod_permissions WHERE mod_id = ?",
+                (id,),
+            ).map_err(|e| e.to_string())?;
+            match perm_row {
+                Some((m, ol, ami, al, al2)) => {
+                    let open_langs: Vec<String> = ol.and_then(|j| serde_json::from_str(&j).ok()).unwrap_or_default();
+                    let apply_langs: Vec<String> = al2.and_then(|j| serde_json::from_str(&j).ok()).unwrap_or_default();
+                    serde_json::json!({
+                        "mode": m, "open_langs": open_langs,
+                        "allow_mod_info": ami, "allow_lang": al, "apply_langs": apply_langs,
+                    })
+                }
+                None => serde_json::json!({
+                    "mode": "author_only", "open_langs": [],
+                    "allow_mod_info": true, "allow_lang": true, "apply_langs": [],
+                }),
+            }
+        };
+
+        // 获取所有翻译
+        let mut translations: Vec<serde_json::Value> = Vec::new();
+        conn.exec_map(
+            "SELECT lang_code, name, description, instructions, instructions_format, changelog, version FROM mod_translations WHERE mod_id = ?",
+            (id,),
+            |row: Row| {
+                let r: Vec<Value> = row.unwrap();
+                translations.push(serde_json::json!({
+                    "lang": val_to_string(r[0].clone()),
+                    "name": val_to_string(r[1].clone()),
+                    "description": val_to_string(r[2].clone()),
+                    "instructions": val_to_string(r[3].clone()),
+                    "instructions_format": val_to_string(r[4].clone()),
+                    "changelog": val_to_string(r[5].clone()),
+                    "version": val_to_string(r[6].clone()),
+                }));
+            }
+        ).map_err(|e| e.to_string())?;
+
+        // 获取文件
+        let mut files: Vec<serde_json::Value> = Vec::new();
+        conn.exec_map(
+            "SELECT lang_code, file_url, file_name, file_size, file_hash, version, created_at FROM mod_files WHERE mod_id = ?", (id,),
+            |row: Row| {
+                let r: Vec<Value> = row.unwrap();
+                files.push(serde_json::json!({
+                    "lang_code": val_to_string(r[0].clone()),
+                    "file_url": val_to_string(r[1].clone()),
+                    "file_name": val_to_string(r[2].clone()),
+                    "file_size": val_to_i64(&r[3]),
+                    "file_hash": match r[4].clone() { Value::Bytes(b) if !b.is_empty() => Some(String::from_utf8_lossy(&b).to_string()), _ => None },
+                    "version": val_to_string(r[5].clone()),
+                    "created_at": val_to_string(r[6].clone()),
+                }));
+            }
+        ).map_err(|e| e.to_string())?;
+
+        Ok(ApiResponse::ok_val(serde_json::json!({
+            "id": id,
+            "mod_key": mod_key,
+            "category": cat,
+            "files": files,
+            "translations": translations,
+            "user_permissions": user_permissions,
+            "perm_config": perm_config,
+        }), "OK"))
     }).await.map_err(|e| e.to_string())?
 }
 
@@ -634,62 +786,76 @@ pub async fn db_update_mod(
     tokio::task::spawn_blocking(move || {
         let mut conn = pool.get_conn().map_err(|e| e.to_string())?;
 
-        // 验证作者
-        let owner: Option<(u64,)> = conn.exec_first(
-            "SELECT author_id FROM mods WHERE id = ?", (mod_id,)
-        ).map_err(|e| e.to_string())?;
+        // 权限校验
+        let perm = get_user_permissions(&mut conn, mod_id, author_id)?;
+        let can_edit_mod_info = perm["can_edit_mod_info"].as_bool().unwrap_or(false);
+        let can_edit_all_langs = perm["can_edit_all_langs"].as_bool().unwrap_or(false);
 
-        match owner {
-            Some((aid,)) if aid == author_id => {
-                if let Some(ver) = &version {
-                    conn.exec_drop("UPDATE mods SET version = ? WHERE id = ?", (ver, mod_id))
-                        .map_err(|e| e.to_string())?;
-                }
-                if let Some(cat) = &category {
-                    conn.exec_drop("UPDATE mods SET category = ? WHERE id = ?", (cat, mod_id))
-                        .map_err(|e| e.to_string())?;
-                }
-
-                // 更新翻译（UPSERT）
-                for t in &translations {
-                    let lc = t.get("lang_code").and_then(|v| v.as_str()).unwrap_or("zh");
-                    let name = t.get("name").and_then(|v| v.as_str()).unwrap_or("");
-                    let desc = t.get("description").and_then(|v| v.as_str()).unwrap_or("");
-                    let instr = t.get("instructions").and_then(|v| v.as_str()).unwrap_or("");
-                    let instr_fmt = t.get("instructions_format").and_then(|v| v.as_str()).unwrap_or("markdown");
-                    let changelog = t.get("changelog").and_then(|v| v.as_str()).unwrap_or("");
-                    let t_ver = t.get("version").and_then(|v| v.as_str()).unwrap_or("1.0.0");
-
-                    // 先检查是否存在
-                    let existing: Option<(u64,)> = conn.exec_first(
-                        "SELECT id FROM mod_translations WHERE mod_id = ? AND lang_code = ?",
-                        (mod_id, lc),
-                    ).map_err(|e| e.to_string())?;
-
-                    if existing.is_some() {
-                        conn.exec_drop(
-                            "UPDATE mod_translations SET name = ?, description = ?, instructions = ?, instructions_format = ?, changelog = ?, version = ? WHERE mod_id = ? AND lang_code = ?",
-                            (name, desc, instr, instr_fmt, changelog, t_ver, mod_id, lc),
-                        ).map_err(|e| e.to_string())?;
-                    } else {
-                        conn.exec_drop(
-                            "INSERT INTO mod_translations (mod_id, lang_code, name, description, instructions, instructions_format, changelog, version) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                            (mod_id, lc, name, desc, instr, instr_fmt, changelog, t_ver),
-                        ).map_err(|e| e.to_string())?;
-                    }
-
-                    // 同步更新 mod_files 中对应语言文件的版本
-                    conn.exec_drop(
-                        "UPDATE mod_files SET version = ? WHERE mod_id = ? AND lang_code = ?",
-                        (t_ver, mod_id, lc),
-                    ).map_err(|e| e.to_string())?;
-                }
-
-                Ok(ApiResponse::ok_msg("Mod updated"))
-            }
-            Some(_) => Ok(ApiResponse::err("You can only edit your own mods")),
-            None => Ok(ApiResponse::err("Mod not found")),
+        if !can_edit_mod_info && !can_edit_all_langs {
+            return Ok(ApiResponse::err("You don't have permission to edit this mod"));
         }
+
+        // 更新 mod 基本信息（仅 author 或 mod_info 协作者）
+        if can_edit_mod_info {
+            if let Some(ver) = &version {
+                conn.exec_drop("UPDATE mods SET version = ? WHERE id = ?", (ver, mod_id))
+                    .map_err(|e| e.to_string())?;
+            }
+            if let Some(cat) = &category {
+                conn.exec_drop("UPDATE mods SET category = ? WHERE id = ?", (cat, mod_id))
+                    .map_err(|e| e.to_string())?;
+            }
+        }
+
+        // 更新翻译（检查每种语言是否有权限）
+        let editable_langs = perm["editable_langs"].as_array().map(|a| {
+            a.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect::<Vec<_>>()
+        });
+
+        for t in &translations {
+            let lc = t.get("lang_code").and_then(|v| v.as_str()).unwrap_or("zh");
+
+            // 如果没有全局语言权限，检查是否可编辑该特定语言
+            if !can_edit_all_langs {
+                let allowed = editable_langs.as_ref()
+                    .map(|langs| langs.contains(&lc.to_string()))
+                    .unwrap_or(false);
+                if !allowed {
+                    continue; // 跳过无权限的语言
+                }
+            }
+
+            let name = t.get("name").and_then(|v| v.as_str()).unwrap_or("");
+            let desc = t.get("description").and_then(|v| v.as_str()).unwrap_or("");
+            let instr = t.get("instructions").and_then(|v| v.as_str()).unwrap_or("");
+            let instr_fmt = t.get("instructions_format").and_then(|v| v.as_str()).unwrap_or("markdown");
+            let changelog = t.get("changelog").and_then(|v| v.as_str()).unwrap_or("");
+            let t_ver = t.get("version").and_then(|v| v.as_str()).unwrap_or("1.0.0");
+
+            let existing: Option<(u64,)> = conn.exec_first(
+                "SELECT id FROM mod_translations WHERE mod_id = ? AND lang_code = ?",
+                (mod_id, lc),
+            ).map_err(|e| e.to_string())?;
+
+            if existing.is_some() {
+                conn.exec_drop(
+                    "UPDATE mod_translations SET name = ?, description = ?, instructions = ?, instructions_format = ?, changelog = ?, version = ? WHERE mod_id = ? AND lang_code = ?",
+                    (name, desc, instr, instr_fmt, changelog, t_ver, mod_id, lc),
+                ).map_err(|e| e.to_string())?;
+            } else {
+                conn.exec_drop(
+                    "INSERT INTO mod_translations (mod_id, lang_code, name, description, instructions, instructions_format, changelog, version) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (mod_id, lc, name, desc, instr, instr_fmt, changelog, t_ver),
+                ).map_err(|e| e.to_string())?;
+            }
+
+            conn.exec_drop(
+                "UPDATE mod_files SET version = ? WHERE mod_id = ? AND lang_code = ?",
+                (t_ver, mod_id, lc),
+            ).map_err(|e| e.to_string())?;
+        }
+
+        Ok(ApiResponse::ok_msg("Mod updated"))
     }).await.map_err(|e| e.to_string())?
 }
 
@@ -754,43 +920,45 @@ pub async fn db_save_mod_file(
         let mut conn = pool.get_conn().map_err(|e| e.to_string())?;
         let ver = version.unwrap_or_else(|| "1.0.0".into());
 
-        // 验证作者
-        let owner: Option<(u64,)> = conn.exec_first(
-            "SELECT author_id FROM mods WHERE id = ?", (mod_id,)
+        // 权限校验（作者或可编辑该语言的协作者）
+        let perm = get_user_permissions(&mut conn, mod_id, author_id)?;
+        let is_author = perm["is_author"].as_bool().unwrap_or(false);
+        let can_edit_all_langs = perm["can_edit_all_langs"].as_bool().unwrap_or(false);
+        let editable_langs = perm["editable_langs"].as_array()
+            .map(|a| a.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect::<Vec<_>>())
+            .unwrap_or_default();
+
+        let can_edit_lang = is_author || can_edit_all_langs || editable_langs.contains(&lang_code);
+        if !can_edit_lang {
+            return Ok(ApiResponse::err("You don't have permission to upload files for this language"));
+        }
+
+        // UPSERT
+        let existing: Option<(u64,)> = conn.exec_first(
+            "SELECT id FROM mod_files WHERE mod_id = ? AND lang_code = ?",
+            (mod_id, &lang_code),
         ).map_err(|e| e.to_string())?;
 
-        match owner {
-            Some((aid,)) if aid == author_id => {
-                // UPSERT
-                let existing: Option<(u64,)> = conn.exec_first(
-                    "SELECT id FROM mod_files WHERE mod_id = ? AND lang_code = ?",
-                    (mod_id, &lang_code),
-                ).map_err(|e| e.to_string())?;
-
-                if existing.is_some() {
-                    conn.exec_drop(
-                        "UPDATE mod_files SET file_url = ?, file_name = ?, file_size = ?, file_hash = ?, version = ? WHERE mod_id = ? AND lang_code = ?",
-                        (&file_url, &file_name, file_size, &file_hash, &ver, mod_id, &lang_code),
-                    ).map_err(|e| e.to_string())?;
-                } else {
-                    conn.exec_drop(
-                        "INSERT INTO mod_files (mod_id, lang_code, file_url, file_name, file_size, file_hash, version) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                        (mod_id, &lang_code, &file_url, &file_name, file_size, &file_hash, &ver),
-                    ).map_err(|e| e.to_string())?;
-                }
-
-                Ok(ApiResponse::ok_val(serde_json::json!({
-                    "lang_code": lang_code,
-                    "file_url": file_url,
-                    "file_name": file_name,
-                    "file_size": file_size,
-                    "file_hash": file_hash,
-                    "version": ver,
-                }), "File saved"))
-            }
-            Some(_) => Ok(ApiResponse::err("You can only upload files for your own mods")),
-            None => Ok(ApiResponse::err("Mod not found")),
+        if existing.is_some() {
+            conn.exec_drop(
+                "UPDATE mod_files SET file_url = ?, file_name = ?, file_size = ?, file_hash = ?, version = ? WHERE mod_id = ? AND lang_code = ?",
+                (&file_url, &file_name, file_size, &file_hash, &ver, mod_id, &lang_code),
+            ).map_err(|e| e.to_string())?;
+        } else {
+            conn.exec_drop(
+                "INSERT INTO mod_files (mod_id, lang_code, file_url, file_name, file_size, file_hash, version) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (mod_id, &lang_code, &file_url, &file_name, file_size, &file_hash, &ver),
+            ).map_err(|e| e.to_string())?;
         }
+
+        Ok(ApiResponse::ok_val(serde_json::json!({
+            "lang_code": lang_code,
+            "file_url": file_url,
+            "file_name": file_name,
+            "file_size": file_size,
+            "file_hash": file_hash,
+            "version": ver,
+        }), "File saved"))
     }).await.map_err(|e| e.to_string())?
 }
 
@@ -805,23 +973,25 @@ pub async fn db_delete_mod_file(
     tokio::task::spawn_blocking(move || {
         let mut conn = pool.get_conn().map_err(|e| e.to_string())?;
 
-        // 验证作者
-        let owner: Option<(u64,)> = conn.exec_first(
-            "SELECT author_id FROM mods WHERE id = ?", (mod_id,)
+        // 权限校验
+        let perm = get_user_permissions(&mut conn, mod_id, author_id)?;
+        let is_author = perm["is_author"].as_bool().unwrap_or(false);
+        let can_edit_all_langs = perm["can_edit_all_langs"].as_bool().unwrap_or(false);
+        let editable_langs = perm["editable_langs"].as_array()
+            .map(|a| a.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect::<Vec<_>>())
+            .unwrap_or_default();
+
+        let can_edit_lang = is_author || can_edit_all_langs || editable_langs.contains(&lang_code);
+        if !can_edit_lang {
+            return Ok(ApiResponse::err("You don't have permission to delete files for this language"));
+        }
+
+        conn.exec_drop(
+            "DELETE FROM mod_files WHERE mod_id = ? AND lang_code = ?",
+            (mod_id, &lang_code),
         ).map_err(|e| e.to_string())?;
 
-        match owner {
-            Some((aid,)) if aid == author_id => {
-                conn.exec_drop(
-                    "DELETE FROM mod_files WHERE mod_id = ? AND lang_code = ?",
-                    (mod_id, &lang_code),
-                ).map_err(|e| e.to_string())?;
-
-                Ok(ApiResponse::ok_msg("File deleted"))
-            }
-            Some(_) => Ok(ApiResponse::err("You can only delete files for your own mods")),
-            None => Ok(ApiResponse::err("Mod not found")),
-        }
+        Ok(ApiResponse::ok_msg("File deleted"))
     }).await.map_err(|e| e.to_string())?
 }
 
@@ -845,12 +1015,13 @@ pub async fn db_add_comment(
         }
 
         // 验证 mod 存在
-        let mod_exists: Option<(u64,)> = conn.exec_first(
-            "SELECT id FROM mods WHERE id = ?", (mod_id,)
+        let mod_exists: Option<(u64, u64)> = conn.exec_first(
+            "SELECT id, author_id FROM mods WHERE id = ?", (mod_id,)
         ).map_err(|e| e.to_string())?;
-        if mod_exists.is_none() {
-            return Ok(ApiResponse::err("Mod not found"));
-        }
+        let mod_author_id = match mod_exists {
+            Some((_, aid)) => aid,
+            None => return Ok(ApiResponse::err("Mod not found")),
+        };
 
         // 如果 parent_id 存在，验证它属于同一个 mod
         if let Some(pid) = parent_id {
@@ -870,6 +1041,15 @@ pub async fn db_add_comment(
         ).map_err(|e| e.to_string())?;
 
         let new_id = conn.last_insert_id();
+
+        // 触发通知（如果不是给自己的 mod 评论）
+        if mod_author_id != author_id {
+            let notif_type = if parent_id.is_some() { "new_reply" } else { "new_comment" };
+            conn.exec_drop(
+                "INSERT INTO mod_notifications (user_id, mod_id, type, comment_id) VALUES (?, ?, ?, ?)",
+                (mod_author_id, mod_id, notif_type, new_id),
+            ).map_err(|e| e.to_string())?;
+        }
 
         Ok(ApiResponse::ok_val(serde_json::json!({
             "comment_id": new_id,
@@ -1155,4 +1335,392 @@ pub async fn db_install_update(url: String) -> Result<String, String> {
         .map_err(|e| format!("启动安装程序失败: {}", e))?;
 
     Ok("安装程序已启动，应用将自动更新".into())
+}
+
+// ── 权限设置 ──────────────────────────────────────────────
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn db_set_mod_permissions(
+    state: tauri::State<'_, DbState>,
+    author_id: u64,
+    mod_id: u64,
+    mode: String,
+    open_langs: Option<Vec<String>>,
+    allow_mod_info: Option<bool>,
+    allow_lang: Option<bool>,
+    apply_langs: Option<Vec<String>>,
+) -> Result<ApiResponse, String> {
+    let pool = state.pool.clone();
+    tokio::task::spawn_blocking(move || {
+        let mut conn = pool.get_conn().map_err(|e| e.to_string())?;
+
+        let owner: Option<(u64,)> = conn.exec_first(
+            "SELECT author_id FROM mods WHERE id = ?", (mod_id,)
+        ).map_err(|e| e.to_string())?;
+        match owner {
+            Some((aid,)) if aid != author_id => return Ok(ApiResponse::err("Only the author can set permissions")),
+            None => return Ok(ApiResponse::err("Mod not found")),
+            _ => {}
+        }
+
+        let open_langs_json = open_langs.map(|v| serde_json::json!(v).to_string());
+        let apply_langs_json = apply_langs.map(|v| serde_json::json!(v).to_string());
+        let allow_mod = allow_mod_info.unwrap_or(true);
+        let allow_l = allow_lang.unwrap_or(true);
+
+        // UPSERT
+        let existing: Option<(u64,)> = conn.exec_first(
+            "SELECT mod_id FROM mod_permissions WHERE mod_id = ?", (mod_id,)
+        ).map_err(|e| e.to_string())?;
+
+        if existing.is_some() {
+            conn.exec_drop(
+                "UPDATE mod_permissions SET mode = ?, open_langs = ?, allow_mod_info = ?, allow_lang = ?, apply_langs = ? WHERE mod_id = ?",
+                (&mode, &open_langs_json, allow_mod, allow_l, &apply_langs_json, mod_id),
+            ).map_err(|e| e.to_string())?;
+        } else {
+            conn.exec_drop(
+                "INSERT INTO mod_permissions (mod_id, mode, open_langs, allow_mod_info, allow_lang, apply_langs) VALUES (?, ?, ?, ?, ?, ?)",
+                (mod_id, &mode, &open_langs_json, allow_mod, allow_l, &apply_langs_json),
+            ).map_err(|e| e.to_string())?;
+        }
+
+        Ok(ApiResponse::ok_msg("Permissions updated"))
+    }).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn db_submit_application(
+    state: tauri::State<'_, DbState>,
+    mod_id: u64,
+    user_id: u64,
+    scope: String,
+    target_lang: Option<String>,
+    reason: Option<String>,
+) -> Result<ApiResponse, String> {
+    let pool = state.pool.clone();
+    tokio::task::spawn_blocking(move || {
+        let mut conn = pool.get_conn().map_err(|e| e.to_string())?;
+
+        // 检查 mod 是否存在
+        let mod_exists: Option<(u64,)> = conn.exec_first(
+            "SELECT id FROM mods WHERE id = ?", (mod_id,)
+        ).map_err(|e| e.to_string())?;
+        if mod_exists.is_none() {
+            return Ok(ApiResponse::err("Mod not found"));
+        }
+
+        // 检查是否已有待处理的申请
+        let pending: Option<(u64,)> = conn.exec_first(
+            "SELECT id FROM edit_applications WHERE mod_id = ? AND applicant_id = ? AND scope = ? AND (target_lang IS NULL OR target_lang = ?) AND status = 'pending'",
+            (mod_id, user_id, &scope, &target_lang),
+        ).map_err(|e| e.to_string())?;
+        if pending.is_some() {
+            return Ok(ApiResponse::err("You already have a pending application for this scope"));
+        }
+
+        let reason_str = reason.unwrap_or_default();
+        conn.exec_drop(
+            "INSERT INTO edit_applications (mod_id, applicant_id, scope, target_lang, reason, status) VALUES (?, ?, ?, ?, ?, 'pending')",
+            (mod_id, user_id, &scope, &target_lang, &reason_str),
+        ).map_err(|e| e.to_string())?;
+
+        Ok(ApiResponse::ok_msg("Application submitted"))
+    }).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn db_list_applications(
+    state: tauri::State<'_, DbState>,
+    mod_id: Option<u64>,
+    user_id: Option<u64>,
+    role: Option<String>,        // "author" | "applicant" | "all"
+    status: Option<String>,       // "pending" | "approved" | "denied" | null = all
+    page: Option<u64>,
+    page_size: Option<u64>,
+) -> Result<ApiResponse, String> {
+    let pool = state.pool.clone();
+    tokio::task::spawn_blocking(move || {
+        let mut conn = pool.get_conn().map_err(|e| e.to_string())?;
+        let page = page.unwrap_or(1).max(1);
+        let page_size = page_size.unwrap_or(20).min(100);
+        let offset = (page - 1) * page_size;
+
+        let mut where_clauses: Vec<String> = Vec::new();
+        let mut params: Vec<mysql::Value> = Vec::new();
+
+        if let Some(mid) = mod_id {
+            where_clauses.push(format!("a.mod_id = ?"));
+            params.push(mysql::Value::UInt(mid));
+        }
+        if let Some(uid) = user_id {
+            if role.as_deref() == Some("author") {
+                // 用户是作者的 mods
+                where_clauses.push(format!("m.author_id = ?"));
+            } else {
+                where_clauses.push(format!("a.applicant_id = ?"));
+            }
+            params.push(mysql::Value::UInt(uid));
+        }
+        if let Some(s) = status {
+            if !s.is_empty() {
+                where_clauses.push(format!("a.status = ?"));
+                params.push(mysql::Value::Bytes(s.into_bytes()));
+            }
+        }
+
+        let where_sql = if where_clauses.is_empty() {
+            String::new()
+        } else {
+            format!("WHERE {}", where_clauses.join(" AND "))
+        };
+
+        // 总数
+        let count_sql = format!(
+            "SELECT COUNT(*) FROM edit_applications a JOIN mods m ON a.mod_id = m.id {}",
+            where_sql
+        );
+        let total: i64 = conn.exec_first(&count_sql, params.clone())
+            .map_err(|e| e.to_string())?.unwrap_or(0i64);
+
+        // 查询列表
+        let mut rows: Vec<Vec<Value>> = Vec::new();
+        let query_sql = format!(
+            "SELECT a.id, a.mod_id, m.mod_id as mod_key, a.applicant_id, u.username as applicant_name,
+                    a.scope, a.target_lang, a.reason, a.status, a.created_at
+             FROM edit_applications a
+             JOIN mods m ON a.mod_id = m.id
+             JOIN users u ON a.applicant_id = u.id
+             {} ORDER BY a.created_at DESC LIMIT ? OFFSET ?",
+            where_sql
+        );
+        let mut query_params = params.clone();
+        query_params.push(mysql::Value::UInt(page_size));
+        query_params.push(mysql::Value::UInt(offset));
+
+        conn.exec_map(&query_sql, query_params, |row: Row| {
+            rows.push(row.unwrap());
+        }).map_err(|e| e.to_string())?;
+
+        let items: Vec<serde_json::Value> = rows.into_iter().map(|r| {
+            serde_json::json!({
+                "id": val_to_i64(&r[0]),
+                "mod_id": val_to_i64(&r[1]),
+                "mod_key": val_to_string(r[2].clone()),
+                "applicant_id": val_to_i64(&r[3]),
+                "applicant_name": val_to_string(r[4].clone()),
+                "scope": val_to_string(r[5].clone()),
+                "target_lang": val_to_string(r[6].clone()),
+                "reason": val_to_string(r[7].clone()),
+                "status": val_to_string(r[8].clone()),
+                "created_at": val_to_string(r[9].clone()),
+            })
+        }).collect();
+
+        Ok(ApiResponse::ok_list(items, total, page, page_size))
+    }).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn db_handle_application(
+    state: tauri::State<'_, DbState>,
+    author_id: u64,
+    app_id: u64,
+    action: String, // "approve" | "deny"
+) -> Result<ApiResponse, String> {
+    let pool = state.pool.clone();
+    tokio::task::spawn_blocking(move || {
+        let mut conn = pool.get_conn().map_err(|e| e.to_string())?;
+
+        // 获取申请信息
+        let app: Option<(u64, u64, String, Option<String>)> = conn.exec_first(
+            "SELECT mod_id, applicant_id, scope, target_lang FROM edit_applications WHERE id = ?",
+            (app_id,),
+        ).map_err(|e| e.to_string())?;
+
+        let (mod_id, applicant_id, scope, target_lang) = match app {
+            Some(a) => a,
+            None => return Ok(ApiResponse::err("Application not found")),
+        };
+
+        // 验证操作者是 mod 作者
+        let owner: Option<(u64,)> = conn.exec_first(
+            "SELECT author_id FROM mods WHERE id = ?", (mod_id,)
+        ).map_err(|e| e.to_string())?;
+        match owner {
+            Some((aid,)) if aid == author_id => {}
+            _ => return Ok(ApiResponse::err("Only the mod author can handle applications")),
+        }
+
+        let db_status = match action.as_str() {
+            "approve" => "approved",
+            "deny" => "denied",
+            _ => return Ok(ApiResponse::err("Invalid action, must be 'approve' or 'deny'")),
+        };
+
+        // 更新状态
+        conn.exec_drop(
+            "UPDATE edit_applications SET status = ?, handled_by = ? WHERE id = ?",
+            (db_status, author_id, app_id),
+        ).map_err(|e| e.to_string())?;
+
+        // 批准时自动创建 collaborator 记录
+        if action == "approve" {
+            let existing: Option<(u64,)> = conn.exec_first(
+                "SELECT id FROM mod_collaborators WHERE mod_id = ? AND user_id = ? AND scope = ? AND (target_lang IS NULL OR target_lang = ?)",
+                (mod_id, applicant_id, &scope, &target_lang),
+            ).map_err(|e| e.to_string())?;
+
+            if existing.is_none() {
+                conn.exec_drop(
+                    "INSERT INTO mod_collaborators (mod_id, user_id, scope, target_lang) VALUES (?, ?, ?, ?)",
+                    (mod_id, applicant_id, &scope, &target_lang),
+                ).map_err(|e| e.to_string())?;
+            }
+        }
+
+        Ok(ApiResponse::ok_msg(if action == "approve" { "Application approved" } else { "Application denied" }))
+    }).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn db_get_unread_count(
+    state: tauri::State<'_, DbState>,
+    user_id: u64,
+) -> Result<ApiResponse, String> {
+    let pool = state.pool.clone();
+    tokio::task::spawn_blocking(move || {
+        let mut conn = pool.get_conn().map_err(|e| e.to_string())?;
+
+        // 待处理的申请数（用户是作者）
+        let pending_apps: i64 = conn.exec_first(
+            "SELECT COUNT(*) FROM edit_applications a JOIN mods m ON a.mod_id = m.id WHERE m.author_id = ? AND a.status = 'pending' AND a.is_read = 0",
+            (user_id,),
+        ).map_err(|e| e.to_string())?.unwrap_or(0i64);
+
+        // 未读的通知数
+        let unread_notifs: i64 = conn.exec_first(
+            "SELECT COUNT(*) FROM mod_notifications WHERE user_id = ? AND is_read = 0",
+            (user_id,),
+        ).map_err(|e| e.to_string())?.unwrap_or(0i64);
+
+        Ok(ApiResponse::ok_val(serde_json::json!({
+            "applications": pending_apps,
+            "notifications": unread_notifs,
+            "total": pending_apps + unread_notifs,
+        }), "OK"))
+    }).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn db_get_my_notifications(
+    state: tauri::State<'_, DbState>,
+    user_id: u64,
+    page: Option<u64>,
+    page_size: Option<u64>,
+) -> Result<ApiResponse, String> {
+    let pool = state.pool.clone();
+    tokio::task::spawn_blocking(move || {
+        let mut conn = pool.get_conn().map_err(|e| e.to_string())?;
+        let page = page.unwrap_or(1).max(1);
+        let page_size = page_size.unwrap_or(20).min(100);
+        let offset = (page - 1) * page_size;
+
+        let total: i64 = conn.exec_first(
+            "SELECT COUNT(*) FROM mod_notifications WHERE user_id = ?",
+            (user_id,),
+        ).map_err(|e| e.to_string())?.unwrap_or(0i64);
+
+        let mut rows: Vec<Vec<Value>> = Vec::new();
+        conn.exec_map(
+            "SELECT n.id, n.mod_id, m.mod_id as mod_key, n.type, n.comment_id, n.is_read, n.created_at,
+                    c.content as comment_content, u.username as comment_author
+             FROM mod_notifications n
+             JOIN mods m ON n.mod_id = m.id
+             LEFT JOIN mod_comments c ON n.comment_id = c.id
+             LEFT JOIN users u ON c.author_id = u.id
+             WHERE n.user_id = ?
+             ORDER BY n.created_at DESC
+             LIMIT ? OFFSET ?",
+            (user_id, page_size as i64, offset as i64),
+            |row: Row| { rows.push(row.unwrap()); }
+        ).map_err(|e| e.to_string())?;
+
+        let items: Vec<serde_json::Value> = rows.into_iter().map(|r| {
+            serde_json::json!({
+                "id": val_to_i64(&r[0]),
+                "mod_id": val_to_i64(&r[1]),
+                "mod_key": val_to_string(r[2].clone()),
+                "type": val_to_string(r[3].clone()),
+                "comment_id": val_to_i64(&r[4]),
+                "is_read": val_to_i64(&r[5]) != 0,
+                "created_at": val_to_string(r[6].clone()),
+                "content": val_to_string(r[7].clone()),
+                "author_name": val_to_string(r[8].clone()),
+            })
+        }).collect();
+
+        Ok(ApiResponse::ok_list(items, total, page, page_size))
+    }).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn db_mark_read(
+    state: tauri::State<'_, DbState>,
+    user_id: u64,
+    target_type: Option<String>, // "application" | "notification" | null = all
+    ids: Option<Vec<u64>>,       // null = mark all as read
+) -> Result<ApiResponse, String> {
+    let pool = state.pool.clone();
+    tokio::task::spawn_blocking(move || {
+        let mut conn = pool.get_conn().map_err(|e| e.to_string())?;
+
+        if let Some(ttype) = &target_type {
+            match ttype.as_str() {
+                "application" => {
+                    if let Some(id_list) = &ids {
+                        for id in id_list {
+                            conn.exec_drop(
+                                "UPDATE edit_applications SET is_read = 1 WHERE id = ? AND mod_id IN (SELECT id FROM mods WHERE author_id = ?)",
+                                (id, user_id),
+                            ).map_err(|e| e.to_string())?;
+                        }
+                    } else {
+                        conn.exec_drop(
+                            "UPDATE edit_applications SET is_read = 1 WHERE mod_id IN (SELECT id FROM mods WHERE author_id = ?) AND is_read = 0",
+                            (user_id,),
+                        ).map_err(|e| e.to_string())?;
+                    }
+                }
+                "notification" => {
+                    if let Some(id_list) = &ids {
+                        for id in id_list {
+                            conn.exec_drop(
+                                "UPDATE mod_notifications SET is_read = 1 WHERE id = ? AND user_id = ?",
+                                (id, user_id),
+                            ).map_err(|e| e.to_string())?;
+                        }
+                    } else {
+                        conn.exec_drop(
+                            "UPDATE mod_notifications SET is_read = 1 WHERE user_id = ? AND is_read = 0",
+                            (user_id,),
+                        ).map_err(|e| e.to_string())?;
+                    }
+                }
+                _ => return Ok(ApiResponse::err("Invalid target type")),
+            }
+        } else {
+            // 全部标记已读
+            conn.exec_drop(
+                "UPDATE edit_applications SET is_read = 1 WHERE mod_id IN (SELECT id FROM mods WHERE author_id = ?) AND is_read = 0",
+                (user_id,),
+            ).map_err(|e| e.to_string())?;
+            conn.exec_drop(
+                "UPDATE mod_notifications SET is_read = 1 WHERE user_id = ? AND is_read = 0",
+                (user_id,),
+            ).map_err(|e| e.to_string())?;
+        }
+
+        Ok(ApiResponse::ok_msg("Marked as read"))
+    }).await.map_err(|e| e.to_string())?
 }

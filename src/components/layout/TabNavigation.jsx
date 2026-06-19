@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import APP_VERSION from '../../version.js'
 import {
@@ -37,6 +37,7 @@ import {
 } from '@fluentui/react-icons'
 import { login, register } from '../../services/workshopApi'
 import { useAuth } from '../../contexts/AuthContext'
+import { useNotification } from '../../contexts/NotificationContext'
 
 const useStyles = makeStyles({
   sidebar: {
@@ -249,12 +250,18 @@ export function TabNavigation({ value, onChange, isCollapsed, onToggleCollapse, 
   const styles = useStyles()
   const { t } = useTranslation()
   const { user, isLoggedIn, loginSuccess, logout } = useAuth()
+  const { unreadCount, refreshUnread } = useNotification()
   const [authOpen, setAuthOpen] = useState(false)
   const [isRegister, setIsRegister] = useState(false)
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  // 启动时查询一次未读通知数
+  useEffect(() => {
+    if (!isLoggedIn) { refreshUnread(null); return }
+    refreshUnread(user.user_id)
+  }, [isLoggedIn, user?.user_id, refreshUnread])
 
   const tabs = [
     { value: 'mods', label: t('nav.mods'), icon: BoxMultiple24Regular },
@@ -263,6 +270,7 @@ export function TabNavigation({ value, onChange, isCollapsed, onToggleCollapse, 
     // { value: 'saves', label: '存档', icon: Save24Regular },
     // { value: 'import-export', label: '导入/导出', icon: ArrowSwap24Regular },
     { value: 'workshop', label: t('nav.workshop'), icon: Cloud24Regular },
+    { value: 'apply', label: t('nav.apply'), icon: PersonAccounts24Regular },
     { value: 'settings', label: t('nav.settings'), icon: Settings24Regular },
   ]
 
@@ -411,6 +419,9 @@ export function TabNavigation({ value, onChange, isCollapsed, onToggleCollapse, 
                 >
                   {tab.label}
                 </span>
+                {tab.value === 'apply' && unreadCount > 0 && (
+                  <span className={styles.badge}>{unreadCount > 99 ? '99+' : unreadCount}</span>
+                )}
               </button>
             </Tooltip>
           )

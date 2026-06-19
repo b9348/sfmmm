@@ -7,8 +7,10 @@ import {
   ArrowClockwise24Regular,
 } from '@fluentui/react-icons'
 import { useTranslation } from 'react-i18next'
-import { listMods, getModDetail } from '../../services/workshopApi'
+import { listMods, getModDetail, getModForEdit } from '../../services/workshopApi'
 import ModDetailPage from './ModDetailPage'
+import { useAuth } from '../../contexts/AuthContext'
+import { EditModPage } from './MyMods'
 
 const CATEGORIES = [
   { value: 'v1', label: 'v1' },
@@ -108,9 +110,10 @@ const useStyles = makeStyles({
   },
 })
 
-export function BrowseMods() {
+export function BrowseMods({ initialModId, initialCommentId }) {
   const styles = useStyles()
   const { t } = useTranslation()
+  const { user } = useAuth()
   const [search, setSearch] = useState('')
   const [mods, setMods] = useState([])
   const [total, setTotal] = useState(0)
@@ -118,23 +121,34 @@ export function BrowseMods() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [detailMod, setDetailMod] = useState(null)
+  const [detailCommentId, setDetailCommentId] = useState(null)
   const [detailLoading, setDetailLoading] = useState(false)
+  const [editingMod, setEditingMod] = useState(null)
   const initialFetch = useRef(false)
 
-  // 从 URL hash 恢复详情页（Ctrl+R 刷新后）
+  // 从 URL hash 恢复详情页（Ctrl+R 刷新后）或从导航参数进入
   useEffect(() => {
-    const match = window.location.hash.match(/^#\/mod\/(\d+)/)
-    if (match) {
-      const modId = parseInt(match[1])
+    const modId = initialModId || (() => {
+      const match = window.location.hash.match(/^#\/mod\/(\d+)/)
+      return match ? parseInt(match[1]) : null
+    })()
+    const commentId = initialCommentId || (() => {
+      const match = window.location.hash.match(/[?&]comment=(\d+)/)
+      return match ? parseInt(match[1]) : null
+    })()
+    if (modId) {
       setDetailLoading(true)
-      getModDetail(modId, 'zh')
+      getModDetail(modId, 'zh', user?.user_id)
         .then(data => {
-          if (data.data?.mod) setDetailMod(data.data.mod)
+          if (data.data?.mod) {
+            setDetailMod(data.data.mod)
+            if (commentId) setDetailCommentId(commentId)
+          }
         })
         .catch(() => {})
         .finally(() => setDetailLoading(false))
     }
-  }, [])
+  }, [initialModId, initialCommentId, user])
 
   const fetchMods = useCallback(async (p) => {
     setLoading(true)
@@ -164,8 +178,19 @@ export function BrowseMods() {
     setPage(1)
   }
 
+  const handleEdit = async (mod) => {
+    try {
+      const res = await getModForEdit(mod.id, user.user_id)
+      setEditingMod(res.data || mod)
+    } catch (e) {
+      alert('Failed to load edit data: ' + e.message)
+    }
+  }
+
+  if (editingMod) return <EditModPage mod={editingMod} onClose={() => setEditingMod(null)} onUpdated={() => { setEditingMod(null); fetchMods() }} />
+
   if (detailMod) {
-    return <ModDetailPage mod={detailMod} onBack={() => { setDetailMod(null); window.location.hash = '' }} />
+    return <ModDetailPage mod={detailMod} onBack={() => { setDetailMod(null); setDetailCommentId(null); window.location.hash = '' }} onEdit={handleEdit} scrollToCommentId={detailCommentId} />
   }
 
   if (detailLoading) {

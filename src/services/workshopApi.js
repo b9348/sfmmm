@@ -69,13 +69,13 @@ export async function listMods({ lang = 'zh', search, page = 1, limit = 20 } = {
   }
 }
 
-export async function getModDetail(id, lang = 'zh') {
-  const res = await dbCall('db_get_mod_detail', { id: Number(id), lang })
+export async function getModDetail(id, lang = 'zh', user_id) {
+  const res = await dbCall('db_get_mod_detail', { id: Number(id), lang, user_id: user_id || null })
   return { success: true, data: res.data }
 }
 
-export async function getModForEdit(id, author_id) {
-  const res = await dbCall('db_get_mod_for_edit', { id: Number(id), author_id })
+export async function getModForEdit(id, user_id) {
+  const res = await dbCall('db_get_mod_for_edit', { id: Number(id), user_id })
   return { success: true, data: res.data }
 }
 
@@ -258,6 +258,39 @@ export async function getCommentReplies({ comment_id, page = 1, page_size = 10 }
 export async function deleteComment({ comment_id, author_id }) {
   const res = await dbCall('db_delete_comment', { comment_id, author_id })
   return { success: true }
+}
+
+// ── 权限系统 ──
+
+export async function setModPermissions({ author_id, mod_id, mode, open_langs, allow_mod_info, allow_lang, apply_langs }) {
+  return await dbCall('db_set_mod_permissions', { author_id, mod_id, mode, open_langs: open_langs || null, allow_mod_info, allow_lang, apply_langs: apply_langs || null })
+}
+
+export async function submitApplication({ mod_id, user_id, scope, target_lang, reason }) {
+  return await dbCall('db_submit_application', { mod_id, user_id, scope, target_lang: target_lang || null, reason: reason || null })
+}
+
+export async function listApplications({ mod_id, user_id, role, status, page = 1, page_size = 20 } = {}) {
+  const res = await dbCall('db_list_applications', { mod_id: mod_id || null, user_id: user_id || null, role: role || null, status: status || null, page, page_size })
+  return { applications: res.mods || [], total: res.total || 0, page: res.page || 1, page_size: res.page_size || page_size }
+}
+
+export async function handleApplication({ author_id, app_id, action }) {
+  return await dbCall('db_handle_application', { author_id, app_id, action })
+}
+
+export async function getUnreadCount(user_id) {
+  const res = await dbCall('db_get_unread_count', { user_id })
+  return res.data || { applications: 0, notifications: 0, total: 0 }
+}
+
+export async function getMyNotifications({ user_id, page = 1, page_size = 20 } = {}) {
+  const res = await dbCall('db_get_my_notifications', { user_id, page, page_size })
+  return { items: res.mods || [], total: res.total || 0, page: res.page || 1, page_size: res.page_size || page_size }
+}
+
+export async function markRead({ user_id, target_type, ids }) {
+  return await dbCall('db_mark_read', { user_id, target_type: target_type || null, ids: ids || null })
 }
 
 // ── 浏览器端 SHA-256（使用 SubtleCrypto） ──

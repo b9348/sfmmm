@@ -30,7 +30,7 @@ const useStyles = makeStyles({
   },
 })
 
-export function Workshop() {
+export function Workshop({ initialModId, initialCommentId }) {
   const { t } = useTranslation()
   const styles = useStyles()
 
@@ -49,7 +49,9 @@ export function Workshop() {
   // 初始化时同步一次 hash（可能被其他组件覆盖）
   useEffect(() => {
     const tab = getInitialTab()
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (tab !== subTab) setSubTab(tab)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   return (
@@ -65,7 +67,7 @@ export function Workshop() {
 
       <div className={styles.content}>
         <div className={`${styles.tabContent}${subTab !== 'browse' ? ` ${styles.tabHidden}` : ''}`}>
-          <BrowseMods />
+          <BrowseMods initialModId={initialModId} initialCommentId={initialCommentId} />
         </div>
         <div className={`${styles.tabContent}${subTab !== 'my' ? ` ${styles.tabHidden}` : ''}`}>
           <MyMods />

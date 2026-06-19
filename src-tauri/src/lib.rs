@@ -675,6 +675,14 @@ pub fn run() {
             db::db_add_comment, db::db_get_comments, db::db_get_replies, db::db_delete_comment,
             db::db_check_updates,
             db::db_install_update,
+            // 权限系统
+            db::db_set_mod_permissions,
+            db::db_submit_application,
+            db::db_list_applications,
+            db::db_handle_application,
+            db::db_get_unread_count,
+            db::db_get_my_notifications,
+            db::db_mark_read,
         ])
         .plugin(
             Builder::default()

@@ -2,8 +2,9 @@ import { useState, useEffect, useReducer } from 'react'
 import { FluentProvider, webLightTheme } from '@fluentui/react-components'
 import { makeStyles, tokens } from '@fluentui/react-components'
 import { TabNavigation, WelcomeScreen, TitleBar } from './components'
-import { ModList, SaveManagement, ImportExport, GameSettings, Workshop, MissionFolder } from './modules'
+import { ModList, SaveManagement, ImportExport, GameSettings, Workshop, MissionFolder, ApplicationsPage } from './modules'
 import { AuthProvider } from './contexts/AuthContext'
+import { NotificationProvider } from './contexts/NotificationContext'
 import { usePersistUI } from './hooks/usePersistUI'
 import Database from '@tauri-apps/plugin-sql'
 import { checkVersion } from './services/updateApi'
@@ -60,6 +61,7 @@ function appReducer(state, action) {
 function App() {
   const styles = useStyles()
   const [selectedTab, setSelectedTab] = useState('mods')
+  const [navTarget, setNavTarget] = useState(null)
   const { sidebarCollapsed, toggleSidebar } = usePersistUI()
   const [state, dispatch] = useReducer(appReducer, initialState)
   const [updateInfo, setUpdateInfo] = useState({ hasUpdate: false })
@@ -101,12 +103,12 @@ function App() {
         if (configMap.language) {
           try {
             await i18n.changeLanguage(configMap.language)
-          } catch (_e) {
+          } catch {
             // changeLanguage 失败不影响主流程
           }
         }
 
-        const validTabs = ['mods', 'v1', 'v2', 'saves', 'import-export', 'workshop', 'settings']
+        const validTabs = ['mods', 'v1', 'v2', 'saves', 'import-export', 'workshop', 'apply', 'settings']
         if (configMap.selected_tab && validTabs.includes(configMap.selected_tab)) {
           setSelectedTab(configMap.selected_tab)
         }
@@ -172,7 +174,8 @@ function App() {
   return (
     <FluentProvider theme={webLightTheme}>
       <AuthProvider>
-        <div className={styles.root}>
+        <NotificationProvider>
+          <div className={styles.root}>
           <TitleBar />
           <div className={styles.appShell}>
             <TabNavigation
@@ -189,11 +192,16 @@ function App() {
               {selectedTab === 'v2' && <MissionFolder config={state.config} subfolder="CustomMissions2" />}
               {selectedTab === 'saves' && <SaveManagement config={state.config} />}
               {selectedTab === 'import-export' && <ImportExport config={state.config} />}
-              {selectedTab === 'workshop' && <Workshop />}
+              {selectedTab === 'workshop' && <Workshop initialModId={navTarget?.modId} initialCommentId={navTarget?.commentId} />}
+              {selectedTab === 'apply' && <ApplicationsPage onNavigate={(modId, commentId) => {
+                setNavTarget({ modId, commentId })
+                handleTabChange('workshop')
+              }} />}
               {selectedTab === 'settings' && <GameSettings config={state.config} onConfigChange={handleConfigChange} />}
             </main>
           </div>
         </div>
+        </NotificationProvider>
       </AuthProvider>
     </FluentProvider>
   )
