@@ -1,5 +1,5 @@
 import { useState, useEffect, useReducer } from 'react'
-import { FluentProvider, webLightTheme } from '@fluentui/react-components'
+import { FluentProvider, webLightTheme, Dialog, DialogSurface, DialogBody, DialogTitle, DialogContent, DialogActions, DialogTrigger, Button, Text } from '@fluentui/react-components'
 import { makeStyles, tokens } from '@fluentui/react-components'
 import { TabNavigation, WelcomeScreen, TitleBar } from './components'
 import { ModList, SaveManagement, ImportExport, GameSettings, Workshop, MissionFolder, ApplicationsPage } from './modules'
@@ -8,6 +8,8 @@ import { NotificationProvider } from './contexts/NotificationContext'
 import { usePersistUI } from './hooks/usePersistUI'
 import Database from '@tauri-apps/plugin-sql'
 import { checkVersion } from './services/updateApi'
+import { uninstallMod } from './services/installMod'
+import { useTranslation } from 'react-i18next'
 import APP_VERSION from './version.js'
 import i18n from './i18n'
 
@@ -154,6 +156,29 @@ function App() {
     }
   }
 
+  const { t } = useTranslation()
+  const [uninstallTarget, setUninstallTarget] = useState(null)
+  const [uninstalling, setUninstalling] = useState(false)
+  const [modListKey, setModListKey] = useState(0)
+
+  const handleUninstallMod = (mod) => {
+    setUninstallTarget(mod)
+  }
+
+  const confirmUninstall = async () => {
+    if (!uninstallTarget) return
+    setUninstalling(true)
+    try {
+      await uninstallMod({ modKey: uninstallTarget.name.replace(/\.\w+$/, '').replace(/\/$/, '') })
+      setUninstallTarget(null)
+      setModListKey(k => k + 1)
+    } catch (e) {
+      alert('退订失败: ' + e.message)
+    } finally {
+      setUninstalling(false)
+    }
+  }
+
   if (state.isFirstRun === null) {
     return (
       <FluentProvider theme={webLightTheme}>
@@ -187,9 +212,9 @@ function App() {
              onNavigateToSettings={() => handleTabChange('settings')}
            />
             <main className={styles.tabContent}>
-              {selectedTab === 'mods' && <ModList config={state.config} />}
-              {selectedTab === 'v1' && <MissionFolder config={state.config} subfolder="CustomMissions" />}
-              {selectedTab === 'v2' && <MissionFolder config={state.config} subfolder="CustomMissions2" />}
+              {selectedTab === 'mods' && <ModList key={modListKey} config={state.config} onUninstall={handleUninstallMod} />}
+              {selectedTab === 'v1' && <MissionFolder config={state.config} subfolder="CustomMissions" onUninstall={handleUninstallMod} />}
+              {selectedTab === 'v2' && <MissionFolder config={state.config} subfolder="CustomMissions2" onUninstall={handleUninstallMod} />}
               {selectedTab === 'saves' && <SaveManagement config={state.config} />}
               {selectedTab === 'import-export' && <ImportExport config={state.config} />}
               {selectedTab === 'workshop' && <Workshop initialModId={navTarget?.modId} initialCommentId={navTarget?.commentId} />}
@@ -202,6 +227,26 @@ function App() {
           </div>
         </div>
         </NotificationProvider>
+
+        <Dialog open={!!uninstallTarget} onOpenChange={(_, { open }) => !open && setUninstallTarget(null)}>
+          <DialogSurface>
+            <DialogBody>
+              <DialogTitle>{t('workshop.confirmUninstall')}</DialogTitle>
+              <DialogContent>
+                <Text size="small">{t('workshop.uninstallHint')}</Text>
+              </DialogContent>
+              <DialogActions>
+                <DialogTrigger disableButtonEnhancement>
+                  <Button size="small" appearance="subtle">{t('workshop.cancel')}</Button>
+                </DialogTrigger>
+                <Button size="small" appearance="primary" onClick={confirmUninstall} disabled={uninstalling}>
+                  {uninstalling ? t('workshop.processing') : t('workshop.uninstall')}
+                </Button>
+              </DialogActions>
+            </DialogBody>
+          </DialogSurface>
+        </Dialog>
+
       </AuthProvider>
     </FluentProvider>
   )

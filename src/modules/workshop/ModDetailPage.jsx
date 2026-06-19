@@ -1,21 +1,22 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
-  Card, CardHeader, Text, Button, Badge, Avatar,
-  makeStyles, tokens, Spinner,
+  Text, Button, Badge, Avatar,
+  makeStyles, tokens,
   Dialog, DialogSurface, DialogBody, DialogTitle,
   DialogContent, DialogTrigger, DialogActions, Textarea, Select,
 } from '@fluentui/react-components'
 import {
   ArrowLeft24Regular, ArrowDownload24Regular,
-  Edit24Regular, Add24Regular,
+  Edit24Regular, Add24Regular, Delete24Regular,
 } from '@fluentui/react-icons'
-import { installMod } from '../../services/installMod'
+import { installMod, uninstallMod } from '../../services/installMod'
 import { RichTextContent, MarkdownContent } from '../../components/common/RichTextEditor'
 import { invoke } from '@tauri-apps/api/core'
 import { useAuth } from '../../contexts/AuthContext'
-import { getModForEdit, submitApplication } from '../../services/workshopApi'
+import { submitApplication } from '../../services/workshopApi'
 import CommentSection from './CommentSection'
+import Database from '@tauri-apps/plugin-sql'
 
 const LANG_LABELS = { zh: '中文', en: 'English', ja: '日本語' }
 
@@ -67,10 +68,30 @@ export default function ModDetailPage({ mod, onBack, onEdit, scrollToCommentId }
   const [installingLang, setInstallingLang] = useState('')
   const [installError, setInstallError] = useState('')
   const [installedDir, setInstalledDir] = useState('')
+  const [isInstalled, setIsInstalled] = useState(false)
+  const [uninstalling, setUninstalling] = useState(false)
+  const [uninstallError, setUninstallError] = useState('')
+  const [confirmUninstall, setConfirmUninstall] = useState(false)
   const [applyOpen, setApplyOpen] = useState(false)
   const [applyScope, setApplyScope] = useState('lang_all')
   const [applyReason, setApplyReason] = useState('')
   const [applying, setApplying] = useState(false)
+
+  useEffect(() => {
+    const checkInstalled = async () => {
+      try {
+        const db = await Database.load('sqlite:config.db')
+        const rows = await db.select(
+          'SELECT id FROM installed_workshop_mods WHERE mod_key = $1',
+          [mod.mod_key]
+        )
+        setIsInstalled(rows.length > 0)
+      } catch (e) {
+        console.warn('[ModDetailPage] 查询安装状态失败:', e)
+      }
+    }
+    checkInstalled()
+  }, [mod.mod_key])
 
   const handleApply = async () => {
     if (!user) return
@@ -100,10 +121,13 @@ export default function ModDetailPage({ mod, onBack, onEdit, scrollToCommentId }
         modKey: mod.mod_key,
         category: mod.category,
         fileUrl: file.file_url,
-        version: file.version || mod.version,
+        version: file.version,
         fileHash: file.file_hash,
+        langCode: file.lang_code,
+        manifest: file.manifest,
       })
       setInstalledDir(result.targetDir)
+      setIsInstalled(true)
     } catch (e) {
       setInstallError(e.message)
     } finally {
@@ -111,11 +135,26 @@ export default function ModDetailPage({ mod, onBack, onEdit, scrollToCommentId }
     }
   }
 
+  const handleUninstall = async () => {
+    setUninstallError('')
+    setUninstalling(true)
+    try {
+      await uninstallMod({ modKey: mod.mod_key })
+      setIsInstalled(false)
+      setConfirmUninstall(false)
+      setInstalledDir('')
+    } catch (e) {
+      setUninstallError(e.message)
+    } finally {
+      setUninstalling(false)
+    }
+  }
+
   return (
     <div className={styles.root}>
-      <div className={styles.toolbarRow}>
+        <div className={styles.toolbarRow}>
         <Button size="small" icon={<ArrowLeft24Regular />} appearance="subtle" onClick={onBack}>{t('workshop.back')}</Button>
-        <Text weight="semibold">{mod.display_name}</Text>
+        <Text weight="semibold">{mod.mod_key}</Text>
       </div>
       <div className={styles.detailSection}>
         <div className={styles.authorRow}>
@@ -161,27 +200,45 @@ export default function ModDetailPage({ mod, onBack, onEdit, scrollToCommentId }
         {mod.files && mod.files.length > 0 && (
           <div style={{ borderTop: `1px solid ${tokens.colorNeutralStroke2}`, paddingTop: '8px' }}>
             <Text size="small" weight="semibold" block style={{ marginBottom: '8px' }}>{t('workshop.availableVersions')}</Text>
-            {mod.files.map(f => (
+            {mod.files.map(f => {
+              const langName = mod.translations?.[f.lang_code]?.name || mod.display_name
+              return (
               <div key={f.lang_code} className={styles.fileRow}>
                 <Badge appearance="outline" size="small" style={{ whiteSpace: 'nowrap' }}>{LANG_LABELS[f.lang_code] || f.lang_code}</Badge>
+                <Text size="small" truncate>{langName}</Text>
+                {f.file_name && <Text size="small" truncate className={styles.meta} style={{ flex: '0 1 auto', maxWidth: '160px' }}>{f.file_name}</Text>}
                 <Text size="small">v{f.version}</Text>
                 <Text size="small" className={styles.meta}>{(f.file_size / 1024).toFixed(1)}KB</Text>
                 <Button
                   size="small"
                   icon={<ArrowDownload24Regular />}
-                  appearance="primary"
+                  appearance={isInstalled ? 'outline' : 'primary'}
                   disabled={installingLang === f.lang_code}
                   onClick={(e) => {
                     e.stopPropagation()
                     handleInstall(f)
                   }}
                 >
-{installingLang === f.lang_code ? t('workshop.installing') : t('workshop.install')}
+{isInstalled ? t('workshop.reinstall') : installingLang === f.lang_code ? t('workshop.installing') : t('workshop.install')}
                 </Button>
+                {isInstalled && (
+                  <Button
+                    size="small"
+                    icon={<Delete24Regular />}
+                    appearance="subtle"
+                    disabled={uninstalling}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setConfirmUninstall(true)
+                    }}
+                  >
+                    {t('workshop.uninstall')}
+                  </Button>
+                )}
                 <Text size="small" className={styles.meta}>{f.file_hash?.slice(0, 8)}</Text>
                 <div style={{ flex: 1 }} />
               </div>
-            ))}
+            )})}
           </div>
         )}
         {installedDir && (
@@ -197,6 +254,11 @@ export default function ModDetailPage({ mod, onBack, onEdit, scrollToCommentId }
         {installError && (
           <div style={{ padding: '8px', background: tokens.colorPaletteRedBackground1, borderRadius: '4px' }}>
             <Text size="small" style={{ color: tokens.colorPaletteRedForeground1 }}>{installError}</Text>
+          </div>
+        )}
+        {uninstallError && (
+          <div style={{ padding: '8px', background: tokens.colorPaletteRedBackground1, borderRadius: '4px' }}>
+            <Text size="small" style={{ color: tokens.colorPaletteRedForeground1 }}>{uninstallError}</Text>
           </div>
         )}
         <CommentSection modId={mod.id} scrollToCommentId={scrollToCommentId} />
@@ -227,6 +289,25 @@ export default function ModDetailPage({ mod, onBack, onEdit, scrollToCommentId }
               </DialogTrigger>
               <Button size="small" appearance="primary" onClick={handleApply} disabled={applying}>
                 {applying ? t('workshop.processing') : t('workshop.submit')}
+              </Button>
+            </DialogActions>
+          </DialogBody>
+        </DialogSurface>
+      </Dialog>
+
+      <Dialog open={confirmUninstall} onOpenChange={(_, { open }) => !open && setConfirmUninstall(false)}>
+        <DialogSurface>
+          <DialogBody>
+            <DialogTitle>{t('workshop.confirmUninstall')}</DialogTitle>
+            <DialogContent>
+              <Text size="small">{t('workshop.uninstallHint')}</Text>
+            </DialogContent>
+            <DialogActions>
+              <DialogTrigger disableButtonEnhancement>
+                <Button size="small" appearance="subtle">{t('workshop.cancel')}</Button>
+              </DialogTrigger>
+              <Button size="small" appearance="primary" onClick={handleUninstall} disabled={uninstalling}>
+                {uninstalling ? t('workshop.processing') : t('workshop.uninstall')}
               </Button>
             </DialogActions>
           </DialogBody>

@@ -1,10 +1,12 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import { makeStyles, tokens, Text, Button, Spinner, Card, CardHeader, Badge, Tooltip } from '@fluentui/react-components'
-import { FolderOpen24Regular, ArrowClockwise24Regular, Document24Regular, Folder24Regular, ChevronRight24Regular, Play24Regular, Pause24Regular } from '@fluentui/react-icons'
+import { FolderOpen24Regular, ArrowClockwise24Regular, Document24Regular, Folder24Regular, ChevronRight24Regular, Play24Regular, Pause24Regular, Delete24Regular } from '@fluentui/react-icons'
 import { invoke } from '@tauri-apps/api/core'
 import { readDir } from '@tauri-apps/plugin-fs'
 import { useInstalledMods } from '../../hooks/useInstalledMods'
+
+const LANG_LABELS = { zh: '中文', en: 'English', ja: '日本語' }
 
 const useStyles = makeStyles({
   root: {
@@ -170,7 +172,7 @@ async function openInExplorer(dir) {
   }
 }
 
-function FolderCard({ name, fullPath, onNavigate, isWorkshop }) {
+function FolderCard({ name, fullPath, onNavigate, isWorkshop, workshopDetail, onUninstall }) {
   const { t } = useTranslation()
   const styles = useStyles()
   const [childInfo, setChildInfo] = useState(null)
@@ -191,6 +193,11 @@ function FolderCard({ name, fullPath, onNavigate, isWorkshop }) {
             <Folder24Regular />
             <Text size="small" weight="semibold" className={styles.fileName}>{name}</Text>
             {isWorkshop && <Badge appearance="filled" color="success" size="small">{t('mods.workshopBadge')}</Badge>}
+            {isWorkshop && workshopDetail?.version && <Badge appearance="outline" size="small">v{workshopDetail.version}</Badge>}
+            {isWorkshop && workshopDetail?.langCode && <Badge appearance="outline" size="small">{LANG_LABELS[workshopDetail.langCode] || workshopDetail.langCode}</Badge>}
+            {isWorkshop && onUninstall && (
+              <Button size="small" icon={<Delete24Regular />} appearance="subtle" onClick={(e) => { e.stopPropagation(); onUninstall({ name }) }} />
+            )}
           </div>
         }
         description={
@@ -207,7 +214,7 @@ function FolderCard({ name, fullPath, onNavigate, isWorkshop }) {
   )
 }
 
-function FileCard({ name, fullPath, isBanned, onToggle, isWorkshop, hasUpdate }) {
+function FileCard({ name, fullPath, isBanned, onToggle, isWorkshop, hasUpdate, workshopDetail, onUninstall }) {
   const { t } = useTranslation()
   const styles = useStyles()
   const ext = getExt(name)
@@ -225,7 +232,12 @@ function FileCard({ name, fullPath, isBanned, onToggle, isWorkshop, hasUpdate })
             <Badge appearance="outline" size="small">{ext.toUpperCase()}</Badge>
             {isBanned && <Badge appearance="filled" color="danger" size="small">{t('mods.disabled')}</Badge>}
             {isWorkshop && <Badge appearance="filled" color="success" size="small">{t('mods.workshopBadge')}</Badge>}
+            {isWorkshop && workshopDetail?.version && <Badge appearance="outline" size="small">v{workshopDetail.version}</Badge>}
+            {isWorkshop && workshopDetail?.langCode && <Badge appearance="outline" size="small">{LANG_LABELS[workshopDetail.langCode] || workshopDetail.langCode}</Badge>}
             {hasUpdate && <Badge appearance="filled" color="warning" size="small">{t('mods.hasUpdate')}</Badge>}
+            {isWorkshop && onUninstall && (
+              <Button size="small" icon={<Delete24Regular />} appearance="subtle" onClick={(e) => { e.stopPropagation(); onUninstall({ name }) }} />
+            )}
           </div>
         }
       />
@@ -243,7 +255,7 @@ function FileCard({ name, fullPath, isBanned, onToggle, isWorkshop, hasUpdate })
   )
 }
 
-export function MissionFolder({ config, subfolder }) {
+export function MissionFolder({ config, subfolder, onUninstall }) {
   const styles = useStyles()
   const { t } = useTranslation()
   const gamePath = config?.game_path?.replace(/\\/g, '/') || ''
@@ -252,12 +264,13 @@ export function MissionFolder({ config, subfolder }) {
   const [files, setFiles] = useState([])
   const [loading, setLoading] = useState(false)
   const [historyStack, setHistoryStack] = useState([])
-  const { installed, updates } = useInstalledMods()
+  const { installed, updates, modDetails } = useInstalledMods()
 
   // 检查文件/文件夹是否是已安装的工坊模组
   const getWorkshopKey = (name) => name.replace(/\.\w+$/, '').replace(/\/$/, '')
   const isWorkshopMod = (name) => installed.has(getWorkshopKey(name))
   const hasUpdate = (name) => updates.has(getWorkshopKey(name))
+  const getWorkshopDetail = (name) => modDetails.get(getWorkshopKey(name))
 
   // Reset to root when gamePath or subfolder changes
   useEffect(() => {
@@ -417,9 +430,10 @@ export function MissionFolder({ config, subfolder }) {
         <div className={styles.grid}>
           {files.map((f, i) => {
             const fullPath = `${currentDir}/${f.name}`
+            const detail = getWorkshopDetail(f.name)
             return f.isDir
-              ? <FolderCard key={i} name={f.name} fullPath={fullPath} onNavigate={navigateTo} isWorkshop={isWorkshopMod(f.name)} />
-              : <FileCard key={i} name={f.name} fullPath={fullPath} isBanned={f.isBanned} onToggle={toggleItemEnabled} isWorkshop={isWorkshopMod(f.name)} hasUpdate={hasUpdate(f.name)} />
+              ? <FolderCard key={i} name={f.name} fullPath={fullPath} onNavigate={navigateTo} isWorkshop={isWorkshopMod(f.name)} workshopDetail={detail} onUninstall={onUninstall} />
+              : <FileCard key={i} name={f.name} fullPath={fullPath} isBanned={f.isBanned} onToggle={toggleItemEnabled} isWorkshop={isWorkshopMod(f.name)} hasUpdate={hasUpdate(f.name)} workshopDetail={detail} onUninstall={onUninstall} />
           })}
         </div>
       )}

@@ -654,6 +654,18 @@ pub fn run() {
             );",
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 4,
+            description: "add_lang_code_to_installed_workshop_mods",
+            sql: "ALTER TABLE installed_workshop_mods ADD COLUMN lang_code TEXT DEFAULT '';",
+            kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 5,
+            description: "add_manifest_to_installed_workshop_mods",
+            sql: "ALTER TABLE installed_workshop_mods ADD COLUMN manifest TEXT DEFAULT '';",
+            kind: MigrationKind::Up,
+        },
     ];
 
     tauri::Builder::default()

@@ -78,6 +78,7 @@
     "workshopBadge": "ワークショップ",
     "enable": "有効",
     "disable": "無効",
+    "uninstall": "アンインストール",
     "unknownError": "不明なエラー"
   },
 
@@ -235,6 +236,11 @@
     "fileListTitle": "ファイル一覧（全{{count}}個）",
     "installing": "インストール中...",
     "install": "インストール",
+    "installed": "インストール済み",
+    "reinstall": "インストール済み, 再インストール",
+    "uninstall": "アンインストール",
+    "confirmUninstall": "アンインストール確認",
+    "uninstallHint": "アンインストールするとローカルにインストールされたModファイルが削除されます。この操作は取り消せません。",
     "installSuccess": "インストール成功！場所：",
     "openDir": "ディレクトリを開く",
     "selectFolderErr": "フォルダ選択に失敗しました：{{msg}}",

@@ -78,6 +78,7 @@
     "workshopBadge": "Workshop",
     "enable": "Enable",
     "disable": "Disable",
+    "uninstall": "Uninstall",
     "unknownError": "Unknown error"
   },
 
@@ -235,6 +236,11 @@
     "fileListTitle": "File list ({{count}} files)",
     "installing": "Installing...",
     "install": "Install",
+    "installed": "Installed",
+    "reinstall": "Installed, Reinstall",
+    "uninstall": "Uninstall",
+    "confirmUninstall": "Confirm Uninstall",
+    "uninstallHint": "Uninstalling will remove the locally installed mod files. This action cannot be undone.",
     "installSuccess": "Install successful! Location: ",
     "openDir": "Open directory",
     "selectFolderErr": "Failed to select folder: {{msg}}",

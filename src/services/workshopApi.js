@@ -96,20 +96,20 @@ function normalizeTranslations(translations) {
   }))
 }
 
-export async function createMod({ author_id, mod_key, translations, version, category }) {
+export async function createMod({ author_id, mod_key, translations, category }) {
   const res = await dbCall('db_create_mod', {
     author_id, mod_key,
     translations: normalizeTranslations(translations),
-    version, category,
+    category,
   })
   return { success: true, data: res.data }
 }
 
-export async function updateMod({ author_id, mod_id, version, category, translations }) {
+export async function updateMod({ author_id, mod_id, category, translations }) {
   const res = await dbCall('db_update_mod', {
     author_id, mod_id: Number(mod_id),
     translations: normalizeTranslations(translations),
-    version, category,
+    category,
   })
   return { success: true, data: res.data }
 }
@@ -149,7 +149,7 @@ export async function getImgbedConfig() {
   return await invoke('db_get_imgbed_config')
 }
 
-export async function uploadModFile({ author_id, mod_id, lang_code, version, file }) {
+export async function uploadModFile({ author_id, mod_id, lang_code, version, file, manifest }) {
   // 1. 读 ImgBed 配置
   const imgbed = await getImgbedConfig()
 
@@ -191,6 +191,7 @@ export async function uploadModFile({ author_id, mod_id, lang_code, version, fil
     file_size: file.size,
     file_hash: fileHash,
     version: version || '1.0.0',
+    manifest: manifest || null,
   })
 
   return {
@@ -202,6 +203,7 @@ export async function uploadModFile({ author_id, mod_id, lang_code, version, fil
       file_size: file.size,
       file_hash: fileHash,
       version: version || '1.0.0',
+      manifest: manifest || null,
       reused: false,
     },
   }

@@ -388,6 +388,7 @@ function CreateModPage({ onClose, onCreated }) {
       for (const lang of fileLangs) {
         setUploadingLang(lang)
         const files = modFiles[lang]
+        const manifest = JSON.stringify(files.map(f => f.name))
         const zip = new JSZip()
         for (const file of files) {
           zip.file(file.name, file.data)
@@ -399,7 +400,7 @@ function CreateModPage({ onClose, onCreated }) {
           return
         }
         const zipFile = new File([blob], `${modKey}_${lang}.zip`, { type: 'application/zip' })
-        await uploadModFile({ author_id: user.user_id, mod_id: newModId, lang_code: lang, version: translations[lang]?.version, file: zipFile })
+        await uploadModFile({ author_id: user.user_id, mod_id: newModId, lang_code: lang, version: translations[lang]?.version, file: zipFile, manifest })
       }
       setUploadingLang('')
 
@@ -791,6 +792,7 @@ export function EditModPage({ mod: initialMod, onClose, onUpdated }) {
       if (existingFiles[lang]) {
         await deleteModFile({ author_id: user.user_id, mod_id: initialMod.id, lang_code: lang, fileUrl: existingFiles[lang].file_url })
       }
+      const manifest = JSON.stringify(files.map(f => f.name))
       const zip = new JSZip()
       for (const file of files) {
         zip.file(file.name, file.data)
@@ -802,7 +804,7 @@ export function EditModPage({ mod: initialMod, onClose, onUpdated }) {
         return
       }
       const zipFile = new File([blob], `${modKey}_${lang}.zip`, { type: 'application/zip' })
-      const res = await uploadModFile({ author_id: user.user_id, mod_id: initialMod.id, lang_code: lang, version: translations[lang]?.version, file: zipFile })
+      const res = await uploadModFile({ author_id: user.user_id, mod_id: initialMod.id, lang_code: lang, version: translations[lang]?.version, file: zipFile, manifest })
       setExistingFiles(prev => ({ ...prev, [lang]: res.data }))
       setModFiles(prev => { const n = { ...prev }; delete n[lang]; return n })
       onUpdated()
@@ -838,6 +840,7 @@ export function EditModPage({ mod: initialMod, onClose, onUpdated }) {
         }
         setUploadingLang(lang)
         const files = modFiles[lang]
+        const manifest = JSON.stringify(files.map(f => f.name))
         const zip = new JSZip()
         for (const file of files) {
           zip.file(file.name, file.data)
@@ -849,7 +852,7 @@ export function EditModPage({ mod: initialMod, onClose, onUpdated }) {
           return
         }
         const zipFile = new File([blob], `${modKey}_${lang}.zip`, { type: 'application/zip' })
-        const res = await uploadModFile({ author_id: user.user_id, mod_id: initialMod.id, lang_code: lang, version: translations[lang]?.version, file: zipFile })
+        const res = await uploadModFile({ author_id: user.user_id, mod_id: initialMod.id, lang_code: lang, version: translations[lang]?.version, file: zipFile, manifest })
         setExistingFiles(prev => ({ ...prev, [lang]: res.data }))
       }
       // 清空待上传队列

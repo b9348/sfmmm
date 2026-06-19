@@ -3,6 +3,25 @@ use mysql::*;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
+// 语义版本比较：返回 -1, 0, 1
+fn semver_cmp(a: &str, b: &str) -> i32 {
+    let parse = |s: &str| -> Vec<u32> {
+        s.trim_start_matches('v')
+            .split('.')
+            .filter_map(|p| p.parse::<u32>().ok())
+            .collect()
+    };
+    let pa = parse(a);
+    let pb = parse(b);
+    for i in 0..pa.len().max(pb.len()) {
+        let va = pa.get(i).copied().unwrap_or(0);
+        let vb = pb.get(i).copied().unwrap_or(0);
+        if va < vb { return -1; }
+        if va > vb { return 1; }
+    }
+    0
+}
+
 // ── 数据库配置 ─────────────────────────────────────────────
 // 优先读 .env 文件或环境变量，找不到则用硬编码默认值
 fn db_url() -> String {
@@ -309,7 +328,7 @@ pub async fn db_list_mods(
 
         // 分页查询 — 使用位置索引
         let query_sql = format!(
-            "SELECT m.id, m.mod_id, COALESCE(mt_t.version, mt_en.version, m.version) as version, m.category, m.download_count,
+            "SELECT m.id, m.mod_id, COALESCE(mt_t.version, mt_en.version) as version, m.category, m.download_count,
                     m.created_at, m.updated_at, u.username,
                     COALESCE(mt_t.name, mt_en.name, m.mod_id),
                     COALESCE(mt_t.description, mt_en.description, ''),
@@ -345,7 +364,7 @@ pub async fn db_list_mods(
         if !mod_ids.is_empty() {
             let ph: Vec<String> = mod_ids.iter().map(|_| "?".to_string()).collect();
             let file_sql = format!(
-                "SELECT mod_id, lang_code, file_url, file_name, file_size, file_hash, version, created_at FROM mod_files WHERE mod_id IN ({})",
+                "SELECT mod_id, lang_code, file_url, file_name, file_size, file_hash, version, created_at, manifest FROM mod_files WHERE mod_id IN ({})",
                 ph.join(",")
             );
             let id_params: Vec<Value> = mod_ids.iter().map(|&id| Value::UInt(id)).collect();
@@ -361,6 +380,7 @@ pub async fn db_list_mods(
                     "file_hash": match vals[5].clone() { Value::Bytes(b) if !b.is_empty() => Some(String::from_utf8_lossy(&b).to_string()), _ => None },
                     "version": val_to_string(vals[6].clone()),
                     "created_at": val_to_string(vals[7].clone()),
+                    "manifest": val_to_string(vals[8].clone()),
                 });
                 files_by_mod.entry(mid).or_default().push(fj);
             }).map_err(|e| e.to_string())?;
@@ -439,7 +459,7 @@ pub async fn db_list_my_mods(
         ).map_err(|e| e.to_string())?.unwrap_or(0i64);
 
         let query_sql = format!(
-            "SELECT m.id, m.mod_id, COALESCE(mt_t.version, mt_en.version, m.version) as version, m.category, m.download_count,
+            "SELECT m.id, m.mod_id, COALESCE(mt_t.version, mt_en.version) as version, m.category, m.download_count,
                     m.created_at, m.updated_at, u.username,
                     COALESCE(mt_t.name, mt_en.name, m.mod_id),
                     COALESCE(mt_t.description, mt_en.description, ''),
@@ -473,7 +493,7 @@ pub async fn db_list_my_mods(
         if !mod_ids.is_empty() {
             let ph: Vec<String> = mod_ids.iter().map(|_| "?".to_string()).collect();
             let file_sql = format!(
-                "SELECT mod_id, lang_code, file_url, file_name, file_size, file_hash, version, created_at FROM mod_files WHERE mod_id IN ({})",
+                "SELECT mod_id, lang_code, file_url, file_name, file_size, file_hash, version, created_at, manifest FROM mod_files WHERE mod_id IN ({})",
                 ph.join(",")
             );
             let id_params: Vec<Value> = mod_ids.iter().map(|&id| Value::UInt(id)).collect();
@@ -489,6 +509,7 @@ pub async fn db_list_my_mods(
                     "file_hash": match vals[5].clone() { Value::Bytes(b) if !b.is_empty() => Some(String::from_utf8_lossy(&b).to_string()), _ => None },
                     "version": val_to_string(vals[6].clone()),
                     "created_at": val_to_string(vals[7].clone()),
+                    "manifest": val_to_string(vals[8].clone()),
                 });
                 files_by_mod.entry(mid).or_default().push(fj);
             }).map_err(|e| e.to_string())?;
@@ -553,7 +574,7 @@ pub async fn db_get_mod_detail(
         let lang = lang.filter(|s| !s.is_empty()).unwrap_or_else(|| "en".into());
 
         let row: Option<Row> = conn.exec_first(
-            "SELECT m.id, m.mod_id, COALESCE(mt_t.version, mt_en.version, m.version) as version, m.category, m.download_count,
+            "SELECT m.id, m.mod_id, COALESCE(mt_t.version, mt_en.version) as version, m.category, m.download_count,
                     m.created_at, m.updated_at, u.username,
                     COALESCE(mt_t.name, mt_en.name, m.mod_id),
                     COALESCE(mt_t.description, mt_en.description, ''),
@@ -575,7 +596,7 @@ pub async fn db_get_mod_detail(
                 // 查文件
                 let mut files: Vec<serde_json::Value> = Vec::new();
                 conn.exec_map(
-                    "SELECT lang_code, file_url, file_name, file_size, file_hash, version, created_at FROM mod_files WHERE mod_id = ?", (id,),
+                    "SELECT lang_code, file_url, file_name, file_size, file_hash, version, created_at, manifest FROM mod_files WHERE mod_id = ?", (id,),
                     |row: Row| {
                         let r: Vec<Value> = row.unwrap();
                         files.push(serde_json::json!({
@@ -586,6 +607,7 @@ pub async fn db_get_mod_detail(
                             "file_hash": match r[4].clone() { Value::Bytes(b) if !b.is_empty() => Some(String::from_utf8_lossy(&b).to_string()), _ => None },
                             "version": val_to_string(r[5].clone()),
                             "created_at": val_to_string(r[6].clone()),
+                            "manifest": val_to_string(r[7].clone()),
                         }));
                     }
                 ).map_err(|e| e.to_string())?;
@@ -634,11 +656,11 @@ pub async fn db_get_mod_for_edit(
         let mut conn = pool.get_conn().map_err(|e| e.to_string())?;
 
         // 检查 mod 存在
-        let mod_row: Option<(u64, String, String, String)> = conn.exec_first(
-            "SELECT author_id, mod_id, version, category FROM mods WHERE id = ?", (id,)
+        let mod_row: Option<(u64, String, String)> = conn.exec_first(
+            "SELECT author_id, mod_id, category FROM mods WHERE id = ?", (id,)
         ).map_err(|e| e.to_string())?;
 
-        let (author_id, mod_key, _ver, cat) = match mod_row {
+        let (author_id, mod_key, cat) = match mod_row {
             Some(r) => r,
             None => return Ok(ApiResponse::err("Mod not found")),
         };
@@ -697,7 +719,7 @@ pub async fn db_get_mod_for_edit(
         // 获取文件
         let mut files: Vec<serde_json::Value> = Vec::new();
         conn.exec_map(
-            "SELECT lang_code, file_url, file_name, file_size, file_hash, version, created_at FROM mod_files WHERE mod_id = ?", (id,),
+            "SELECT lang_code, file_url, file_name, file_size, file_hash, version, created_at, manifest FROM mod_files WHERE mod_id = ?", (id,),
             |row: Row| {
                 let r: Vec<Value> = row.unwrap();
                 files.push(serde_json::json!({
@@ -708,6 +730,7 @@ pub async fn db_get_mod_for_edit(
                     "file_hash": match r[4].clone() { Value::Bytes(b) if !b.is_empty() => Some(String::from_utf8_lossy(&b).to_string()), _ => None },
                     "version": val_to_string(r[5].clone()),
                     "created_at": val_to_string(r[6].clone()),
+                    "manifest": val_to_string(r[7].clone()),
                 }));
             }
         ).map_err(|e| e.to_string())?;
@@ -730,13 +753,11 @@ pub async fn db_create_mod(
     author_id: u64,
     mod_key: String,
     translations: Vec<serde_json::Value>,
-    version: Option<String>,
     category: Option<String>,
 ) -> Result<ApiResponse, String> {
     let pool = state.pool.clone();
     tokio::task::spawn_blocking(move || {
         let mut conn = pool.get_conn().map_err(|e| e.to_string())?;
-        let ver = version.unwrap_or_else(|| "1.0.0".into());
         let cat = category.unwrap_or_else(|| "v1".into());
 
         // 检查 mod_key 是否已存在
@@ -748,8 +769,8 @@ pub async fn db_create_mod(
         }
 
         conn.exec_drop(
-            "INSERT INTO mods (author_id, mod_id, version, category) VALUES (?, ?, ?, ?)",
-            (author_id, &mod_key, &ver, &cat),
+            "INSERT INTO mods (author_id, mod_id, category) VALUES (?, ?, ?)",
+            (author_id, &mod_key, &cat),
         ).map_err(|e| e.to_string())?;
 
         let new_id = conn.last_insert_id();
@@ -762,7 +783,7 @@ pub async fn db_create_mod(
             let instr = t.get("instructions").and_then(|v| v.as_str()).unwrap_or("");
             let instr_fmt = t.get("instructions_format").and_then(|v| v.as_str()).unwrap_or("markdown");
             let changelog = t.get("changelog").and_then(|v| v.as_str()).unwrap_or("");
-            let t_ver = t.get("version").and_then(|v| v.as_str()).unwrap_or(&ver);
+            let t_ver = t.get("version").and_then(|v| v.as_str()).unwrap_or("1.0.0");
             conn.exec_drop(
                 "INSERT INTO mod_translations (mod_id, lang_code, name, description, instructions, instructions_format, changelog, version) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 (new_id, lc, name, desc, instr, instr_fmt, changelog, t_ver),
@@ -778,7 +799,6 @@ pub async fn db_update_mod(
     state: tauri::State<'_, DbState>,
     mod_id: u64,
     author_id: u64,
-    version: Option<String>,
     category: Option<String>,
     translations: Vec<serde_json::Value>,
 ) -> Result<ApiResponse, String> {
@@ -797,10 +817,6 @@ pub async fn db_update_mod(
 
         // 更新 mod 基本信息（仅 author 或 mod_info 协作者）
         if can_edit_mod_info {
-            if let Some(ver) = &version {
-                conn.exec_drop("UPDATE mods SET version = ? WHERE id = ?", (ver, mod_id))
-                    .map_err(|e| e.to_string())?;
-            }
             if let Some(cat) = &category {
                 conn.exec_drop("UPDATE mods SET category = ? WHERE id = ?", (cat, mod_id))
                     .map_err(|e| e.to_string())?;
@@ -914,6 +930,7 @@ pub async fn db_save_mod_file(
     file_size: i64,
     file_hash: String,
     version: Option<String>,
+    manifest: Option<String>,
 ) -> Result<ApiResponse, String> {
     let pool = state.pool.clone();
     tokio::task::spawn_blocking(move || {
@@ -941,13 +958,13 @@ pub async fn db_save_mod_file(
 
         if existing.is_some() {
             conn.exec_drop(
-                "UPDATE mod_files SET file_url = ?, file_name = ?, file_size = ?, file_hash = ?, version = ? WHERE mod_id = ? AND lang_code = ?",
-                (&file_url, &file_name, file_size, &file_hash, &ver, mod_id, &lang_code),
+                "UPDATE mod_files SET file_url = ?, file_name = ?, file_size = ?, file_hash = ?, version = ?, manifest = ? WHERE mod_id = ? AND lang_code = ?",
+                (&file_url, &file_name, file_size, &file_hash, &ver, &manifest, mod_id, &lang_code),
             ).map_err(|e| e.to_string())?;
         } else {
             conn.exec_drop(
-                "INSERT INTO mod_files (mod_id, lang_code, file_url, file_name, file_size, file_hash, version) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (mod_id, &lang_code, &file_url, &file_name, file_size, &file_hash, &ver),
+                "INSERT INTO mod_files (mod_id, lang_code, file_url, file_name, file_size, file_hash, version, manifest) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (mod_id, &lang_code, &file_url, &file_name, file_size, &file_hash, &ver, &manifest),
             ).map_err(|e| e.to_string())?;
         }
 
@@ -958,6 +975,7 @@ pub async fn db_save_mod_file(
             "file_size": file_size,
             "file_hash": file_hash,
             "version": ver,
+            "manifest": manifest,
         }), "File saved"))
     }).await.map_err(|e| e.to_string())?
 }
@@ -1280,7 +1298,7 @@ pub async fn db_delete_comment(
 }
 
 /// 检查已安装的工坊模组是否有更新
-/// 参数：installed = [{ mod_key: "xxx", installed_version: "1.0.0" }, ...]
+/// 参数：installed = [{ mod_key: "xxx", installed_version: "1.0.0", lang_code: "zh" }, ...]
 #[tauri::command(rename_all = "snake_case")]
 pub async fn db_check_updates(
     state: tauri::State<'_, DbState>,
@@ -1294,16 +1312,18 @@ pub async fn db_check_updates(
         for item in &installed {
             let mod_key = item.get("mod_key").and_then(|v| v.as_str()).unwrap_or("");
             let installed_ver = item.get("installed_version").and_then(|v| v.as_str()).unwrap_or("0.0.0");
+            let lang_code = item.get("lang_code").and_then(|v| v.as_str()).unwrap_or("zh");
 
             if mod_key.is_empty() { continue; }
 
+            // 从 mod_translations 表获取对应语言的最新版本
             let latest: Option<(String,)> = conn.exec_first(
-                "SELECT version FROM mods WHERE mod_id = ? ORDER BY id DESC LIMIT 1",
-                (mod_key,),
+                "SELECT t.version FROM mod_translations t JOIN mods m ON t.mod_id = m.id WHERE m.mod_id = ? AND t.lang_code = ? ORDER BY t.id DESC LIMIT 1",
+                (mod_key, lang_code),
             ).map_err(|e| e.to_string())?;
 
             let latest_ver = latest.map(|v| v.0).unwrap_or_default();
-            let has_update = !latest_ver.is_empty() && latest_ver != installed_ver;
+            let has_update = !latest_ver.is_empty() && semver_cmp(&latest_ver, &installed_ver) > 0;
 
             if has_update {
                 results.push(serde_json::json!({

@@ -78,6 +78,7 @@
     "workshopBadge": "创意工坊",
     "enable": "启用",
     "disable": "禁用",
+    "uninstall": "退订",
     "unknownError": "未知错误"
   },
 
@@ -235,6 +236,11 @@
     "fileListTitle": "文件列表（共{{count}}个）",
     "installing": "安装中...",
     "install": "安装",
+    "installed": "已安装",
+    "reinstall": "已安装, 重新安装",
+    "uninstall": "退订",
+    "confirmUninstall": "确认退订",
+    "uninstallHint": "退订将删除本地安装的模组文件，此操作不可撤销。",
     "installSuccess": "安装成功！位置：",
     "openDir": "打开目录",
     "selectFolderErr": "选择文件夹失败：{{msg}}",

@@ -13,12 +13,15 @@ import {
   Dismiss16Regular,
   Play24Regular,
   Pause24Regular,
+  Delete24Regular,
 } from '@fluentui/react-icons'
 import { makeStyles, tokens, mergeClasses } from '@fluentui/react-components'
 import { invoke } from '@tauri-apps/api/core'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useInstalledMods } from '../../hooks/useInstalledMods'
+
+const LANG_LABELS = { zh: '中文', en: 'English', ja: '日本語' }
 
 const useStyles = makeStyles({
   root: {
@@ -173,7 +176,7 @@ function getKindLabel(kind, t) {
   return kind === 'dll' ? t('mods.dllMod') : t('mods.file')
 }
 
-export function ModList({ config }) {
+export function ModList({ config, onUninstall }) {
   const styles = useStyles()
   const { t } = useTranslation()
   const gamePath = config?.game_path || ''
@@ -182,7 +185,7 @@ export function ModList({ config }) {
   const [scanInfo, setScanInfo] = useState(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
-  const { installed, updates } = useInstalledMods()
+  const { installed, updates, modDetails } = useInstalledMods()
 
   const scanMods = useCallback(async () => {
     if (!gamePath) {
@@ -229,14 +232,17 @@ export function ModList({ config }) {
     for (const mod of mods) {
       const key = mod.name.replace(/\.\w+$/, '').replace(/\/$/, '') // DLL 去扩展名，目录去斜杠
       if (installed.has(key)) {
+        const detail = modDetails.get(key)
         map.set(mod.id, {
           isWorkshop: true,
           hasUpdate: updates.has(key),
+          version: detail?.version,
+          langCode: detail?.langCode,
         })
       }
     }
     return map
-  }, [mods, installed, updates])
+  }, [mods, installed, updates, modDetails])
 
   const openPath = async (path) => {
     if (path) {
@@ -383,6 +389,8 @@ export function ModList({ config }) {
                 {mod.isDirectoryMod && <Badge appearance="filled" color="brand" size="small">{t('mods.folderConfig')}</Badge>}
                 {mod.isBanned && <Badge appearance="filled" color="danger" size="small">{t('mods.disabled')}</Badge>}
                 {workshopInfo.get(mod.id)?.isWorkshop && <Badge appearance="filled" color="success" size="small">{t('mods.workshopBadge')}</Badge>}
+                {workshopInfo.get(mod.id)?.isWorkshop && workshopInfo.get(mod.id)?.version && <Badge appearance="outline" size="small">v{workshopInfo.get(mod.id).version}</Badge>}
+                {workshopInfo.get(mod.id)?.isWorkshop && workshopInfo.get(mod.id)?.langCode && <Badge appearance="outline" size="small">{LANG_LABELS[workshopInfo.get(mod.id).langCode] || workshopInfo.get(mod.id).langCode}</Badge>}
                 {workshopInfo.get(mod.id)?.hasUpdate && <Badge appearance="filled" color="warning" size="small">{t('mods.hasUpdate')}</Badge>}
               </div>
               <Text size="small" className={mergeClasses(styles.truncatedText, styles.muted)} title={mod.relativePath}>
@@ -390,6 +398,17 @@ export function ModList({ config }) {
               </Text>
             </div>
             <div className={styles.actionRow}>
+              {workshopInfo.get(mod.id)?.isWorkshop && (
+                <Tooltip content={t('mods.uninstall')} relationship="label">
+                  <Button
+                    size="small"
+                    icon={<Delete24Regular />}
+                    appearance="subtle"
+                    className={styles.toggleButton}
+                    onClick={() => onUninstall?.(mod)}
+                  />
+                </Tooltip>
+              )}
               <Tooltip content={mod.isBanned ? t('mods.enable') : t('mods.disable')} relationship="label">
                 <Button
                   size="small"
