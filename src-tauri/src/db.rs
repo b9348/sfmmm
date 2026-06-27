@@ -3,6 +3,10 @@ use mysql::*;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
+// 单个应用实例最多占用 1 个 MySQL 连接，闲置时不保留连接
+const DB_POOL_MIN: usize = 0;
+const DB_POOL_MAX: usize = 1;
+
 // 语义版本比较：返回 -1, 0, 1
 fn semver_cmp(a: &str, b: &str) -> i32 {
     let parse = |s: &str| -> Vec<u32> {
@@ -46,6 +50,12 @@ pub struct DbState {
 impl DbState {
     pub fn new() -> Result<Self, Box<dyn std::error::Error>> {
         let opts = Opts::from_url(&db_url())?;
+        // 限制连接池大小，避免单个客户端占用过多 MySQL 连接
+        let pool_opts = opts
+            .get_pool_opts()
+            .clone()
+            .with_constraints(PoolConstraints::new(DB_POOL_MIN, DB_POOL_MAX).unwrap_or_default());
+        let opts: Opts = OptsBuilder::from_opts(opts).pool_opts(pool_opts).into();
         let pool = Pool::new(opts)?;
         Ok(Self { pool })
     }
@@ -312,11 +322,11 @@ pub async fn db_list_mods(
         let limit = limit.unwrap_or(20).min(100);
         let offset = (page - 1) * limit;
 
-        // 构建搜索条件
+        // 构建搜索条件：支持 mod_key、翻译名称、描述、语言代码模糊匹配
         let (where_sql, mut params): (String, Vec<Value>) = if let Some(ref s) = search {
             let p = format!("%{}%", s);
-            ("WHERE (m.mod_id LIKE ? OR m.id IN (SELECT mod_id FROM mod_translations WHERE name LIKE ? OR description LIKE ?))".into(),
-             vec![p.clone().into(), p.clone().into(), p.into()])
+            ("WHERE (m.mod_id LIKE ? OR m.id IN (SELECT mod_id FROM mod_translations WHERE name LIKE ? OR description LIKE ? OR lang_code LIKE ?))".into(),
+             vec![p.clone().into(), p.clone().into(), p.clone().into(), p.into()])
         } else {
             (String::new(), vec![])
         };

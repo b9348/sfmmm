@@ -5,6 +5,7 @@ import {
 } from '@fluentui/react-components'
 import {
   ArrowClockwise24Regular,
+  Search24Regular,
 } from '@fluentui/react-icons'
 import { useTranslation } from 'react-i18next'
 import { listMods, getModDetail, getModForEdit } from '../../services/workshopApi'
@@ -150,11 +151,11 @@ export function BrowseMods({ initialModId, initialCommentId }) {
     }
   }, [initialModId, initialCommentId, user])
 
-  const fetchMods = useCallback(async (p) => {
+  const fetchMods = useCallback(async (p, keyword = search) => {
     setLoading(true)
     setError('')
     try {
-      const data = await listMods({ lang: 'zh', search, page: p, limit: 20 })
+      const data = await listMods({ lang: 'zh', search: keyword, page: p, limit: 20 })
       setMods(data.mods || [])
       setTotal(data.total || 0)
       setPage(data.page || 1)
@@ -175,7 +176,20 @@ export function BrowseMods({ initialModId, initialCommentId }) {
 
   const handleSearch = (value) => {
     setSearch(value)
+  }
+
+  const handleSearchSubmit = () => {
     setPage(1)
+    fetchMods(1, search)
+  }
+
+  const handleSearchKeyDown = (e) => {
+    if (e.key === 'Enter') {
+      const value = e.target.value
+      setSearch(value)
+      setPage(1)
+      fetchMods(1, value)
+    }
   }
 
   const handleEdit = async (mod) => {
@@ -209,7 +223,11 @@ export function BrowseMods({ initialModId, initialCommentId }) {
             placeholder={t('workshop.searchPlaceholder')}
             value={search}
             onChange={(_, d) => handleSearch(d.value)}
+            onKeyDown={handleSearchKeyDown}
           />
+          <Button size="small" icon={<Search24Regular />} onClick={handleSearchSubmit} disabled={loading}>
+            {t('workshop.search')}
+          </Button>
           <Button size="small" icon={<ArrowClockwise24Regular />} onClick={() => fetchMods(1)} disabled={loading}>
             {t('workshop.refresh')}
           </Button>
