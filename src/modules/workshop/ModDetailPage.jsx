@@ -64,6 +64,13 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground2,
     fontSize: tokens.fontSizeSmall,
   },
+  fab: {
+    position: 'fixed',
+    bottom: '24px',
+    right: '24px',
+    zIndex: 1000,
+    boxShadow: tokens.shadow8,
+  },
 })
 
 export default function ModDetailPage({ mod, onBack, onEdit, scrollToCommentId }) {
@@ -71,6 +78,7 @@ export default function ModDetailPage({ mod, onBack, onEdit, scrollToCommentId }
   const { t, i18n } = useTranslation()
   const { user } = useAuth()
   const perms = mod.user_permissions || {}
+  const canEdit = perms.is_author || perms.can_edit_mod_info || perms.can_edit_all_langs || (perms.editable_langs && perms.editable_langs.length > 0)
   const [installingLang, setInstallingLang] = useState('')
   const [installError, setInstallError] = useState('')
   const [installedDir, setInstalledDir] = useState('')
@@ -204,7 +212,7 @@ export default function ModDetailPage({ mod, onBack, onEdit, scrollToCommentId }
             </Badge>
           )}
         </div>
-        {user && (perms.can_edit_mod_info || perms.can_edit_all_langs || (perms.editable_langs && perms.editable_langs.length > 0)) && (
+        {user && canEdit && (
           <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
             <Button size="small" icon={<Edit24Regular />} appearance="primary" onClick={() => onEdit?.(mod)}>
               {t('workshop.edit')}
@@ -368,6 +376,17 @@ export default function ModDetailPage({ mod, onBack, onEdit, scrollToCommentId }
           </DialogBody>
         </DialogSurface>
       </Dialog>
+
+      {user && canEdit && (
+        <Button
+          size="large"
+          icon={<Edit24Regular />}
+          appearance="primary"
+          className={styles.fab}
+          onClick={() => onEdit?.(mod)}
+          title={t('workshop.edit')}
+        />
+      )}
     </div>
   )
 }

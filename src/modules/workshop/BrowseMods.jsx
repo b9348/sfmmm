@@ -6,12 +6,13 @@ import {
 import {
   ArrowClockwise24Regular,
   Search24Regular,
+  Add24Regular,
 } from '@fluentui/react-icons'
 import { useTranslation } from 'react-i18next'
 import { listMods, getModDetail, getModForEdit } from '../../services/workshopApi'
 import ModDetailPage from './ModDetailPage'
 import { useAuth } from '../../contexts/useAuth'
-import { EditModPage } from './MyMods'
+import { EditModPage, CreateModPage } from './MyMods'
 
 const CATEGORIES = [
   { value: 'v1', label: 'v1' },
@@ -104,6 +105,13 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground3,
     fontSize: tokens.fontSizeSmall,
   },
+  fab: {
+    position: 'fixed',
+    bottom: '24px',
+    right: '24px',
+    zIndex: 1000,
+    boxShadow: tokens.shadow8,
+  },
   authorRow: {
     display: 'flex',
     alignItems: 'center',
@@ -114,7 +122,7 @@ const useStyles = makeStyles({
 export function BrowseMods({ initialModId, initialCommentId }) {
   const styles = useStyles()
   const { t } = useTranslation()
-  const { user } = useAuth()
+  const { user, isLoggedIn } = useAuth()
   const [search, setSearch] = useState('')
   const [mods, setMods] = useState([])
   const [total, setTotal] = useState(0)
@@ -125,6 +133,7 @@ export function BrowseMods({ initialModId, initialCommentId }) {
   const [detailCommentId, setDetailCommentId] = useState(null)
   const [detailLoading, setDetailLoading] = useState(!!initialModId)
   const [editingMod, setEditingMod] = useState(null)
+  const [showCreatePage, setShowCreatePage] = useState(false)
   const initialFetch = useRef(false)
 
   // 从 URL hash 恢复详情页（Ctrl+R 刷新后）或从导航参数进入
@@ -197,6 +206,15 @@ export function BrowseMods({ initialModId, initialCommentId }) {
     } catch (e) {
       alert('Failed to load edit data: ' + e.message)
     }
+  }
+
+  if (showCreatePage) {
+    return (
+      <CreateModPage
+        onClose={() => setShowCreatePage(false)}
+        onCreated={() => { setShowCreatePage(false); fetchMods(1) }}
+      />
+    )
   }
 
   if (editingMod) return <EditModPage mod={editingMod} onClose={() => setEditingMod(null)} onUpdated={() => { setEditingMod(null); fetchMods() }} />
@@ -312,6 +330,17 @@ export function BrowseMods({ initialModId, initialCommentId }) {
             </div>
           )}
         </>
+      )}
+
+      {isLoggedIn && (
+        <Button
+          size="large"
+          icon={<Add24Regular />}
+          appearance="primary"
+          className={styles.fab}
+          onClick={() => setShowCreatePage(true)}
+          title={t('workshop.publishMod')}
+        />
       )}
     </div>
   )

@@ -196,6 +196,8 @@
     "publishing": "发布中...",
     "markdown": "Markdown",
     "richtext": "富文本",
+    "lineBreakTwice": "换行请敲两次回车",
+    "lineBreakOnce": "换行只需敲一次回车",
     "category_v1": "v1 任务",
     "category_v2": "v2 任务",
     "category_dll": "DLL 模组",

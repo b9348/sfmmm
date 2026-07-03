@@ -196,6 +196,8 @@
     "publishing": "Publishing...",
     "markdown": "Markdown",
     "richtext": "Rich Text",
+    "lineBreakTwice": "Press Enter twice for a new line",
+    "lineBreakOnce": "Press Enter once for a new line",
     "category_v1": "v1 Mission",
     "category_v2": "v2 Mission",
     "category_dll": "DLL Mod",

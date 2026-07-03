@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useEditor, EditorContent } from '@tiptap/react'
+import { nodeInputRule, nodePasteRule } from '@tiptap/core'
 import StarterKit from '@tiptap/starter-kit'
 import Placeholder from '@tiptap/extension-placeholder'
 import Image from '@tiptap/extension-image'
@@ -111,7 +112,10 @@ const useStyles = makeStyles({
   },
 })
 
-// 自定义 Tiptap Image 扩展，支持 data-imgbed-pending 属性
+// 自定义 Tiptap Image 扩展，支持 data-imgbed-pending 属性，并兼容 Markdown 图片语法
+const MD_IMAGE_REGEX = /!\[(.*?)\]\(([^)]+)\)/
+const MD_IMAGE_REGEX_GLOBAL = /!\[(.*?)\]\(([^)]+)\)/g
+
 const CustomImage = Image.extend({
   addAttributes() {
     return {
@@ -129,6 +133,38 @@ const CustomImage = Image.extend({
         },
       },
     }
+  },
+  addInputRules() {
+    return [
+      nodeInputRule({
+        find: MD_IMAGE_REGEX,
+        type: this.type,
+        getAttributes: (match) => {
+          const src = match[2]
+          return {
+            src,
+            alt: match[1],
+            dataImgbedPending: src.startsWith('imgbed://pending/') ? src : null,
+          }
+        },
+      }),
+    ]
+  },
+  addPasteRules() {
+    return [
+      nodePasteRule({
+        find: MD_IMAGE_REGEX_GLOBAL,
+        type: this.type,
+        getAttributes: (match) => {
+          const src = match[2]
+          return {
+            src,
+            alt: match[1],
+            dataImgbedPending: src.startsWith('imgbed://pending/') ? src : null,
+          }
+        },
+      }),
+    ]
   },
 })
 
@@ -171,7 +207,7 @@ const useContentStyles = makeStyles({
   },
 })
 
-export function RichTextEditor({ value, onChange, placeholder, maxLength }) {
+export function RichTextEditor({ value, onChange, placeholder, maxLength, disabled = false }) {
   const { t } = useTranslation()
   const styles = useStyles()
   const placeholderText = placeholder ?? t('editor.inputPlaceholder')
@@ -216,6 +252,12 @@ export function RichTextEditor({ value, onChange, placeholder, maxLength }) {
       editor.commands.setContent(value || '', false)
     }
   }, [editor, value])
+
+  // 禁用/启用编辑
+  useEffect(() => {
+    if (!editor) return
+    editor.setEditable(!disabled)
+  }, [editor, disabled])
 
   const insertBlobImage = (file, img) => {
     if (!editor) return false
@@ -275,21 +317,21 @@ export function RichTextEditor({ value, onChange, placeholder, maxLength }) {
   if (!editor) return null
 
   return (
-    <div className={styles.editor} onPaste={handlePaste}>
+    <div className={styles.editor} onPaste={disabled ? undefined : handlePaste}>
       <div className={styles.toolbar}>
-        <Tooltip content={t('editor.bold')} relationship="label"><Button size="small" appearance={editor.isActive('bold') ? 'filled' : 'subtle'} onClick={() => editor.chain().focus().toggleBold().run()}><b>B</b></Button></Tooltip>
-        <Tooltip content={t('editor.italic')} relationship="label"><Button size="small" appearance={editor.isActive('italic') ? 'filled' : 'subtle'} onClick={() => editor.chain().focus().toggleItalic().run()}><i>I</i></Button></Tooltip>
-        <Tooltip content={t('editor.strikethrough')} relationship="label"><Button size="small" appearance={editor.isActive('strike') ? 'filled' : 'subtle'} onClick={() => editor.chain().focus().toggleStrike().run()}><s>S</s></Button></Tooltip>
-        <Tooltip content={t('editor.inlineCode')} relationship="label"><Button size="small" appearance={editor.isActive('code') ? 'filled' : 'subtle'} onClick={() => editor.chain().focus().toggleCode().run()}>{'</>'}</Button></Tooltip>
-        <Tooltip content={t('editor.divider')} relationship="label"><Button size="small" appearance="subtle" onClick={() => editor.chain().focus().setHorizontalRule().run()}>―</Button></Tooltip>
-        <Tooltip content={t('editor.heading2')} relationship="label"><Button size="small" appearance={editor.isActive('heading', { level: 2 }) ? 'filled' : 'subtle'} onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}>H2</Button></Tooltip>
-        <Tooltip content={t('editor.heading3')} relationship="label"><Button size="small" appearance={editor.isActive('heading', { level: 3 }) ? 'filled' : 'subtle'} onClick={() => editor.chain().focus().toggleHeading({ level: 3 }).run()}>H3</Button></Tooltip>
-        <Tooltip content={t('editor.bulletList')} relationship="label"><Button size="small" appearance={editor.isActive('bulletList') ? 'filled' : 'subtle'} onClick={() => editor.chain().focus().toggleBulletList().run()}>•</Button></Tooltip>
-        <Tooltip content={t('editor.orderedList')} relationship="label"><Button size="small" appearance={editor.isActive('orderedList') ? 'filled' : 'subtle'} onClick={() => editor.chain().focus().toggleOrderedList().run()}>1.</Button></Tooltip>
-        <Tooltip content={t('editor.quote')} relationship="label"><Button size="small" appearance={editor.isActive('blockquote') ? 'filled' : 'subtle'} onClick={() => editor.chain().focus().toggleBlockquote().run()}>"</Button></Tooltip>
-        <Tooltip content={t('editor.insertImage')} relationship="label"><Button size="small" icon={<Image24Regular />} onClick={insertImage}>{t('editor.image')}</Button></Tooltip>
-        <Tooltip content={t('editor.undo')} relationship="label"><Button size="small" appearance="subtle" onClick={() => editor.chain().focus().undo().run()}>↶</Button></Tooltip>
-        <Tooltip content={t('editor.redo')} relationship="label"><Button size="small" appearance="subtle" onClick={() => editor.chain().focus().redo().run()}>↷</Button></Tooltip>
+        <Tooltip content={t('editor.bold')} relationship="label"><Button size="small" disabled={disabled} appearance={editor.isActive('bold') ? 'filled' : 'subtle'} onClick={() => editor.chain().focus().toggleBold().run()}><b>B</b></Button></Tooltip>
+        <Tooltip content={t('editor.italic')} relationship="label"><Button size="small" disabled={disabled} appearance={editor.isActive('italic') ? 'filled' : 'subtle'} onClick={() => editor.chain().focus().toggleItalic().run()}><i>I</i></Button></Tooltip>
+        <Tooltip content={t('editor.strikethrough')} relationship="label"><Button size="small" disabled={disabled} appearance={editor.isActive('strike') ? 'filled' : 'subtle'} onClick={() => editor.chain().focus().toggleStrike().run()}><s>S</s></Button></Tooltip>
+        <Tooltip content={t('editor.inlineCode')} relationship="label"><Button size="small" disabled={disabled} appearance={editor.isActive('code') ? 'filled' : 'subtle'} onClick={() => editor.chain().focus().toggleCode().run()}>{'</>'}</Button></Tooltip>
+        <Tooltip content={t('editor.divider')} relationship="label"><Button size="small" disabled={disabled} appearance="subtle" onClick={() => editor.chain().focus().setHorizontalRule().run()}>―</Button></Tooltip>
+        <Tooltip content={t('editor.heading2')} relationship="label"><Button size="small" disabled={disabled} appearance={editor.isActive('heading', { level: 2 }) ? 'filled' : 'subtle'} onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}>H2</Button></Tooltip>
+        <Tooltip content={t('editor.heading3')} relationship="label"><Button size="small" disabled={disabled} appearance={editor.isActive('heading', { level: 3 }) ? 'filled' : 'subtle'} onClick={() => editor.chain().focus().toggleHeading({ level: 3 }).run()}>H3</Button></Tooltip>
+        <Tooltip content={t('editor.bulletList')} relationship="label"><Button size="small" disabled={disabled} appearance={editor.isActive('bulletList') ? 'filled' : 'subtle'} onClick={() => editor.chain().focus().toggleBulletList().run()}>•</Button></Tooltip>
+        <Tooltip content={t('editor.orderedList')} relationship="label"><Button size="small" disabled={disabled} appearance={editor.isActive('orderedList') ? 'filled' : 'subtle'} onClick={() => editor.chain().focus().toggleOrderedList().run()}>1.</Button></Tooltip>
+        <Tooltip content={t('editor.quote')} relationship="label"><Button size="small" disabled={disabled} appearance={editor.isActive('blockquote') ? 'filled' : 'subtle'} onClick={() => editor.chain().focus().toggleBlockquote().run()}>"</Button></Tooltip>
+        <Tooltip content={t('editor.insertImage')} relationship="label"><Button size="small" disabled={disabled} icon={<Image24Regular />} onClick={insertImage}>{t('editor.image')}</Button></Tooltip>
+        <Tooltip content={t('editor.undo')} relationship="label"><Button size="small" disabled={disabled} appearance="subtle" onClick={() => editor.chain().focus().undo().run()}>↶</Button></Tooltip>
+        <Tooltip content={t('editor.redo')} relationship="label"><Button size="small" disabled={disabled} appearance="subtle" onClick={() => editor.chain().focus().redo().run()}>↷</Button></Tooltip>
       </div>
       <EditorContent editor={editor} className={styles.editorContent} />
       {maxLength && maxLength > 0 && (
@@ -301,7 +343,7 @@ export function RichTextEditor({ value, onChange, placeholder, maxLength }) {
   )
 }
 
-export function MarkdownEditor({ value, onChange, placeholder, maxLength }) {
+export function MarkdownEditor({ value, onChange, placeholder, maxLength, disabled = false }) {
   const { t } = useTranslation()
   const styles = useStyles()
   const textareaRef = useRef(null)
@@ -394,9 +436,9 @@ export function MarkdownEditor({ value, onChange, placeholder, maxLength }) {
     <div className={styles.mdContainer}>
       <div className={styles.toolbar}>
         <Tooltip content={t('editor.insertImage')} relationship="label">
-          <Button size="small" icon={<Image24Regular />} onClick={handleInsertImage}>{t('editor.image')}</Button>
+          <Button size="small" disabled={disabled} icon={<Image24Regular />} onClick={handleInsertImage}>{t('editor.image')}</Button>
         </Tooltip>
-        <Button size="small" appearance={!showPreview ? 'filled' : 'subtle'} onClick={() => setShowPreview(false)}>{t('editor.edit')}</Button>
+        <Button size="small" disabled={disabled} appearance={!showPreview ? 'filled' : 'subtle'} onClick={() => setShowPreview(false)}>{t('editor.edit')}</Button>
         <Button size="small" appearance={showPreview ? 'filled' : 'subtle'} onClick={() => setShowPreview(true)}>{t('editor.preview')}</Button>
       </div>
       {showPreview ? (
@@ -416,8 +458,9 @@ export function MarkdownEditor({ value, onChange, placeholder, maxLength }) {
           placeholder={placeholderText}
           value={value || ''}
           maxLength={maxLength}
+          disabled={disabled}
           onChange={(e) => onChange?.(e.target.value)}
-          onPaste={handlePaste}
+          onPaste={disabled ? undefined : handlePaste}
         />
       )}
       {maxLength && maxLength > 0 && (

@@ -9,7 +9,7 @@ import {
 import {
   Add24Regular, Delete24Regular, Edit24Regular,
   ArrowClockwise24Regular, Cloud24Regular,
-  ArrowUpload24Regular,
+  ArrowUpload24Regular, Save24Regular,
 } from '@fluentui/react-icons'
 import { listMyMods, createMod, updateMod, uploadModFile, deleteModFile, login, register, getModForEdit, getModDetail, deleteModWithFiles, checkModKey, setModPermissions } from '../../services/workshopApi'
 import { resolveTranslationImages, extractImgbedUrls, deleteImageFromImgbed } from '../../services/imageApi'
@@ -126,6 +126,13 @@ const useStyles = makeStyles({
     gap: '4px',
     marginBottom: '8px',
   },
+  fab: {
+    position: 'fixed',
+    bottom: '24px',
+    right: '24px',
+    zIndex: 1000,
+    boxShadow: tokens.shadow8,
+  },
 })
 
 function LoginForm() {
@@ -193,7 +200,7 @@ function LoginForm() {
   )
 }
 
-function CreateModPage({ onClose, onCreated }) {
+export function CreateModPage({ onClose, onCreated }) {
   const styles = useStyles()
   const { t } = useTranslation()
   const { user } = useAuth()
@@ -511,9 +518,9 @@ function CreateModPage({ onClose, onCreated }) {
                   </Select>
                 </div>
                 {(trans.instructions_format || 'markdown') === 'richtext' ? (
-                  <RichTextEditor value={trans.instructions} onChange={(html) => handleTransChange(lang, 'instructions', html)} placeholder={t('workshop.instructions')} maxLength={MAX_INSTRUCTIONS_LENGTH} />
+                  <RichTextEditor value={trans.instructions} onChange={(html) => handleTransChange(lang, 'instructions', html)} placeholder={t('workshop.instructions') + '（' + t('workshop.richtext') + '；' + t('workshop.lineBreakOnce') + '）'} maxLength={MAX_INSTRUCTIONS_LENGTH} />
                 ) : (
-                  <MarkdownEditor value={trans.instructions} onChange={(md) => handleTransChange(lang, 'instructions', md)} placeholder={t('workshop.instructions') + '（' + t('workshop.markdown') + '）'} maxLength={MAX_INSTRUCTIONS_LENGTH} />
+                  <MarkdownEditor value={trans.instructions} onChange={(md) => handleTransChange(lang, 'instructions', md)} placeholder={t('workshop.instructions') + '（' + t('workshop.markdown') + '；' + t('workshop.lineBreakTwice') + '）'} maxLength={MAX_INSTRUCTIONS_LENGTH} />
                 )}
               </div>
               <div className={styles.formRow}>
@@ -662,6 +669,11 @@ export function EditModPage({ mod: initialMod, onClose, onUpdated }) {
   const pc = initialMod.perm_config || { mode: 'author_only', open_langs: [], allow_mod_info: true, allow_lang: true, apply_langs: [] }
   const [permissions, setPermissions] = useState({ ...pc })
   const userPermissions = initialMod.user_permissions || {}
+  const canEditModInfo = !!userPermissions?.can_edit_mod_info || !!userPermissions?.is_author
+  const canEditAllLangs = !!userPermissions?.can_edit_all_langs || !!userPermissions?.is_author
+  const editableLangs = userPermissions?.editable_langs || []
+  const canEditLang = (lang) => canEditAllLangs || editableLangs.includes(lang)
+  const hasAnyEditPermission = canEditModInfo || canEditAllLangs || editableLangs.length > 0
 
   const handleSelectFolders = async (lang) => {
     try {
@@ -941,7 +953,7 @@ export function EditModPage({ mod: initialMod, onClose, onUpdated }) {
 
         <div className={styles.formRow}>
           <Text className={styles.formLabel}>{t('workshop.type')}</Text>
-          <Select size="small" value={category} onChange={(_, d) => setCategory(d.value)}>
+          <Select size="small" value={category} onChange={(_, d) => setCategory(d.value)} disabled={!canEditModInfo}>
             <option value="v1">{t('workshop.category_v1')}</option>
             <option value="v2">{t('workshop.category_v2')}</option>
             <option value="dll">{t('workshop.category_dll')}</option>
@@ -959,29 +971,32 @@ export function EditModPage({ mod: initialMod, onClose, onUpdated }) {
               return <option key={l} value={l}>{lang?.label || l}</option>
             })}
           </Select>
-          <Button size="small" onClick={handleAddLang} disabled={!addLang || translations[addLang]}>{t('workshop.addLang')}</Button>
+          <Button size="small" onClick={handleAddLang} disabled={!addLang || translations[addLang] || !canEditAllLangs}>{t('workshop.addLang')}</Button>
         </div>
 
         {langList.map(lang => {
           const langLabel = LANGUAGES.find(l => l.value === lang)?.label || lang
           const trans = translations[lang]
+          const langEditable = canEditLang(lang)
           return (
             <div key={lang} style={{ border: `1px solid ${tokens.colorNeutralStroke2}`, borderRadius: '4px', padding: '8px', marginBottom: '8px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
                 <Text weight="semibold" size="small">{langLabel} ({lang})</Text>
-                <Button size="small" icon={<Delete24Regular />} appearance="subtle" onClick={() => setConfirmRemoveLang(lang)} />
+                {canEditAllLangs && (
+                  <Button size="small" icon={<Delete24Regular />} appearance="subtle" onClick={() => setConfirmRemoveLang(lang)} />
+                )}
               </div>
               <div className={styles.formRow}>
                 <Text className={styles.formLabel}>{t('workshop.name')}</Text>
-                <Input size="small" placeholder={t('workshop.modName')} value={trans.name} onChange={(_, d) => handleTransChange(lang, 'name', d.value)} />
+                <Input size="small" placeholder={t('workshop.modName')} value={trans.name} onChange={(_, d) => handleTransChange(lang, 'name', d.value)} disabled={!langEditable} />
               </div>
               <div className={styles.formRow}>
                 <Text className={styles.formLabel}>{t('workshop.version')}</Text>
-                <Input size="small" placeholder="1.0.0" value={trans.version || '1.0.0'} onChange={(_, d) => handleTransChange(lang, 'version', d.value)} style={{ width: '100px' }} />
+                <Input size="small" placeholder="1.0.0" value={trans.version || '1.0.0'} onChange={(_, d) => handleTransChange(lang, 'version', d.value)} style={{ width: '100px' }} disabled={!langEditable} />
               </div>
               <div className={styles.formRow}>
                 <Text className={styles.formLabel}>{t('workshop.desc')}</Text>
-                <Textarea size="small" placeholder={t('workshop.briefDesc')} value={trans.description} onChange={(_, d) => handleTransChange(lang, 'description', d.value)} />
+                <Textarea size="small" placeholder={t('workshop.briefDesc')} value={trans.description} onChange={(_, d) => handleTransChange(lang, 'description', d.value)} disabled={!langEditable} />
               </div>
               <div className={styles.expandableFormRow}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -990,15 +1005,16 @@ export function EditModPage({ mod: initialMod, onClose, onUpdated }) {
                     size="small"
                     value={trans.instructions_format || 'markdown'}
                     onChange={(_, d) => handleTransChange(lang, 'instructions_format', d.value)}
+                    disabled={!langEditable}
                   >
                     <option value="markdown">{t('workshop.markdown')}</option>
                     <option value="richtext">{t('workshop.richtext')}</option>
                   </Select>
                 </div>
                 {(trans.instructions_format || 'markdown') === 'richtext' ? (
-                  <RichTextEditor value={trans.instructions} onChange={(html) => handleTransChange(lang, 'instructions', html)} placeholder={t('workshop.instructions')} maxLength={MAX_INSTRUCTIONS_LENGTH} />
+                  <RichTextEditor value={trans.instructions} onChange={(html) => handleTransChange(lang, 'instructions', html)} placeholder={t('workshop.instructions') + '（' + t('workshop.richtext') + '；' + t('workshop.lineBreakOnce') + '）'} maxLength={MAX_INSTRUCTIONS_LENGTH} disabled={!langEditable} />
                 ) : (
-                  <MarkdownEditor value={trans.instructions} onChange={(md) => handleTransChange(lang, 'instructions', md)} placeholder={t('workshop.instructions') + '（' + t('workshop.markdown') + '）'} maxLength={MAX_INSTRUCTIONS_LENGTH} />
+                  <MarkdownEditor value={trans.instructions} onChange={(md) => handleTransChange(lang, 'instructions', md)} placeholder={t('workshop.instructions') + '（' + t('workshop.markdown') + '；' + t('workshop.lineBreakTwice') + '）'} maxLength={MAX_INSTRUCTIONS_LENGTH} disabled={!langEditable} />
                 )}
               </div>
               <div className={styles.formRow}>
@@ -1022,20 +1038,20 @@ export function EditModPage({ mod: initialMod, onClose, onUpdated }) {
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                   {category === 'composite' ? (
                     <>
-                      <Button size="small" icon={<ArrowUpload24Regular />} onClick={() => handleSelectFolders(lang)}>{t('workshop.hint_v2')}</Button>
-                      <Button size="small" icon={<ArrowUpload24Regular />} onClick={() => handleSelectFiles(lang)}>{t('workshop.selectFile')}</Button>
+                      <Button size="small" icon={<ArrowUpload24Regular />} onClick={() => handleSelectFolders(lang)} disabled={!langEditable}>{t('workshop.hint_v2')}</Button>
+                      <Button size="small" icon={<ArrowUpload24Regular />} onClick={() => handleSelectFiles(lang)} disabled={!langEditable}>{t('workshop.selectFile')}</Button>
                     </>
                   ) : (
-                    <Button size="small" icon={<ArrowUpload24Regular />} onClick={() => handleSelectFiles(lang)}>
+                    <Button size="small" icon={<ArrowUpload24Regular />} onClick={() => handleSelectFiles(lang)} disabled={!langEditable}>
                       {category === 'v2' ? t('workshop.hint_v2') : category === 'dll' ? t('workshop.hint_dll') : t('workshop.selectFile')}
                     </Button>
                   )}
                   {modFiles[lang] && (
                     <>
-                      <Button size="small" appearance="primary" onClick={() => handleUploadFile(lang)} disabled={uploadingLang === lang}>
+                      <Button size="small" appearance="primary" onClick={() => handleUploadFile(lang)} disabled={uploadingLang === lang || !langEditable}>
                         {uploadingLang === lang ? t('workshop.uploading') : t('workshop.upload')}
                       </Button>
-                      <Button size="small" icon={<Delete24Regular />} appearance="subtle" onClick={() => setModFiles(prev => { const n = { ...prev }; delete n[lang]; return n })} />
+                      <Button size="small" icon={<Delete24Regular />} appearance="subtle" onClick={() => setModFiles(prev => { const n = { ...prev }; delete n[lang]; return n })} disabled={!langEditable} />
                     </>
                   )}
                 </div>
@@ -1063,7 +1079,7 @@ export function EditModPage({ mod: initialMod, onClose, onUpdated }) {
       </div>
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '6px', padding: '12px 8px', borderTop: `1px solid ${tokens.colorNeutralStroke2}` }}>
         <Button size="small" appearance="subtle" onClick={onClose}>{t('workshop.cancel')}</Button>
-        <Button size="small" appearance="primary" onClick={handleSubmit} disabled={busy}>
+        <Button size="small" appearance="primary" onClick={handleSubmit} disabled={busy || !hasAnyEditPermission}>
           {busy ? t('workshop.saving') : t('workshop.save')}
         </Button>
       </div>
@@ -1101,6 +1117,16 @@ export function EditModPage({ mod: initialMod, onClose, onUpdated }) {
           </Text>
         )}
       </ConfirmDialog>
+
+      <Button
+        size="large"
+        icon={<Save24Regular />}
+        appearance="primary"
+        className={styles.fab}
+        onClick={handleSubmit}
+        disabled={busy || !hasAnyEditPermission}
+        title={t('workshop.save')}
+      />
     </div>
   )
 }
@@ -1150,7 +1176,7 @@ export function MyMods() {
 
   const handleDetail = async (mod) => {
     try {
-      const res = await getModDetail(mod.id, 'zh')
+      const res = await getModDetail(mod.id, 'zh', user?.user_id)
       setDetailMod(res.data?.mod || mod)
     } catch {
       setDetailMod(mod)

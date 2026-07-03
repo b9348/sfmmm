@@ -196,6 +196,8 @@
     "publishing": "公開中...",
     "markdown": "Markdown",
     "richtext": "リッチテキスト",
+    "lineBreakTwice": "改行は Enter を 2 回押してください",
+    "lineBreakOnce": "改行は Enter を 1 回押してください",
     "category_v1": "v1 任務",
     "category_v2": "v2 任務",
     "category_dll": "DLL Mod",
