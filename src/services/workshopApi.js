@@ -97,25 +97,25 @@ function normalizeTranslations(translations) {
 }
 
 export async function createMod({ author_id, mod_key, translations, category }) {
-  const res = await dbCall('db_create_mod', {
+  const { data } = await dbCall('db_create_mod', {
     author_id, mod_key,
     translations: normalizeTranslations(translations),
     category,
   })
-  return { success: true, data: res.data }
+  return { success: true, data }
 }
 
 export async function updateMod({ author_id, mod_id, category, translations }) {
-  const res = await dbCall('db_update_mod', {
+  const { data } = await dbCall('db_update_mod', {
     author_id, mod_id: Number(mod_id),
     translations: normalizeTranslations(translations),
     category,
   })
-  return { success: true, data: res.data }
+  return { success: true, data }
 }
 
 export async function deleteMod({ author_id, modId }) {
-  const res = await dbCall('db_delete_mod', { author_id, mod_id: Number(modId) })
+  await dbCall('db_delete_mod', { author_id, mod_id: Number(modId) })
   return { success: true }
 }
 
@@ -123,7 +123,7 @@ export async function deleteModWithFiles({ author_id, modId, files }) {
   for (const file of files) {
     await deleteModFile({ author_id, mod_id: Number(modId), lang_code: file.lang_code, fileUrl: file.file_url })
   }
-  const res = await dbCall('db_delete_mod', { author_id, mod_id: Number(modId) })
+  await dbCall('db_delete_mod', { author_id, mod_id: Number(modId) })
   return { success: true }
 }
 
@@ -182,7 +182,7 @@ export async function uploadModFile({ author_id, mod_id, lang_code, version, fil
   const fileHash = await computeFileHash(file)
 
   // 4. 保存 URL 到 MySQL
-  const saveRes = await dbCall('db_save_mod_file', {
+  await dbCall('db_save_mod_file', {
     mod_id: Number(mod_id),
     author_id,
     lang_code,
@@ -258,7 +258,7 @@ export async function getCommentReplies({ comment_id, page = 1, page_size = 10 }
 }
 
 export async function deleteComment({ comment_id, author_id }) {
-  const res = await dbCall('db_delete_comment', { comment_id, author_id })
+  await dbCall('db_delete_comment', { comment_id, author_id })
   return { success: true }
 }
 

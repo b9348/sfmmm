@@ -260,10 +260,9 @@ export function MissionFolder({ config, subfolder, onUninstall }) {
   const { t } = useTranslation()
   const gamePath = config?.game_path?.replace(/\\/g, '/') || ''
   const rootDir = gamePath ? `${gamePath}/${subfolder}` : ''
-  const [currentDir, setCurrentDir] = useState('')
+  const [currentDir, setCurrentDir] = useState(rootDir)
   const [files, setFiles] = useState([])
-  const [loading, setLoading] = useState(false)
-  const [historyStack, setHistoryStack] = useState([])
+  const [loading, setLoading] = useState(true)
   const { installed, updates, modDetails } = useInstalledMods()
 
   // 检查文件/文件夹是否是已安装的工坊模组
@@ -272,24 +271,8 @@ export function MissionFolder({ config, subfolder, onUninstall }) {
   const hasUpdate = (name) => updates.has(getWorkshopKey(name))
   const getWorkshopDetail = (name) => modDetails.get(getWorkshopKey(name))
 
-  // Reset to root when gamePath or subfolder changes
-  useEffect(() => {
-    setCurrentDir(rootDir)
-    setHistoryStack([])
-    entryCache = {}
-    // 直接在 effect 中加载文件，避免 currentDir 状态更新延迟问题
-    if (rootDir) {
-      setLoading(true)
-      listFiles(rootDir).then(list => {
-        setFiles(list)
-        setLoading(false)
-      })
-    }
-  }, [rootDir])
-
   const loadFiles = useCallback(async () => {
     if (!currentDir) return
-    setLoading(true)
     try {
       const list = await listFiles(currentDir)
       setFiles(list)
@@ -299,34 +282,20 @@ export function MissionFolder({ config, subfolder, onUninstall }) {
   }, [currentDir])
 
   useEffect(() => {
-    // 当 currentDir 改变时加载文件（只要有值就加载）
     if (currentDir) {
       loadFiles()
     }
   }, [currentDir, loadFiles])
 
   const navigateTo = useCallback((targetDir) => {
-    setHistoryStack(prev => [...prev, currentDir])
+    entryCache = {}
     setCurrentDir(targetDir)
-  }, [currentDir])
+  }, [])
 
   const navigateBreadcrumb = useCallback((targetDir) => {
+    entryCache = {}
     setCurrentDir(targetDir)
-    // 重新计算 historyStack：从 rootDir 到 targetDir 的路径
-    if (targetDir === rootDir) {
-      setHistoryStack([])
-    } else if (targetDir.startsWith(rootDir)) {
-      const relative = targetDir.slice(rootDir.length + 1)
-      const parts = relative.split('/')
-      const newStack = []
-      let currentPath = rootDir
-      for (let i = 0; i < parts.length - 1; i++) {
-        currentPath = `${currentPath}/${parts[i]}`
-        newStack.push(currentPath)
-      }
-      setHistoryStack(newStack)
-    }
-  }, [rootDir])
+  }, [])
 
   // Build breadcrumb segments: root folder name + subfolder names
   const breadcrumbSegments = []

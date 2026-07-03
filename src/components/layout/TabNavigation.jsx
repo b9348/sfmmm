@@ -36,7 +36,7 @@ import {
   DocumentFolder24Regular,
 } from '@fluentui/react-icons'
 import { login, register } from '../../services/workshopApi'
-import { useAuth } from '../../contexts/AuthContext'
+import { useAuth } from '../../contexts/useAuth'
 import { useNotification } from '../../contexts/NotificationContext'
 
 const useStyles = makeStyles({

@@ -1,5 +1,4 @@
 import { useTranslation } from 'react-i18next'
-import { useState, useEffect } from 'react'
 import { Select, Text, tokens, Checkbox, makeStyles } from '@fluentui/react-components'
 
 const LANGUAGES = ['zh', 'en', 'ja']
@@ -48,47 +47,24 @@ export default function PermissionSettings({ value, onChange, disabled = false }
   ]
 
   const settings = value || { mode: 'author_only', open_langs: [], allow_mod_info: true, allow_lang: true, apply_langs: [] }
-  const [mode, setMode] = useState(settings.mode)
-  const [openLangs, setOpenLangs] = useState(settings.open_langs)
-  const [allowModInfo, setAllowModInfo] = useState(settings.allow_mod_info !== false)
-  const [allowLang, setAllowLang] = useState(settings.allow_lang !== false)
-  const [applyLangs, setApplyLangs] = useState(settings.apply_langs)
-
-  useEffect(() => {
-    setMode(settings.mode)
-    setOpenLangs(settings.open_langs)
-    setAllowModInfo(settings.allow_mod_info !== false)
-    setAllowLang(settings.allow_lang !== false)
-    setApplyLangs(settings.apply_langs)
-  }, [settings.mode, settings.open_langs, settings.allow_mod_info, settings.allow_lang, settings.apply_langs])
+  const { mode, open_langs: openLangs, allow_mod_info: allowModInfo, allow_lang: allowLang, apply_langs: applyLangs } = settings
 
   const handleModeChange = (_, { value: newMode }) => {
-    setMode(newMode)
-    onChange?.({ mode: newMode, open_langs: openLangs, allow_mod_info: allowModInfo, allow_lang: allowLang, apply_langs: applyLangs })
+    onChange?.({ ...settings, mode: newMode })
   }
 
   const handleOpenLangsToggle = (lang) => {
     const next = openLangs.includes(lang) ? openLangs.filter(l => l !== lang) : [...openLangs, lang]
-    setOpenLangs(next)
-    onChange?.({ mode, open_langs: next, allow_mod_info: allowModInfo, allow_lang: allowLang, apply_langs: applyLangs })
+    onChange?.({ ...settings, open_langs: next })
   }
 
   const handleApplyLangsToggle = (lang) => {
     const next = applyLangs.includes(lang) ? applyLangs.filter(l => l !== lang) : [...applyLangs, lang]
-    setApplyLangs(next)
-    onChange?.({ mode, open_langs: openLangs, allow_mod_info: allowModInfo, allow_lang: allowLang, apply_langs: next })
+    onChange?.({ ...settings, apply_langs: next })
   }
 
-  const handleCheckChange = (setter, field) => (_, { checked }) => {
-    setter(checked)
-    const updated = {
-      mode,
-      open_langs: openLangs,
-      allow_mod_info: field === 'allow_mod_info' ? checked : allowModInfo,
-      allow_lang: field === 'allow_lang' ? checked : allowLang,
-      apply_langs: applyLangs,
-    }
-    onChange?.(updated)
+  const handleCheckChange = (field) => (_, { checked }) => {
+    onChange?.({ ...settings, [field]: checked })
   }
 
   return (
@@ -133,7 +109,7 @@ export default function PermissionSettings({ value, onChange, disabled = false }
               size="small"
               label={t('workshop.permAllowModInfo')}
               checked={allowModInfo}
-              onChange={handleCheckChange(setAllowModInfo, 'allow_mod_info')}
+              onChange={handleCheckChange('allow_mod_info')}
               disabled={disabled}
             />
           </div>
@@ -142,7 +118,7 @@ export default function PermissionSettings({ value, onChange, disabled = false }
               size="small"
               label={t('workshop.permAllowLang')}
               checked={allowLang}
-              onChange={handleCheckChange(setAllowLang, 'allow_lang')}
+              onChange={handleCheckChange('allow_lang')}
               disabled={disabled}
             />
           </div>

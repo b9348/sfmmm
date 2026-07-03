@@ -7,7 +7,7 @@ import {
 import {
   ArrowUndo24Regular, Checkmark24Regular, Delete24Regular,
 } from '@fluentui/react-icons'
-import { useAuth } from '../../contexts/AuthContext'
+import { useAuth } from '../../contexts/useAuth'
 import { useNotification } from '../../contexts/NotificationContext'
 import { listApplications, handleApplication, getMyNotifications, markRead } from '../../services/workshopApi'
 

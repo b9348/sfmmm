@@ -624,6 +624,26 @@ pub async fn db_get_mod_detail(
 
                 let mid = val_to_i64(&vals[0]) as u64;
 
+                // 收集该 mod 的所有翻译
+                let mut translations: serde_json::Value = serde_json::json!({});
+                conn.exec_map(
+                    "SELECT lang_code, name, description, instructions, instructions_format, changelog, version FROM mod_translations WHERE mod_id = ?",
+                    (id,),
+                    |row: Row| {
+                        let r: Vec<Value> = row.unwrap();
+                        if let Some(obj) = translations.as_object_mut() {
+                            obj.insert(val_to_string(r[0].clone()), serde_json::json!({
+                                "name": val_to_string(r[1].clone()),
+                                "description": val_to_string(r[2].clone()),
+                                "instructions": val_to_string(r[3].clone()),
+                                "instructions_format": val_to_string(r[4].clone()),
+                                "changelog": val_to_string(r[5].clone()),
+                                "version": val_to_string(r[6].clone()),
+                            }));
+                        }
+                    }
+                ).map_err(|e| e.to_string())?;
+
                 let user_permissions = if let Some(uid) = user_id {
                     get_user_permissions(&mut conn, mid, uid)?
                 } else {
@@ -646,6 +666,7 @@ pub async fn db_get_mod_detail(
                         "files": files,
                         "created_at": val_to_string(vals[5].clone()),
                         "updated_at": val_to_string(vals[6].clone()),
+                        "translations": translations,
                         "user_permissions": user_permissions,
                     }
                 }), "OK"))

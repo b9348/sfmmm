@@ -136,11 +136,6 @@ function getHttpCodeColor(code) {
   return 'informative'
 }
 
-function formatHttpCode(code) {
-  if (code === 'NETWORK_ERROR') return t('workshop.loadFailed')
-  return code
-}
-
 export function ApiTestTab() {
   const { t } = useTranslation()
   const styles = useStyles()

@@ -4,7 +4,7 @@ import {
   Text, Button, Badge, Avatar,
   makeStyles, tokens,
   Dialog, DialogSurface, DialogBody, DialogTitle,
-  DialogContent, DialogTrigger, DialogActions, Textarea, Select,
+  DialogContent, DialogTrigger, DialogActions, Textarea, Select, Checkbox,
 } from '@fluentui/react-components'
 import {
   ArrowLeft24Regular, ArrowDownload24Regular,
@@ -13,12 +13,18 @@ import {
 import { installMod, uninstallMod } from '../../services/installMod'
 import { RichTextContent, MarkdownContent } from '../../components/common/RichTextEditor'
 import { invoke } from '@tauri-apps/api/core'
-import { useAuth } from '../../contexts/AuthContext'
+import { useAuth } from '../../contexts/useAuth'
 import { submitApplication } from '../../services/workshopApi'
 import CommentSection from './CommentSection'
 import Database from '@tauri-apps/plugin-sql'
 
 const LANG_LABELS = { zh: '中文', en: 'English', ja: '日本語' }
+
+const LANGUAGES = [
+  { value: 'zh', label: '中文' },
+  { value: 'en', label: 'English' },
+  { value: 'ja', label: '日本語' },
+]
 
 const useStyles = makeStyles({
   root: {
@@ -62,7 +68,7 @@ const useStyles = makeStyles({
 
 export default function ModDetailPage({ mod, onBack, onEdit, scrollToCommentId }) {
   const styles = useStyles()
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const { user } = useAuth()
   const perms = mod.user_permissions || {}
   const [installingLang, setInstallingLang] = useState('')
@@ -76,6 +82,11 @@ export default function ModDetailPage({ mod, onBack, onEdit, scrollToCommentId }
   const [applyScope, setApplyScope] = useState('lang_all')
   const [applyReason, setApplyReason] = useState('')
   const [applying, setApplying] = useState(false)
+
+  const userLang = (i18n.language || 'en').split('-')[0]
+  const availableLangs = LANGUAGES.filter(l => mod.translations?.[l.value]?.instructions)
+  const defaultLang = availableLangs.find(l => l.value === userLang)?.value || availableLangs[0]?.value
+  const [selectedLangs, setSelectedLangs] = useState(defaultLang ? [defaultLang] : [])
 
   useEffect(() => {
     const checkInstalled = async () => {
@@ -150,11 +161,38 @@ export default function ModDetailPage({ mod, onBack, onEdit, scrollToCommentId }
     }
   }
 
+  const handleLangToggle = (lang) => {
+    setSelectedLangs(prev => prev.includes(lang) ? prev.filter(l => l !== lang) : [...prev, lang])
+  }
+
+  const sortedSelectedLangs = [...selectedLangs].sort((a, b) => {
+    if (a === userLang) return -1
+    if (b === userLang) return 1
+    return 0
+  })
+
   return (
     <div className={styles.root}>
         <div className={styles.toolbarRow}>
         <Button size="small" icon={<ArrowLeft24Regular />} appearance="subtle" onClick={onBack}>{t('workshop.back')}</Button>
         <Text weight="semibold">{mod.mod_key}</Text>
+        <div style={{ flex: 1 }} />
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+          <Text size="small">{t('workshop.displayLang')}</Text>
+          {LANGUAGES.map(lang => {
+            const hasTrans = !!mod.translations?.[lang.value]?.instructions
+            return (
+              <Checkbox
+                key={lang.value}
+                size="small"
+                label={lang.label}
+                checked={selectedLangs.includes(lang.value)}
+                onChange={() => handleLangToggle(lang.value)}
+                disabled={!hasTrans}
+              />
+            )
+          })}
+        </div>
       </div>
       <div className={styles.detailSection}>
         <div className={styles.authorRow}>
@@ -183,12 +221,29 @@ export default function ModDetailPage({ mod, onBack, onEdit, scrollToCommentId }
         {mod.description && (
           <Text size="small" style={{ lineHeight: '1.6' }}>{mod.description}</Text>
         )}
-        {mod.instructions && (
-          <div style={{ borderTop: `1px solid ${tokens.colorNeutralStroke2}`, paddingTop: '8px' }}>
-            <Text size="small" weight="semibold" block style={{ marginBottom: '8px' }}>{t('workshop.detailedDesc')}</Text>
-            {(mod.instructions_format || 'markdown') === 'richtext'
-              ? <RichTextContent html={mod.instructions} />
-              : <MarkdownContent markdown={mod.instructions} />}
+        {(sortedSelectedLangs.length > 0 || mod.instructions) && (
+          <div style={{ borderTop: `1px solid ${tokens.colorNeutralStroke2}`, paddingTop: '8px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+            <Text size="small" weight="semibold" block>{t('workshop.detailedDesc')}</Text>
+            {sortedSelectedLangs.length > 0 ? sortedSelectedLangs.map(langCode => {
+              const trans = mod.translations?.[langCode]
+              if (!trans?.instructions) return null
+              return (
+                <div key={langCode}>
+                  <Badge appearance="outline" size="small" style={{ marginBottom: '8px' }}>
+                    {LANG_LABELS[langCode] || langCode}
+                  </Badge>
+                  {(trans.instructions_format || 'markdown') === 'richtext'
+                    ? <RichTextContent html={trans.instructions} />
+                    : <MarkdownContent markdown={trans.instructions} />}
+                </div>
+              )
+            }) : (
+              <>
+                {(mod.instructions_format || 'markdown') === 'richtext'
+                  ? <RichTextContent html={mod.instructions} />
+                  : <MarkdownContent markdown={mod.instructions} />}
+              </>
+            )}
           </div>
         )}
         {mod.download_count > 0 && (

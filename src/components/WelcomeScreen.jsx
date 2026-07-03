@@ -159,7 +159,7 @@ export function WelcomeScreen({ onComplete }) {
         <div style={{ padding: '12px' }}>
           <div className={styles.formGrid}>
             <Text className={styles.formLabel}>{t('welcome.languageLabel')}</Text>
-            <Select value={language} onChange={(e, data) => handleLanguageChange(e, { value: e.target.value })}>
+            <Select value={language} onChange={(e) => handleLanguageChange(e, { value: e.target.value })}>
               {languageOptions.map(opt => (
                 <option key={opt.value} value={opt.value}>{opt.label}</option>
               ))}

@@ -137,13 +137,6 @@ export function GameSettings({ config, onConfigChange }) {
     { value: 'ja', label: '日本語' },
   ]
 
-  const handleLanguageChange = async (_e, data) => {
-    const newLang = data.value
-    setLanguage(newLang)
-    i18n.changeLanguage(newLang)
-    await saveConfig({ language: newLang })
-  }
-
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
       <Card appearance="outline">

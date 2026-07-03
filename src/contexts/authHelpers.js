@@ -1,0 +1,38 @@
+import Database from '@tauri-apps/plugin-sql'
+
+export async function loadUserFromDb() {
+  try {
+    const db = await Database.load('sqlite:config.db')
+    const rows = await db.select(
+      "SELECT `key`, value FROM config WHERE `key` IN ('cloud_user_id', 'cloud_username')"
+    )
+    const map = {}
+    rows.forEach(r => { map[r.key] = r.value })
+    if (map.cloud_user_id && map.cloud_username) {
+      return { user_id: Number(map.cloud_user_id), username: map.cloud_username }
+    }
+    return null
+  } catch {
+    return null
+  }
+}
+
+export async function saveUserToDb(user) {
+  try {
+    const db = await Database.load('sqlite:config.db')
+    const upsert = "INSERT OR REPLACE INTO config (id, `key`, value) VALUES ((SELECT id FROM config WHERE `key` = $1), $1, $2)"
+    await db.execute(upsert, ['cloud_user_id', String(user.user_id)])
+    await db.execute(upsert, ['cloud_username', user.username])
+  } catch (e) {
+    console.error('Failed to persist cloud user:', e)
+  }
+}
+
+export async function clearUserFromDb() {
+  try {
+    const db = await Database.load('sqlite:config.db')
+    await db.execute("DELETE FROM config WHERE `key` IN ('cloud_user_id', 'cloud_username')")
+  } catch (e) {
+    console.error('Failed to clear cloud user:', e)
+  }
+}

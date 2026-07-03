@@ -10,7 +10,7 @@ import {
 import { useTranslation } from 'react-i18next'
 import { listMods, getModDetail, getModForEdit } from '../../services/workshopApi'
 import ModDetailPage from './ModDetailPage'
-import { useAuth } from '../../contexts/AuthContext'
+import { useAuth } from '../../contexts/useAuth'
 import { EditModPage } from './MyMods'
 
 const CATEGORIES = [
@@ -123,7 +123,7 @@ export function BrowseMods({ initialModId, initialCommentId }) {
   const [error, setError] = useState('')
   const [detailMod, setDetailMod] = useState(null)
   const [detailCommentId, setDetailCommentId] = useState(null)
-  const [detailLoading, setDetailLoading] = useState(false)
+  const [detailLoading, setDetailLoading] = useState(!!initialModId)
   const [editingMod, setEditingMod] = useState(null)
   const initialFetch = useRef(false)
 
@@ -137,18 +137,16 @@ export function BrowseMods({ initialModId, initialCommentId }) {
       const match = window.location.hash.match(/[?&]comment=(\d+)/)
       return match ? parseInt(match[1]) : null
     })()
-    if (modId) {
-      setDetailLoading(true)
-      getModDetail(modId, 'zh', user?.user_id)
-        .then(data => {
-          if (data.data?.mod) {
-            setDetailMod(data.data.mod)
-            if (commentId) setDetailCommentId(commentId)
-          }
-        })
-        .catch(() => {})
-        .finally(() => setDetailLoading(false))
-    }
+    if (!modId) return
+    getModDetail(modId, 'zh', user?.user_id)
+      .then(data => {
+        if (data.data?.mod) {
+          setDetailMod(data.data.mod)
+          if (commentId) setDetailCommentId(commentId)
+        }
+      })
+      .catch(() => {})
+      .finally(() => setDetailLoading(false))
   }, [initialModId, initialCommentId, user])
 
   const fetchMods = useCallback(async (p, keyword = search) => {

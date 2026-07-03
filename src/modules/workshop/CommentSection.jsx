@@ -1,15 +1,27 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
-  Card, Text, Button, Textarea, Spinner,
+  Card, Text, Button, Spinner,
   makeStyles, tokens, Avatar,
 } from '@fluentui/react-components'
 import {
   Send24Regular, Delete24Regular, Edit24Regular,
 } from '@fluentui/react-icons'
 import { addComment, getComments, getCommentReplies, deleteComment, editComment } from '../../services/workshopApi'
-import { useAuth } from '../../contexts/AuthContext'
-import { MarkdownContent } from '../../components/common/RichTextEditor'
+import { resolvePendingImagesInMarkdown, stripPendingUrls, deleteImageFromImgbed, extractImgbedUrls } from '../../services/imageApi'
+import { useAuth } from '../../contexts/useAuth'
+import { MarkdownContent, MarkdownEditor } from '../../components/common/RichTextEditor'
+
+const MAX_COMMENT_LENGTH = 3000
+const MAX_REPLY_LENGTH = 3000
+
+// 解析评论内容中的 pending 图片并上传
+async function resolveCommentImages(content, modId, commentId) {
+  const result = await resolvePendingImagesInMarkdown(content, {
+    getFolder: () => `sfm/${modId}/comments/${commentId}`,
+  })
+  return result.content
+}
 
 const useStyles = makeStyles({
   root: { marginTop: '16px', borderTop: `1px solid ${tokens.colorNeutralStroke2}`, paddingTop: '12px' },
@@ -35,7 +47,6 @@ export default function CommentSection({ modId, scrollToCommentId }) {
   const { t } = useTranslation()
   const styles = useStyles()
   const { user, isLoggedIn } = useAuth()
-  const commentRefs = useRef({})
 
   // 一楼分页
   const [comments, setComments] = useState([])
@@ -106,13 +117,29 @@ export default function CommentSection({ modId, scrollToCommentId }) {
   const handleSubmitComment = async () => {
     const content = newComment.trim()
     if (!content || !user) return
+    if (content.length > MAX_COMMENT_LENGTH) {
+      alert(t('workshop.commentTooLong', { max: MAX_COMMENT_LENGTH }))
+      return
+    }
     setSubmitting(true)
     try {
-      const res = await addComment({ mod_id: modId, author_id: user.user_id, content })
+      // 1. 先创建评论，pending 图片先用占位文本替代，避免上传失败时残留坏链接
+      const safeContent = stripPendingUrls(content)
+      const res = await addComment({ mod_id: modId, author_id: user.user_id, content: safeContent })
+      const commentId = res.data.comment_id
+
+      // 2. 上传图片并替换占位符
+      const resolvedContent = await resolveCommentImages(content, modId, commentId)
+
+      // 3. 更新评论内容为真实 URL
+      if (resolvedContent !== safeContent) {
+        await editComment({ comment_id: commentId, author_id: user.user_id, content: resolvedContent })
+      }
+
       // 本地追加，不刷新全页
       setComments(prev => [{
-        id: res.data.comment_id,
-        content,
+        id: commentId,
+        content: resolvedContent,
         author_name: user.username,
         created_at: t('workshop.justNow'),
         replies: [],
@@ -146,12 +173,29 @@ export default function CommentSection({ modId, scrollToCommentId }) {
       ? `@${replyTo.authorName} ${content}`
       : content
 
+    if (prefixedContent.length > MAX_REPLY_LENGTH) {
+      alert(t('workshop.replyTooLong', { max: MAX_REPLY_LENGTH }))
+      return
+    }
+
     setSubmitting(true)
     try {
-      const res = await addComment({ mod_id: modId, author_id: user.user_id, content: prefixedContent, parent_id: topId })
+      // 1. 先创建回复，pending 图片先用占位文本替代
+      const safeContent = stripPendingUrls(prefixedContent)
+      const res = await addComment({ mod_id: modId, author_id: user.user_id, content: safeContent, parent_id: topId })
+      const replyId = res.data.comment_id
+
+      // 2. 上传图片并替换占位符
+      const resolvedContent = await resolveCommentImages(prefixedContent, modId, replyId)
+
+      // 3. 更新回复内容为真实 URL
+      if (resolvedContent !== safeContent) {
+        await editComment({ comment_id: replyId, author_id: user.user_id, content: resolvedContent })
+      }
+
       const newReply = {
-        id: res.data.comment_id,
-        content: prefixedContent,
+        id: replyId,
+        content: resolvedContent,
         author_name: user.username,
         created_at: t('workshop.justNow'),
       }
@@ -179,11 +223,58 @@ export default function CommentSection({ modId, scrollToCommentId }) {
   const handleDelete = async (commentId) => {
     if (!user) return
     try {
+      // 找到被删除评论的内容，提取图床图片 URL
+      const topComment = comments.find(c => c.id === commentId)
+      let content = topComment?.content
+      if (!content) {
+        for (const c of comments) {
+          const reply = c.replies?.find(r => r.id === commentId)
+          if (reply) {
+            content = reply.content
+            break
+          }
+        }
+      }
+      if (!content) {
+        for (const rs of Object.values(replyState)) {
+          const reply = rs.replies?.find(r => r.id === commentId)
+          if (reply) {
+            content = reply.content
+            break
+          }
+        }
+      }
+
       await deleteComment({ comment_id: commentId, author_id: user.user_id })
+
+      // 异步清理图床图片（不阻塞 UI，失败仅 warn）
+      // 删除一楼时要同时清理其所有楼中楼的图片
+      const contentsToClean = content ? [content] : []
+      if (topComment) {
+        for (const r of topComment.replies || []) {
+          contentsToClean.push(r.content)
+        }
+        const loadedReplies = replyState[commentId]?.replies || []
+        for (const r of loadedReplies) {
+          if (!topComment.replies?.some(cr => cr.id === r.id)) {
+            contentsToClean.push(r.content)
+          }
+        }
+      }
+      const imageUrls = [...new Set(contentsToClean.flatMap(c => extractImgbedUrls(c)))]
+      for (const url of imageUrls) {
+        deleteImageFromImgbed(url).catch(e => console.warn('删除评论图片失败:', e))
+      }
+
       // 判断是一楼还是楼中楼
       if (comments.some(c => c.id === commentId)) {
         setComments(prev => prev.filter(c => c.id !== commentId))
         setTotal(prev => Math.max(0, prev - 1))
+        setReplyState(prev => {
+          const next = { ...prev }
+          delete next[commentId]
+          return next
+        })
       } else {
         // 从一楼 replies 中移除
         setComments(prev => prev.map(c => {
@@ -216,18 +307,59 @@ export default function CommentSection({ modId, scrollToCommentId }) {
   const handleEdit = async (commentId) => {
     const content = editText.trim()
     if (!content || !user) return
+    const isTopComment = comments.some(c => c.id === commentId)
+    const maxLength = isTopComment ? MAX_COMMENT_LENGTH : MAX_REPLY_LENGTH
+    if (content.length > maxLength) {
+      alert(t('workshop.editTooLong', { max: maxLength }))
+      return
+    }
     try {
-      await editComment({ comment_id: commentId, author_id: user.user_id, content })
+      // 找到原内容，用于后续清理被删除的图片
+      let oldContent = ''
+      const topComment = comments.find(c => c.id === commentId)
+      if (topComment) {
+        oldContent = topComment.content
+      } else {
+        for (const c of comments) {
+          const reply = c.replies?.find(r => r.id === commentId)
+          if (reply) {
+            oldContent = reply.content
+            break
+          }
+        }
+      }
+      if (!oldContent) {
+        for (const rs of Object.values(replyState)) {
+          const reply = rs.replies?.find(r => r.id === commentId)
+          if (reply) {
+            oldContent = reply.content
+            break
+          }
+        }
+      }
+
+      // 编辑时已知 comment_id，先上传新增的图片再保存
+      const resolvedContent = await resolveCommentImages(content, modId, commentId)
+      await editComment({ comment_id: commentId, author_id: user.user_id, content: resolvedContent })
+
+      // 清理被删除的图片（编辑成功后异步处理，不阻塞 UI）
+      const oldUrls = extractImgbedUrls(oldContent)
+      const newUrls = extractImgbedUrls(resolvedContent)
+      const removedUrls = oldUrls.filter(url => !newUrls.includes(url))
+      for (const url of removedUrls) {
+        deleteImageFromImgbed(url).catch(e => console.warn('删除评论图片失败:', e))
+      }
+
       // 更新一楼
       setComments(prev => prev.map(c => {
         if (c.id === commentId) {
-          return { ...c, content }
+          return { ...c, content: resolvedContent }
         }
         // 更新楼中楼
         if (c.replies?.some(r => r.id === commentId)) {
           return {
             ...c,
-            replies: c.replies.map(r => r.id === commentId ? { ...r, content } : r),
+            replies: c.replies.map(r => r.id === commentId ? { ...r, content: resolvedContent } : r),
           }
         }
         return c
@@ -239,7 +371,7 @@ export default function CommentSection({ modId, scrollToCommentId }) {
           if (next[key].replies?.some(r => r.id === commentId)) {
             next[key] = {
               ...next[key],
-              replies: next[key].replies.map(r => r.id === commentId ? { ...r, content } : r),
+              replies: next[key].replies.map(r => r.id === commentId ? { ...r, content: resolvedContent } : r),
             }
           }
         }
@@ -283,15 +415,15 @@ export default function CommentSection({ modId, scrollToCommentId }) {
       {/* ── 发表评论表单 ── */}
       {isLoggedIn ? (
         <Card className={styles.commentFormCard}>
-          <div className={styles.formRow}>
-            <Textarea
-              className={styles.textarea}
-              placeholder={t('workshop.commentPlaceholder')}
-              value={newComment}
-              onChange={(_, d) => setNewComment(d.value)}
-              resize="vertical"
-              maxLength={2000}
-            />
+          <div className={styles.formRow} style={{ alignItems: 'stretch' }}>
+            <div className={styles.textarea}>
+              <MarkdownEditor
+                value={newComment}
+                onChange={setNewComment}
+                placeholder={t('workshop.commentPlaceholder')}
+                maxLength={MAX_COMMENT_LENGTH}
+              />
+            </div>
             <Button
               appearance="primary" icon={<Send24Regular />}
               disabled={!newComment.trim() || submitting}
@@ -333,13 +465,13 @@ export default function CommentSection({ modId, scrollToCommentId }) {
                 {/* 一楼内容（Markdown） */}
                 <div className={styles.commentContent}>
                   {editingId === c.id ? (
-                    <Textarea
-                      className={styles.textarea}
-                      value={editText}
-                      onChange={(_, d) => setEditText(d.value)}
-                      maxLength={2000}
-                      resize="vertical"
-                    />
+                    <div className={styles.textarea}>
+                      <MarkdownEditor
+                        value={editText}
+                        onChange={setEditText}
+                        maxLength={MAX_COMMENT_LENGTH}
+                      />
+                    </div>
                   ) : (
                     <MarkdownContent markdown={c.content} />
                   )}
@@ -387,13 +519,13 @@ export default function CommentSection({ modId, scrollToCommentId }) {
                         </div>
                         <div className={styles.commentContent}>
                           {editingId === r.id ? (
-                            <Textarea
-                              className={styles.textarea}
-                              value={editText}
-                              onChange={(_, d) => setEditText(d.value)}
-                              maxLength={2000}
-                              resize="vertical"
-                            />
+                            <div className={styles.textarea}>
+                              <MarkdownEditor
+                                value={editText}
+                                onChange={setEditText}
+                                maxLength={MAX_REPLY_LENGTH}
+                              />
+                            </div>
                           ) : (
                             <MarkdownContent markdown={r.content} />
                           )}
@@ -464,15 +596,15 @@ export default function CommentSection({ modId, scrollToCommentId }) {
                 {/* ── 楼中楼回复表单 ── */}
                 {isReplyingHere && (
                   <Card className={styles.replyFormCard}>
-                    <div className={styles.formRow}>
-                      <Textarea
-                        className={styles.textarea}
-                        placeholder={t('workshop.replyToUserPlaceholder', { name: replyTo.authorName })}
-                        value={replyText}
-                        onChange={(_, d) => setReplyText(d.value)}
-                        maxLength={2000}
-                        resize="vertical"
-                      />
+                    <div className={styles.formRow} style={{ alignItems: 'stretch' }}>
+                      <div className={styles.textarea}>
+                        <MarkdownEditor
+                          value={replyText}
+                          onChange={setReplyText}
+                          placeholder={t('workshop.replyToUserPlaceholder', { name: replyTo.authorName })}
+                          maxLength={Math.max(0, MAX_REPLY_LENGTH - (replyTo.authorName ? `@${replyTo.authorName} `.length : 0))}
+                        />
+                      </div>
                       <Button
                         appearance="primary" size="small" icon={<Send24Regular />}
                         disabled={!replyText.trim() || submitting}

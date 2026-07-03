@@ -11,8 +11,9 @@ import {
   ArrowClockwise24Regular, Cloud24Regular,
   ArrowUpload24Regular,
 } from '@fluentui/react-icons'
-import { listMyMods, createMod, updateMod, deleteMod, uploadModFile, deleteModFile, login, register, getModForEdit, getModDetail, deleteModWithFiles, checkModKey, setModPermissions } from '../../services/workshopApi'
-import { useAuth } from '../../contexts/AuthContext'
+import { listMyMods, createMod, updateMod, uploadModFile, deleteModFile, login, register, getModForEdit, getModDetail, deleteModWithFiles, checkModKey, setModPermissions } from '../../services/workshopApi'
+import { resolveTranslationImages, extractImgbedUrls, deleteImageFromImgbed } from '../../services/imageApi'
+import { useAuth } from '../../contexts/useAuth'
 import { RichTextEditor, MarkdownEditor } from '../../components/common/RichTextEditor'
 import JSZip from 'jszip'
 import { open } from '@tauri-apps/plugin-dialog'
@@ -21,13 +22,14 @@ import ModDetailPage from './ModDetailPage'
 import { ConfirmDialog } from '../../components'
 import PermissionSettings from './PermissionSettings'
 
-export const LANGUAGES = [
+const LANGUAGES = [
   { value: 'zh', label: '中文' },
   { value: 'en', label: 'English' },
   { value: 'ja', label: '日本語' },
 ]
 
 const LANG_LABELS = { zh: '中文', en: 'English', ja: '日本語' }
+const MAX_INSTRUCTIONS_LENGTH = 10000
 const MAX_ZIP_SIZE = 20 * 1024 * 1024 // 20MB 限制
 
 const useStyles = makeStyles({
@@ -372,18 +374,15 @@ function CreateModPage({ onClose, onCreated }) {
     setError('')
     setBusy(true)
     try {
-      const createResult = await createMod({ author_id: user.user_id, mod_key: modKey.trim(), translations, category })
+      // 1. 先创建 mod 拿到 mod_id（instructions 先留空，避免图片上传失败时数据库残留占位符）
+      const emptyInstructionsTranslations = {}
+      for (const [lang, trans] of Object.entries(translations)) {
+        emptyInstructionsTranslations[lang] = { ...trans, instructions: '' }
+      }
+      const createResult = await createMod({ author_id: user.user_id, mod_key: modKey.trim(), translations: emptyInstructionsTranslations, category })
       const newModId = createResult.data.mod_id
 
-      // 保存权限设置
-      if (permissions.mode !== 'author_only') {
-        try {
-          await setModPermissions({ author_id: user.user_id, mod_id: newModId, ...permissions })
-        } catch (e) {
-          console.warn('Failed to save permissions:', e)
-        }
-      }
-
+      // 2. 上传 mod 文件
       const fileLangs = Object.keys(modFiles).filter(lang => modFiles[lang] && modFiles[lang].length > 0)
       for (const lang of fileLangs) {
         setUploadingLang(lang)
@@ -403,6 +402,19 @@ function CreateModPage({ onClose, onCreated }) {
         await uploadModFile({ author_id: user.user_id, mod_id: newModId, lang_code: lang, version: translations[lang]?.version, file: zipFile, manifest })
       }
       setUploadingLang('')
+
+      // 3. 上传说明中的图片并替换占位符
+      const resolvedTranslations = await resolveTranslationImages(translations, newModId)
+      await updateMod({ author_id: user.user_id, mod_id: newModId, category, translations: resolvedTranslations })
+
+      // 4. 保存权限设置
+      if (permissions.mode !== 'author_only') {
+        try {
+          await setModPermissions({ author_id: user.user_id, mod_id: newModId, ...permissions })
+        } catch (e) {
+          console.warn('Failed to save permissions:', e)
+        }
+      }
 
       onCreated()
       onClose()
@@ -499,9 +511,9 @@ function CreateModPage({ onClose, onCreated }) {
                   </Select>
                 </div>
                 {(trans.instructions_format || 'markdown') === 'richtext' ? (
-                  <RichTextEditor value={trans.instructions} onChange={(html) => handleTransChange(lang, 'instructions', html)} placeholder={t('workshop.instructions')} />
+                  <RichTextEditor value={trans.instructions} onChange={(html) => handleTransChange(lang, 'instructions', html)} placeholder={t('workshop.instructions')} maxLength={MAX_INSTRUCTIONS_LENGTH} />
                 ) : (
-                  <MarkdownEditor value={trans.instructions} onChange={(md) => handleTransChange(lang, 'instructions', md)} placeholder={t('workshop.instructions') + '（' + t('workshop.markdown') + '）'} />
+                  <MarkdownEditor value={trans.instructions} onChange={(md) => handleTransChange(lang, 'instructions', md)} placeholder={t('workshop.instructions') + '（' + t('workshop.markdown') + '）'} maxLength={MAX_INSTRUCTIONS_LENGTH} />
                 )}
               </div>
               <div className={styles.formRow}>
@@ -626,6 +638,13 @@ export function EditModPage({ mod: initialMod, onClose, onUpdated }) {
   }
 
   const [translations, setTranslations] = useState(initTrans)
+  const originalInstructionsRef = useRef(() => {
+    const map = {}
+    for (const [lang, trans] of Object.entries(initTrans())) {
+      map[lang] = trans.instructions || ''
+    }
+    return map
+  })
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const allLangs = LANGUAGES.map(l => l.value)
@@ -859,10 +878,31 @@ export function EditModPage({ mod: initialMod, onClose, onUpdated }) {
       setModFiles({})
       setUploadingLang('')
 
-      // 2. 更新翻译信息
-      await updateMod({ author_id: user.user_id, mod_id: initialMod.id, category, translations })
+      // 2. 上传说明中的图片并替换占位符
+      const resolvedTranslations = await resolveTranslationImages(translations, initialMod.id)
 
-      // 3. 保存权限设置
+      // 3. 清理被删除的图片（updateMod 成功后异步处理，不阻塞 UI）
+      const cleanupImages = () => {
+        const originalInstructions = originalInstructionsRef.current
+        const allLangs = new Set([
+          ...Object.keys(originalInstructions),
+          ...Object.keys(resolvedTranslations),
+        ])
+        for (const lang of allLangs) {
+          const oldUrls = extractImgbedUrls(originalInstructions[lang] || '')
+          const newUrls = extractImgbedUrls(resolvedTranslations[lang]?.instructions || '')
+          const removedUrls = oldUrls.filter(url => !newUrls.includes(url))
+          for (const url of removedUrls) {
+            deleteImageFromImgbed(url).catch(e => console.warn('删除 mod 图片失败:', e))
+          }
+        }
+      }
+
+      // 4. 更新翻译信息
+      await updateMod({ author_id: user.user_id, mod_id: initialMod.id, category, translations: resolvedTranslations })
+      cleanupImages()
+
+      // 5. 保存权限设置
       if (userPermissions?.is_author && permissions.mode !== 'author_only') {
         try {
           await setModPermissions({ author_id: user.user_id, mod_id: initialMod.id, ...permissions })
@@ -956,9 +996,9 @@ export function EditModPage({ mod: initialMod, onClose, onUpdated }) {
                   </Select>
                 </div>
                 {(trans.instructions_format || 'markdown') === 'richtext' ? (
-                  <RichTextEditor value={trans.instructions} onChange={(html) => handleTransChange(lang, 'instructions', html)} placeholder={t('workshop.instructions')} />
+                  <RichTextEditor value={trans.instructions} onChange={(html) => handleTransChange(lang, 'instructions', html)} placeholder={t('workshop.instructions')} maxLength={MAX_INSTRUCTIONS_LENGTH} />
                 ) : (
-                  <MarkdownEditor value={trans.instructions} onChange={(md) => handleTransChange(lang, 'instructions', md)} placeholder={t('workshop.instructions') + '（' + t('workshop.markdown') + '）'} />
+                  <MarkdownEditor value={trans.instructions} onChange={(md) => handleTransChange(lang, 'instructions', md)} placeholder={t('workshop.instructions') + '（' + t('workshop.markdown') + '）'} maxLength={MAX_INSTRUCTIONS_LENGTH} />
                 )}
               </div>
               <div className={styles.formRow}>
