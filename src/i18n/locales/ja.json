@@ -1,6 +1,6 @@
 {
   "app": {
-    "title": "SFMMM - Stardew Valley Mod マネージャー",
+    "title": "SFMMM - ワークショップ Mod マネージャー",
     "welcome": "SFMMM へようこそ",
     "firstSetup": "初回設定",
     "getStarted": "使い始める",
@@ -78,6 +78,8 @@
     "workshopBadge": "ワークショップ",
     "enable": "有効",
     "disable": "無効",
+    "enableAll": "すべて有効化",
+    "disableAll": "すべて無効化",
     "uninstall": "アンインストール",
     "unknownError": "不明なエラー"
   },

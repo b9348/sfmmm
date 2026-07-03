@@ -1,6 +1,6 @@
 {
   "app": {
-    "title": "SFMMM - 星露谷物语 Mod 管理器",
+    "title": "SFMMM - 创意工坊 Mod 管理器",
     "welcome": "欢迎使用 SFMMM",
     "firstSetup": "首次设置",
     "getStarted": "开始使用",
@@ -78,6 +78,8 @@
     "workshopBadge": "创意工坊",
     "enable": "启用",
     "disable": "禁用",
+    "enableAll": "一键恢复全部",
+    "disableAll": "一键禁用全部",
     "uninstall": "退订",
     "unknownError": "未知错误"
   },

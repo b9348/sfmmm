@@ -126,7 +126,10 @@ export function BrowseMods({ initialModId, initialCommentId }) {
   const [search, setSearch] = useState('')
   const [mods, setMods] = useState([])
   const [total, setTotal] = useState(0)
-  const [page, setPage] = useState(1)
+  const [page, setPage] = useState(() => {
+    const saved = sessionStorage.getItem('workshop_browse_page')
+    return saved ? parseInt(saved, 10) : 1
+  })
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [detailMod, setDetailMod] = useState(null)
@@ -175,11 +178,15 @@ export function BrowseMods({ initialModId, initialCommentId }) {
   }, [search])
 
   useEffect(() => {
+    sessionStorage.setItem('workshop_browse_page', String(page))
+  }, [page])
+
+  useEffect(() => {
     if (!initialFetch.current) {
       initialFetch.current = true
-      fetchMods(1)
+      fetchMods(page)
     }
-  }, [fetchMods])
+  }, [fetchMods, page])
 
   const handleSearch = (value) => {
     setSearch(value)
@@ -279,7 +286,13 @@ export function BrowseMods({ initialModId, initialCommentId }) {
             {mods.map(mod => {
               const cat = CATEGORIES.find(c => c.value === mod.category)
               return (
-              <Card key={mod.id} className={styles.card} appearance="outline" onClick={() => { setDetailMod(mod); window.location.hash = `#/mod/${mod.id}` }}>
+              <Card key={mod.id} className={styles.card} appearance="outline" onClick={() => {
+                window.location.hash = `#/mod/${mod.id}`
+                setDetailMod(mod)
+                getModDetail(mod.id, 'zh', user?.user_id)
+                  .then(data => { if (data.data?.mod) setDetailMod(data.data.mod) })
+                  .catch(() => {})
+              }}>
                 <CardHeader
                   header={
                     <Text size="small" className={styles.meta} truncate>{mod.mod_key}</Text>

@@ -56,21 +56,30 @@ fn file_stem(path: &PathBuf) -> Option<String> {
     path.file_stem().map(|name| name.to_string_lossy().into_owned())
 }
 
-fn is_banned_file(file_stem: &str) -> bool {
-    let lower = file_stem.to_lowercase();
-    lower.ends_with("[ban]") || lower.ends_with("[ban]dll")
+fn is_banned_file(file_name: &str) -> bool {
+    let lower = file_name.to_lowercase();
+    lower.ends_with("[ban].dll")
+        || lower.ends_with("[ban].json")
+        || lower.ends_with("[ban]dll")
+        || lower.ends_with("[ban]json")
 }
 
-fn strip_banned_suffix(file_stem: &str) -> String {
-    let lower = file_stem.to_lowercase();
-    if lower.ends_with("[ban]dll") {
+fn strip_banned_suffix(file_name: &str) -> String {
+    let lower = file_name.to_lowercase();
+    if lower.ends_with("[ban].dll") {
+        let stem_len = lower.trim_end_matches("[ban].dll").len();
+        file_name[..stem_len].to_string()
+    } else if lower.ends_with("[ban].json") {
+        let stem_len = lower.trim_end_matches("[ban].json").len();
+        file_name[..stem_len].to_string()
+    } else if lower.ends_with("[ban]dll") {
         let stem_len = lower.trim_end_matches("[ban]dll").len();
-        file_stem[..stem_len].to_string()
-    } else if lower.ends_with("[ban]") {
-        let stem_len = lower.trim_end_matches("[ban]").len();
-        file_stem[..stem_len].to_string()
+        file_name[..stem_len].to_string()
+    } else if lower.ends_with("[ban]json") {
+        let stem_len = lower.trim_end_matches("[ban]json").len();
+        file_name[..stem_len].to_string()
     } else {
-        file_stem.to_string()
+        file_name.to_string()
     }
 }
 
@@ -400,6 +409,62 @@ fn toggle_mod_enabled(path: String) -> Result<(bool, String), String> {
 }
 
 #[tauri::command]
+fn batch_toggle_mod_enabled(dir: String, ban: bool) -> Result<(usize, usize), String> {
+    let dir = PathBuf::from(&dir);
+    if !dir.is_dir() {
+        return Err("目录不存在".into());
+    }
+
+    let mut success = 0usize;
+    let mut failed = 0usize;
+
+    let entries = fs::read_dir(&dir).map_err(|e| format!("读取目录失败: {}", e))?;
+    for entry in entries.filter_map(|e| e.ok()) {
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        let file_name = match path.file_name() {
+            Some(n) => n.to_string_lossy().into_owned(),
+            None => continue,
+        };
+        let lower = file_name.to_lowercase();
+
+        let (new_name, should_rename) = if ban {
+            if lower.ends_with(".dll") && !lower.ends_with("[ban]dll") {
+                let stem = &file_name[..file_name.len() - 4];
+                (format!("{}[ban]dll", stem), true)
+            } else if lower.ends_with(".json") && !lower.ends_with("[ban]json") {
+                let stem = &file_name[..file_name.len() - 5];
+                (format!("{}[ban]json", stem), true)
+            } else {
+                (file_name.clone(), false)
+            }
+        } else {
+            if lower.ends_with("[ban]dll") {
+                let stem = &file_name[..file_name.len() - 8];
+                (format!("{}.dll", stem), true)
+            } else if lower.ends_with("[ban]json") {
+                let stem = &file_name[..file_name.len() - 9];
+                (format!("{}.json", stem), true)
+            } else {
+                (file_name.clone(), false)
+            }
+        };
+
+        if should_rename {
+            let new_path = dir.join(&new_name);
+            match fs::rename(&path, &new_path) {
+                Ok(_) => success += 1,
+                Err(_) => failed += 1,
+            }
+        }
+    }
+
+    Ok((success, failed))
+}
+
+#[tauri::command]
 async fn http_request(url: String, method: String, body: Option<String>) -> Result<String, String> {
     println!("[Rust] HTTP Request: {} {}", method, url);
     
@@ -533,9 +598,12 @@ fn scan_mods(game_path: String) -> Result<ScanModsResult, String> {
             let metadata = entry.metadata().map_err(|e| e.to_string())?;
 
             if metadata.is_file() && is_dll_file(&path) {
-                let file_stem = file_stem(&path).unwrap_or_else(|| file_name.clone());
-                let is_banned = is_banned_file(&file_stem);
-                let display_name = strip_banned_suffix(&file_stem);
+                let is_banned = is_banned_file(&file_name);
+                let display_name = if is_banned {
+                    strip_banned_suffix(&file_name)
+                } else {
+                    file_stem(&path).unwrap_or_else(|| file_name.clone())
+                };
                 mods.push(ModEntry {
                     id: path_to_string(path.clone()),
                     name: display_name,
@@ -568,12 +636,11 @@ fn scan_mods(game_path: String) -> Result<ScanModsResult, String> {
                     continue;
                 }
 
-                let dll_stem = file_stem(&nested_path).unwrap_or_else(|| nested_file_name.clone());
-                let is_banned = is_banned_file(&dll_stem);
+                let is_banned = is_banned_file(&nested_file_name);
                 let display_name = if is_banned {
-                    format!("{} - {}", folder_name, strip_banned_suffix(&dll_stem))
+                    format!("{} - {}", folder_name, strip_banned_suffix(&nested_file_name))
                 } else {
-                    format!("{} - {}", folder_name, dll_stem)
+                    format!("{} - {}", folder_name, file_stem(&nested_path).unwrap_or_else(|| nested_file_name.clone()))
                 };
                 mods.push(ModEntry {
                     id: path_to_string(nested_path.clone()),
@@ -674,7 +741,7 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_http::init())
         .invoke_handler(tauri::generate_handler![
-            open_folder, scan_mods, toggle_mod_enabled, http_request, test_network,
+            open_folder, scan_mods, toggle_mod_enabled, batch_toggle_mod_enabled, http_request, test_network,
             db::db_login, db::db_register,
             db::db_list_mods, db::db_list_my_mods,
             db::db_get_mod_detail, db::db_get_mod_for_edit,

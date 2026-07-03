@@ -269,6 +269,22 @@ export function ModList({ config, onUninstall }) {
     }
   }
 
+  const handleBatchToggle = useCallback(async (ban) => {
+    const targets = filteredMods.filter(m => m.isBanned !== ban)
+    if (targets.length === 0) return
+    setLoading(true)
+    try {
+      for (const mod of targets) {
+        await invoke('toggle_mod_enabled', { path: mod.path })
+      }
+      await scanMods()
+    } catch (e) {
+      console.error('Failed to batch toggle:', e)
+    } finally {
+      setLoading(false)
+    }
+  }, [filteredMods, scanMods])
+
   const activeDir = scanInfo?.activeDirs?.[0]
   const missingCoreFiles = scanInfo?.missingCoreFiles || []
   const prerequisiteInstalled = scanInfo?.bepinExInstalled === true
@@ -375,6 +391,8 @@ export function ModList({ config, onUninstall }) {
           <Button size="small" icon={<FolderOpen24Regular />} onClick={() => openPath(activeDir || gamePath)} disabled={!gamePath}>
             {t('mods.openPluginDir')}
           </Button>
+          <Button size="small" icon={<Pause24Regular />} appearance="subtle" onClick={() => handleBatchToggle(true)} disabled={!gamePath || loading || filteredMods.length === 0} title={t('mods.disableAll')} />
+          <Button size="small" icon={<Play24Regular />} appearance="subtle" onClick={() => handleBatchToggle(false)} disabled={!gamePath || loading || filteredMods.length === 0} title={t('mods.enableAll')} />
         </div>
         <Text size="small" className={styles.pathLine} title={pathText}>{pathText}</Text>
       </Card>

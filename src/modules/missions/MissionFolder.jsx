@@ -338,6 +338,19 @@ export function MissionFolder({ config, subfolder, onUninstall }) {
     }
   }, [currentDir, setFiles])
 
+  const handleBatchToggle = useCallback(async (ban) => {
+    if (!currentDir) return
+    setLoading(true)
+    try {
+      await invoke('batch_toggle_mod_enabled', { dir: currentDir.replace(/\//g, '\\'), ban })
+      await loadFiles()
+    } catch (e) {
+      console.error('Failed to batch toggle:', e)
+    } finally {
+      setLoading(false)
+    }
+  }, [currentDir, loadFiles, setLoading])
+
   return (
     <div className={styles.root}>
       <Card className={styles.toolbarCard}>
@@ -367,6 +380,8 @@ export function MissionFolder({ config, subfolder, onUninstall }) {
 
           <Button size="small" icon={<FolderOpen24Regular />} appearance="subtle" onClick={() => openInExplorer(currentDir)} disabled={!currentDir} />
           <Button size="small" icon={<ArrowClockwise24Regular />} appearance="subtle" onClick={refresh} disabled={!currentDir || loading} />
+          <Button size="small" icon={<Pause24Regular />} appearance="subtle" onClick={() => handleBatchToggle(true)} disabled={!currentDir || loading} title={t('mods.disableAll')} />
+          <Button size="small" icon={<Play24Regular />} appearance="subtle" onClick={() => handleBatchToggle(false)} disabled={!currentDir || loading} title={t('mods.enableAll')} />
         </div>
 
         <Text size="small" className={styles.pathText} title={currentDir}>

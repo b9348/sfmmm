@@ -64,12 +64,30 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground2,
     fontSize: tokens.fontSizeSmall,
   },
-  fab: {
+  fabContainer: {
     position: 'fixed',
     bottom: '24px',
     right: '24px',
     zIndex: 1000,
-    boxShadow: tokens.shadow8,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '12px',
+    alignItems: 'center',
+  },
+  fabItem: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    gap: '4px',
+  },
+  fabLabel: {
+    fontSize: tokens.fontSizeSmall,
+    color: tokens.colorNeutralForeground2,
+    backgroundColor: tokens.colorNeutralBackground1,
+    padding: '2px 6px',
+    borderRadius: '4px',
+    boxShadow: tokens.shadow4,
+    whiteSpace: 'nowrap',
   },
 })
 
@@ -79,6 +97,7 @@ export default function ModDetailPage({ mod, onBack, onEdit, scrollToCommentId }
   const { user } = useAuth()
   const perms = mod.user_permissions || {}
   const canEdit = perms.is_author || perms.can_edit_mod_info || perms.can_edit_all_langs || (perms.editable_langs && perms.editable_langs.length > 0)
+  const canApply = perms.can_apply_mod_info || perms.can_apply_lang
   const [installingLang, setInstallingLang] = useState('')
   const [installError, setInstallError] = useState('')
   const [installedDir, setInstalledDir] = useState('')
@@ -212,20 +231,6 @@ export default function ModDetailPage({ mod, onBack, onEdit, scrollToCommentId }
             </Badge>
           )}
         </div>
-        {user && canEdit && (
-          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-            <Button size="small" icon={<Edit24Regular />} appearance="primary" onClick={() => onEdit?.(mod)}>
-              {t('workshop.edit')}
-            </Button>
-          </div>
-        )}
-        {user && (perms.can_apply_mod_info || perms.can_apply_lang) && (
-          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-            <Button size="small" icon={<Add24Regular />} appearance="outline" onClick={() => setApplyOpen(true)}>
-              {t('workshop.applyToEdit')}
-            </Button>
-          </div>
-        )}
         {mod.description && (
           <Text size="small" style={{ lineHeight: '1.6' }}>{mod.description}</Text>
         )}
@@ -377,15 +382,34 @@ export default function ModDetailPage({ mod, onBack, onEdit, scrollToCommentId }
         </DialogSurface>
       </Dialog>
 
-      {user && canEdit && (
-        <Button
-          size="large"
-          icon={<Edit24Regular />}
-          appearance="primary"
-          className={styles.fab}
-          onClick={() => onEdit?.(mod)}
-          title={t('workshop.edit')}
-        />
+      {user && (canEdit || canApply) && (
+        <div className={styles.fabContainer}>
+          {canEdit && (
+            <div className={styles.fabItem}>
+              <Button
+                size="large"
+                icon={<Edit24Regular />}
+                appearance="primary"
+                shape="circular"
+                onClick={() => onEdit?.(mod)}
+                title={t('workshop.edit')}
+              />
+            </div>
+          )}
+          {canApply && (
+            <div className={styles.fabItem}>
+              <Button
+                size="large"
+                icon={<Add24Regular />}
+                appearance="primary"
+                shape="circular"
+                onClick={() => setApplyOpen(true)}
+                title={t('workshop.applyToEdit')}
+              />
+              <Text className={styles.fabLabel}>{t('workshop.applyToEdit')}</Text>
+            </div>
+          )}
+        </div>
       )}
     </div>
   )

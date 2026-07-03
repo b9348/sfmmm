@@ -1,6 +1,6 @@
 {
   "app": {
-    "title": "SFMMM - Stardew Valley Mod Manager",
+    "title": "SFMMM - Workshop Mod Manager",
     "welcome": "Welcome to SFMMM",
     "firstSetup": "First-time Setup",
     "getStarted": "Get Started",
@@ -78,6 +78,8 @@
     "workshopBadge": "Workshop",
     "enable": "Enable",
     "disable": "Disable",
+    "enableAll": "Enable All",
+    "disableAll": "Disable All",
     "uninstall": "Uninstall",
     "unknownError": "Unknown error"
   },
