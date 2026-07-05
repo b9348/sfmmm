@@ -56,10 +56,38 @@ export async function getUserProfile() {
   return { success: true, data: {} }
 }
 
+// ── 设备标识（一机一赞） ──
+
+const DEVICE_ID_KEY = 'sfmmm_device_id'
+
+function generateUUID() {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = Math.random() * 16 | 0
+    const v = c === 'x' ? r : (r & 0x3 | 0x8)
+    return v.toString(16)
+  })
+}
+
+export function getDeviceId() {
+  let id = localStorage.getItem(DEVICE_ID_KEY)
+  if (!id) {
+    id = generateUUID()
+    localStorage.setItem(DEVICE_ID_KEY, id)
+  }
+  return id
+}
+
 // ── Mod 浏览 ──
 
-export async function listMods({ lang = 'zh', search, page = 1, limit = 20 } = {}) {
-  const res = await dbCall('db_list_mods', { lang, search: search || null, page, limit })
+export async function listMods({ lang = 'zh', search, page = 1, limit = 20, sort_by, device_id } = {}) {
+  const res = await dbCall('db_list_mods', {
+    lang,
+    search: search || null,
+    page,
+    limit,
+    sort_by: sort_by || null,
+    device_id: device_id || null,
+  })
   return {
     success: true,
     mods: res.mods || [],
@@ -69,8 +97,13 @@ export async function listMods({ lang = 'zh', search, page = 1, limit = 20 } = {
   }
 }
 
-export async function getModDetail(id, lang = 'zh', user_id) {
-  const res = await dbCall('db_get_mod_detail', { id: Number(id), lang, user_id: user_id || null })
+export async function getModDetail(id, lang = 'zh', user_id, device_id) {
+  const res = await dbCall('db_get_mod_detail', {
+    id: Number(id),
+    lang,
+    user_id: user_id || null,
+    device_id: device_id || null,
+  })
   return { success: true, data: res.data }
 }
 
@@ -127,8 +160,8 @@ export async function deleteModWithFiles({ author_id, modId, files }) {
   return { success: true }
 }
 
-export async function listMyMods({ author_id, lang = 'zh', page = 1, page_size = 20 } = {}) {
-  const res = await dbCall('db_list_my_mods', { author_id, lang, page, page_size })
+export async function listMyMods({ author_id, lang = 'zh', page = 1, page_size = 20, device_id } = {}) {
+  const res = await dbCall('db_list_my_mods', { author_id, lang, page, page_size, device_id: device_id || null })
   return {
     success: true,
     mods: res.mods || [],
@@ -136,6 +169,16 @@ export async function listMyMods({ author_id, lang = 'zh', page = 1, page_size =
     page: res.page || 1,
     page_size: res.page_size || page_size,
   }
+}
+
+export async function likeMod(mod_id, device_id) {
+  const res = await dbCall('db_like_mod', { mod_id: Number(mod_id), device_id })
+  return res.data || { like_count: 0, is_liked: true }
+}
+
+export async function unlikeMod(mod_id, device_id) {
+  const res = await dbCall('db_unlike_mod', { mod_id: Number(mod_id), device_id })
+  return res.data || { like_count: 0, is_liked: false }
 }
 
 export async function checkModKey(mod_key) {

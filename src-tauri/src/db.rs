@@ -118,6 +118,10 @@ fn val_to_i64(v: &Value) -> i64 {
         Value::UInt(u) => *u as i64,
         Value::Float(f) => *f as i64,
         Value::Double(d) => *d as i64,
+        Value::Bytes(b) => {
+            let s = String::from_utf8_lossy(b).trim().to_string();
+            s.parse::<f64>().unwrap_or(0.0) as i64
+        }
         _ => 0,
     }
 }
@@ -313,6 +317,8 @@ pub async fn db_list_mods(
     search: Option<String>,
     page: Option<u64>,
     limit: Option<u64>,
+    sort_by: Option<String>,
+    device_id: Option<String>,
 ) -> Result<ApiResponse, String> {
     let pool = state.pool.clone();
     tokio::task::spawn_blocking(move || {
@@ -321,6 +327,11 @@ pub async fn db_list_mods(
         let page = page.unwrap_or(1).max(1);
         let limit = limit.unwrap_or(20).min(100);
         let offset = (page - 1) * limit;
+        let sort_by = sort_by.filter(|s| !s.is_empty()).unwrap_or_else(|| "created_at".into());
+        let order_sql = match sort_by.as_str() {
+            "likes" => "ORDER BY m.like_count DESC, m.created_at DESC",
+            _ => "ORDER BY m.created_at DESC",
+        };
 
         // 构建搜索条件：支持 mod_key、翻译名称、描述、语言代码模糊匹配
         let (where_sql, mut params): (String, Vec<Value>) = if let Some(ref s) = search {
@@ -338,7 +349,7 @@ pub async fn db_list_mods(
 
         // 分页查询 — 使用位置索引
         let query_sql = format!(
-            "SELECT m.id, m.mod_id, COALESCE(mt_t.version, mt_en.version) as version, m.category, m.download_count,
+            "SELECT m.id, m.mod_id, COALESCE(mt_t.version, mt_en.version) as version, m.category, m.download_count, m.like_count,
                     m.created_at, m.updated_at, u.username,
                     COALESCE(mt_t.name, mt_en.name, m.mod_id),
                     COALESCE(mt_t.description, mt_en.description, ''),
@@ -351,9 +362,8 @@ pub async fn db_list_mods(
              LEFT JOIN mod_translations mt_t ON m.id = mt_t.mod_id AND mt_t.lang_code = ?
              LEFT JOIN mod_translations mt_en ON m.id = mt_en.mod_id AND mt_en.lang_code = 'en'
              {}
-             ORDER BY m.created_at DESC
-             LIMIT ? OFFSET ?",
-            where_sql
+             {} LIMIT ? OFFSET ?",
+            where_sql, order_sql
         );
 
         let mut all_params: Vec<Value> = vec![lang.clone().into(), lang.clone().into()];
@@ -422,8 +432,29 @@ pub async fn db_list_mods(
             }).map_err(|e| e.to_string())?;
         }
 
+        // 收集 mod_id → 点赞数与本机是否已赞
+        let mut likes_by_mod: std::collections::HashMap<u64, (i64, bool)> = std::collections::HashMap::new();
+        if !mod_ids.is_empty() {
+            let ph: Vec<String> = mod_ids.iter().map(|_| "?".to_string()).collect();
+            let did = device_id.unwrap_or_default();
+            let like_sql = format!(
+                "SELECT mod_id, COUNT(*) as cnt, SUM(CASE WHEN device_id = ? THEN 1 ELSE 0 END) as me FROM mod_likes WHERE mod_id IN ({}) GROUP BY mod_id",
+                ph.join(",")
+            );
+            let mut like_params: Vec<Value> = vec![did.into()];
+            like_params.extend(mod_ids.iter().map(|&id| Value::UInt(id)));
+            conn.exec_map(&like_sql, like_params, |row: Row| {
+                let vals: Vec<Value> = row.unwrap();
+                let mid = val_to_i64(&vals[0]) as u64;
+                let cnt = val_to_i64(&vals[1]);
+                let me = val_to_i64(&vals[2]) > 0;
+                likes_by_mod.insert(mid, (cnt, me));
+            }).map_err(|e| e.to_string())?;
+        }
+
         let items: Vec<serde_json::Value> = mod_rows.into_iter().map(|r| {
             let mid = val_to_i64(&r[0]) as u64;
+            let (like_count, is_liked) = likes_by_mod.get(&mid).copied().unwrap_or((0, false));
             serde_json::json!({
                 "id": mid,
                 "mod_key": val_to_string(r[1].clone()),
@@ -435,6 +466,8 @@ pub async fn db_list_mods(
                 "category": val_to_string(r[3].clone()),
                 "author_name": val_to_string(r[7].clone()),
                 "download_count": val_to_i64(&r[4]),
+                "like_count": like_count,
+                "is_liked": is_liked,
                 "language": val_to_string(r[13].clone()),
                 "files": files_by_mod.remove(&mid).unwrap_or_default(),
                 "translations": trans_by_mod.remove(&mid).unwrap_or_default(),
@@ -454,6 +487,7 @@ pub async fn db_list_my_mods(
     lang: Option<String>,
     page: Option<u64>,
     page_size: Option<u64>,
+    device_id: Option<String>,
 ) -> Result<ApiResponse, String> {
     // 复用 list 逻辑，追加 author_id 过滤
     let pool = state.pool.clone();
@@ -469,7 +503,7 @@ pub async fn db_list_my_mods(
         ).map_err(|e| e.to_string())?.unwrap_or(0i64);
 
         let query_sql = format!(
-            "SELECT m.id, m.mod_id, COALESCE(mt_t.version, mt_en.version) as version, m.category, m.download_count,
+            "SELECT m.id, m.mod_id, COALESCE(mt_t.version, mt_en.version) as version, m.category, m.download_count, m.like_count,
                     m.created_at, m.updated_at, u.username,
                     COALESCE(mt_t.name, mt_en.name, m.mod_id),
                     COALESCE(mt_t.description, mt_en.description, ''),
@@ -551,8 +585,29 @@ pub async fn db_list_my_mods(
             }).map_err(|e| e.to_string())?;
         }
 
+        // 收集 mod_id → 点赞数与本机是否已赞
+        let mut likes_by_mod: std::collections::HashMap<u64, (i64, bool)> = std::collections::HashMap::new();
+        if !mod_ids.is_empty() {
+            let ph: Vec<String> = mod_ids.iter().map(|_| "?".to_string()).collect();
+            let did = device_id.unwrap_or_default();
+            let like_sql = format!(
+                "SELECT mod_id, COUNT(*) as cnt, SUM(CASE WHEN device_id = ? THEN 1 ELSE 0 END) as me FROM mod_likes WHERE mod_id IN ({}) GROUP BY mod_id",
+                ph.join(",")
+            );
+            let mut like_params: Vec<Value> = vec![did.into()];
+            like_params.extend(mod_ids.iter().map(|&id| Value::UInt(id)));
+            conn.exec_map(&like_sql, like_params, |row: Row| {
+                let vals: Vec<Value> = row.unwrap();
+                let mid = val_to_i64(&vals[0]) as u64;
+                let cnt = val_to_i64(&vals[1]);
+                let me = val_to_i64(&vals[2]) > 0;
+                likes_by_mod.insert(mid, (cnt, me));
+            }).map_err(|e| e.to_string())?;
+        }
+
         let items: Vec<serde_json::Value> = mod_rows.into_iter().map(|r| {
             let mid = val_to_i64(&r[0]) as u64;
+            let (like_count, is_liked) = likes_by_mod.get(&mid).copied().unwrap_or((0, false));
             serde_json::json!({
                 "id": mid,
                 "mod_key": val_to_string(r[1].clone()),
@@ -561,6 +616,8 @@ pub async fn db_list_my_mods(
                 "category": val_to_string(r[3].clone()),
                 "author_name": val_to_string(r[7].clone()),
                 "download_count": val_to_i64(&r[4]),
+                "like_count": like_count,
+                "is_liked": is_liked,
                 "files": files_by_mod.remove(&mid).unwrap_or_default(),
                 "translations": trans_by_mod.remove(&mid).unwrap_or_default(),
                 "created_at": val_to_string(r[5].clone()),
@@ -577,6 +634,7 @@ pub async fn db_get_mod_detail(
     id: u64,
     lang: Option<String>,
     user_id: Option<u64>,
+    device_id: Option<String>,
 ) -> Result<ApiResponse, String> {
     let pool = state.pool.clone();
     tokio::task::spawn_blocking(move || {
@@ -584,7 +642,7 @@ pub async fn db_get_mod_detail(
         let lang = lang.filter(|s| !s.is_empty()).unwrap_or_else(|| "en".into());
 
         let row: Option<Row> = conn.exec_first(
-            "SELECT m.id, m.mod_id, COALESCE(mt_t.version, mt_en.version) as version, m.category, m.download_count,
+            "SELECT m.id, m.mod_id, COALESCE(mt_t.version, mt_en.version) as version, m.category, m.download_count, m.like_count,
                     m.created_at, m.updated_at, u.username,
                     COALESCE(mt_t.name, mt_en.name, m.mod_id),
                     COALESCE(mt_t.description, mt_en.description, ''),
@@ -623,6 +681,9 @@ pub async fn db_get_mod_detail(
                 ).map_err(|e| e.to_string())?;
 
                 let mid = val_to_i64(&vals[0]) as u64;
+                // SELECT 列索引：0 id, 1 mod_id, 2 version, 3 category, 4 download_count, 5 like_count,
+                // 6 created_at, 7 updated_at, 8 username, 9 display_name, 10 description,
+                // 11 instructions, 12 instructions_format, 13 changelog, 14 language
 
                 // 收集该 mod 的所有翻译
                 let mut translations: serde_json::Value = serde_json::json!({});
@@ -644,6 +705,18 @@ pub async fn db_get_mod_detail(
                     }
                 ).map_err(|e| e.to_string())?;
 
+                // 点赞数与本机是否已赞
+                let did = device_id.unwrap_or_default();
+                let like_row: Option<(i64, Option<i64>)> = conn.exec_first(
+                    "SELECT COUNT(*), SUM(CASE WHEN device_id = ? THEN 1 ELSE 0 END) FROM mod_likes WHERE mod_id = ?",
+                    (did, id),
+                ).map_err(|e| e.to_string())?;
+                let (like_count, is_liked) = match like_row {
+                    Some((cnt, Some(me))) => (cnt, me > 0),
+                    Some((cnt, None)) => (cnt, false),
+                    None => (0, false),
+                };
+
                 let user_permissions = if let Some(uid) = user_id {
                     get_user_permissions(&mut conn, mid, uid)?
                 } else {
@@ -654,18 +727,20 @@ pub async fn db_get_mod_detail(
                     "mod": {
                         "id": mid,
                         "mod_key": val_to_string(vals[1].clone()),
-                        "display_name": val_to_string(vals[8].clone()),
-                        "description": val_to_string(vals[9].clone()),
-                        "instructions": val_to_string(vals[10].clone()),
-                        "instructions_format": val_to_string(vals[11].clone()),
-                        "changelog": val_to_string(vals[12].clone()),
+                        "display_name": val_to_string(vals[9].clone()),
+                        "description": val_to_string(vals[10].clone()),
+                        "instructions": val_to_string(vals[11].clone()),
+                        "instructions_format": val_to_string(vals[12].clone()),
+                        "changelog": val_to_string(vals[13].clone()),
                         "category": val_to_string(vals[3].clone()),
-                        "author_name": val_to_string(vals[7].clone()),
+                        "author_name": val_to_string(vals[8].clone()),
                         "download_count": val_to_i64(&vals[4]),
-                        "language": val_to_string(vals[13].clone()),
+                        "like_count": like_count,
+                        "is_liked": is_liked,
+                        "language": val_to_string(vals[14].clone()),
                         "files": files,
-                        "created_at": val_to_string(vals[5].clone()),
-                        "updated_at": val_to_string(vals[6].clone()),
+                        "created_at": val_to_string(vals[6].clone()),
+                        "updated_at": val_to_string(vals[7].clone()),
                         "translations": translations,
                         "user_permissions": user_permissions,
                     }
@@ -1041,6 +1116,86 @@ pub async fn db_delete_mod_file(
         ).map_err(|e| e.to_string())?;
 
         Ok(ApiResponse::ok_msg("File deleted"))
+    }).await.map_err(|e| e.to_string())?
+}
+
+// ── 点赞系统 ──────────────────────────────────────────────
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn db_like_mod(
+    state: tauri::State<'_, DbState>,
+    mod_id: u64,
+    device_id: String,
+) -> Result<ApiResponse, String> {
+    let pool = state.pool.clone();
+    tokio::task::spawn_blocking(move || {
+        let mut conn = pool.get_conn().map_err(|e| e.to_string())?;
+        if device_id.is_empty() {
+            return Ok(ApiResponse::err("Device ID is required"));
+        }
+        let exists: Option<(u64,)> = conn.exec_first(
+            "SELECT id FROM mod_likes WHERE mod_id = ? AND device_id = ?",
+            (mod_id, &device_id),
+        ).map_err(|e| e.to_string())?;
+        if exists.is_some() {
+            return Ok(ApiResponse::err("Already liked"));
+        }
+        conn.exec_drop(
+            "INSERT INTO mod_likes (mod_id, device_id) VALUES (?, ?)",
+            (mod_id, &device_id),
+        ).map_err(|e| e.to_string())?;
+        conn.exec_drop(
+            "UPDATE mods SET like_count = like_count + 1 WHERE id = ?",
+            (mod_id,),
+        ).map_err(|e| e.to_string())?;
+        // 给 mod 作者发送新点赞通知
+        let author: Option<(u64,)> = conn.exec_first(
+            "SELECT author_id FROM mods WHERE id = ?", (mod_id,)
+        ).map_err(|e| e.to_string())?;
+        if let Some((author_id,)) = author {
+            conn.exec_drop(
+                "INSERT INTO mod_notifications (user_id, mod_id, type) VALUES (?, ?, 'new_like')",
+                (author_id, mod_id),
+            ).map_err(|e| e.to_string())?;
+        }
+        let new_count: i64 = conn.exec_first(
+            "SELECT like_count FROM mods WHERE id = ?", (mod_id,)
+        ).map_err(|e| e.to_string())?.unwrap_or(0);
+        Ok(ApiResponse::ok_val(serde_json::json!({ "like_count": new_count, "is_liked": true }), "Liked"))
+    }).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn db_unlike_mod(
+    state: tauri::State<'_, DbState>,
+    mod_id: u64,
+    device_id: String,
+) -> Result<ApiResponse, String> {
+    let pool = state.pool.clone();
+    tokio::task::spawn_blocking(move || {
+        let mut conn = pool.get_conn().map_err(|e| e.to_string())?;
+        if device_id.is_empty() {
+            return Ok(ApiResponse::err("Device ID is required"));
+        }
+        let exists: Option<(u64,)> = conn.exec_first(
+            "SELECT id FROM mod_likes WHERE mod_id = ? AND device_id = ?",
+            (mod_id, &device_id),
+        ).map_err(|e| e.to_string())?;
+        if exists.is_none() {
+            return Ok(ApiResponse::err("Not liked yet"));
+        }
+        conn.exec_drop(
+            "DELETE FROM mod_likes WHERE mod_id = ? AND device_id = ?",
+            (mod_id, &device_id),
+        ).map_err(|e| e.to_string())?;
+        conn.exec_drop(
+            "UPDATE mods SET like_count = GREATEST(like_count - 1, 0) WHERE id = ?",
+            (mod_id,),
+        ).map_err(|e| e.to_string())?;
+        let new_count: i64 = conn.exec_first(
+            "SELECT like_count FROM mods WHERE id = ?", (mod_id,)
+        ).map_err(|e| e.to_string())?.unwrap_or(0);
+        Ok(ApiResponse::ok_val(serde_json::json!({ "like_count": new_count, "is_liked": false }), "Unliked"))
     }).await.map_err(|e| e.to_string())?
 }
 

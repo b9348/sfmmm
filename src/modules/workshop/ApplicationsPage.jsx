@@ -289,7 +289,7 @@ export default function ApplicationsPage({ onNavigate }) {
         )}
       </div>
 
-      {/* Section 2: 回复/评论通知 */}
+      {/* Section 2: 评论/回复/点赞通知 */}
       <div className={styles.sectionHeader}>
         <Text className={styles.sectionTitle}>{t('workshop.notifications')}</Text>
         <Button size="small" appearance="outline" icon={<ArrowUndo24Regular />} onClick={handleMarkAllRead}>
@@ -323,7 +323,7 @@ export default function ApplicationsPage({ onNavigate }) {
             <div className={styles.cardContent}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
                 <Badge appearance="outline" size="small">
-                  {n.type === 'new_comment' ? '评论' : '回复'}
+                  {n.type === 'new_like' ? t('workshop.notifLike') : n.type === 'new_comment' ? t('workshop.notifComment') : t('workshop.notifReply')}
                 </Badge>
                 {!n.is_read && (
                   <Badge appearance="filled" size="small" color="brand">
@@ -332,11 +332,17 @@ export default function ApplicationsPage({ onNavigate }) {
                 )}
               </div>
               <Text weight="semibold" size="small">{n.mod_key || n.mod_name}</Text>
-              <Text size="small" className={styles.truncate} title={n.content}>
-                {truncateText(n.content)}
-              </Text>
+              {n.type === 'new_like' ? (
+                <Text size="small" className={styles.metaText}>
+                  {t('workshop.notifLikeHint')}
+                </Text>
+              ) : (
+                <Text size="small" className={styles.truncate} title={n.content}>
+                  {truncateText(n.content)}
+                </Text>
+              )}
               <Text size="small" className={styles.metaText}>
-                {n.author_name} · {n.created_at}
+                {n.author_name ? `${n.author_name} · ${n.created_at}` : n.created_at}
               </Text>
             </div>
           </Card>

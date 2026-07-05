@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   Text, Button, Badge, Avatar,
@@ -9,12 +9,13 @@ import {
 import {
   ArrowLeft24Regular, ArrowDownload24Regular,
   Edit24Regular, Add24Regular, Delete24Regular,
+  Heart24Regular, Heart24Filled,
 } from '@fluentui/react-icons'
 import { installMod, uninstallMod } from '../../services/installMod'
 import { RichTextContent, MarkdownContent } from '../../components/common/RichTextEditor'
 import { invoke } from '@tauri-apps/api/core'
 import { useAuth } from '../../contexts/useAuth'
-import { submitApplication } from '../../services/workshopApi'
+import { submitApplication, likeMod, unlikeMod, getDeviceId } from '../../services/workshopApi'
 import CommentSection from './CommentSection'
 import Database from '@tauri-apps/plugin-sql'
 
@@ -95,6 +96,7 @@ export default function ModDetailPage({ mod, onBack, onEdit, scrollToCommentId }
   const styles = useStyles()
   const { t, i18n } = useTranslation()
   const { user } = useAuth()
+  const deviceIdRef = useRef(getDeviceId())
   const perms = mod.user_permissions || {}
   const canEdit = perms.is_author || perms.can_edit_mod_info || perms.can_edit_all_langs || (perms.editable_langs && perms.editable_langs.length > 0)
   const canApply = perms.can_apply_mod_info || perms.can_apply_lang
@@ -109,6 +111,34 @@ export default function ModDetailPage({ mod, onBack, onEdit, scrollToCommentId }
   const [applyScope, setApplyScope] = useState('lang_all')
   const [applyReason, setApplyReason] = useState('')
   const [applying, setApplying] = useState(false)
+  const [likeCount, setLikeCount] = useState(mod.like_count || 0)
+  const [isLiked, setIsLiked] = useState(!!mod.is_liked)
+  const [likeBusy, setLikeBusy] = useState(false)
+
+  useEffect(() => {
+    setLikeCount(mod.like_count || 0)
+    setIsLiked(!!mod.is_liked)
+  }, [mod.id, mod.like_count, mod.is_liked])
+
+  const handleLikeToggle = async () => {
+    if (likeBusy) return
+    setLikeBusy(true)
+    try {
+      if (isLiked) {
+        const res = await unlikeMod(mod.id, deviceIdRef.current)
+        setLikeCount(res.like_count || Math.max((likeCount) - 1, 0))
+        setIsLiked(false)
+      } else {
+        const res = await likeMod(mod.id, deviceIdRef.current)
+        setLikeCount(res.like_count || (likeCount + 1))
+        setIsLiked(true)
+      }
+    } catch (e) {
+      console.error('Like toggle failed', e)
+    } finally {
+      setLikeBusy(false)
+    }
+  }
 
   const userLang = (i18n.language || 'en').split('-')[0]
   const availableLangs = LANGUAGES.filter(l => mod.translations?.[l.value]?.instructions)
@@ -382,35 +412,46 @@ export default function ModDetailPage({ mod, onBack, onEdit, scrollToCommentId }
         </DialogSurface>
       </Dialog>
 
-      {user && (canEdit || canApply) && (
-        <div className={styles.fabContainer}>
-          {canEdit && (
-            <div className={styles.fabItem}>
-              <Button
-                size="large"
-                icon={<Edit24Regular />}
-                appearance="primary"
-                shape="circular"
-                onClick={() => onEdit?.(mod)}
-                title={t('workshop.edit')}
-              />
-            </div>
-          )}
-          {canApply && (
-            <div className={styles.fabItem}>
-              <Button
-                size="large"
-                icon={<Add24Regular />}
-                appearance="primary"
-                shape="circular"
-                onClick={() => setApplyOpen(true)}
-                title={t('workshop.applyToEdit')}
-              />
-              <Text className={styles.fabLabel}>{t('workshop.applyToEdit')}</Text>
-            </div>
-          )}
+      <div className={styles.fabContainer}>
+        <div className={styles.fabItem}>
+          <Button
+            size="large"
+            icon={isLiked ? <Heart24Filled /> : <Heart24Regular />}
+            appearance={isLiked ? 'primary' : 'outline'}
+            shape="circular"
+            onClick={handleLikeToggle}
+            disabled={likeBusy}
+            title={t('workshop.likeCount', { count: likeCount })}
+            style={isLiked ? { color: tokens.colorPaletteRedForeground1 } : undefined}
+          />
+          <Text className={styles.fabLabel}>{likeCount}</Text>
         </div>
-      )}
+        {user && canEdit && (
+          <div className={styles.fabItem}>
+            <Button
+              size="large"
+              icon={<Edit24Regular />}
+              appearance="primary"
+              shape="circular"
+              onClick={() => onEdit?.(mod)}
+              title={t('workshop.edit')}
+            />
+          </div>
+        )}
+        {user && canApply && (
+          <div className={styles.fabItem}>
+            <Button
+              size="large"
+              icon={<Add24Regular />}
+              appearance="primary"
+              shape="circular"
+              onClick={() => setApplyOpen(true)}
+              title={t('workshop.applyToEdit')}
+            />
+            <Text className={styles.fabLabel}>{t('workshop.applyToEdit')}</Text>
+          </div>
+        )}
+      </div>
     </div>
   )
 }

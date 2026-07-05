@@ -10,8 +10,9 @@ import {
   Add24Regular, Delete24Regular, Edit24Regular,
   ArrowClockwise24Regular, Cloud24Regular,
   ArrowUpload24Regular, Save24Regular,
+  Heart24Regular, Heart24Filled,
 } from '@fluentui/react-icons'
-import { listMyMods, createMod, updateMod, uploadModFile, deleteModFile, login, register, getModForEdit, getModDetail, deleteModWithFiles, checkModKey, setModPermissions } from '../../services/workshopApi'
+import { listMyMods, createMod, updateMod, uploadModFile, deleteModFile, login, register, getModForEdit, getModDetail, deleteModWithFiles, checkModKey, setModPermissions, getDeviceId } from '../../services/workshopApi'
 import { resolveTranslationImages, extractImgbedUrls, deleteImageFromImgbed } from '../../services/imageApi'
 import { useAuth } from '../../contexts/useAuth'
 import { RichTextEditor, MarkdownEditor } from '../../components/common/RichTextEditor'
@@ -1135,6 +1136,7 @@ export function MyMods() {
   const styles = useStyles()
   const { t } = useTranslation()
   const { user, isLoggedIn } = useAuth()
+  const deviceIdRef = useRef(getDeviceId())
   const [mods, setMods] = useState([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -1148,7 +1150,7 @@ export function MyMods() {
     setLoading(true)
     setError('')
     try {
-      const data = await listMyMods({ author_id: user.user_id, lang: 'zh' })
+      const data = await listMyMods({ author_id: user.user_id, lang: 'zh', device_id: deviceIdRef.current })
       setMods(data.mods || [])
     } catch (e) {
       setError(e.message)
@@ -1176,7 +1178,7 @@ export function MyMods() {
 
   const handleDetail = async (mod) => {
     try {
-      const res = await getModDetail(mod.id, 'zh', user?.user_id)
+      const res = await getModDetail(mod.id, 'zh', user?.user_id, deviceIdRef.current)
       setDetailMod(res.data?.mod || mod)
     } catch {
       setDetailMod(mod)
@@ -1279,7 +1281,15 @@ export function MyMods() {
                   </div>
                 }
                 action={
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '3px' }} title={mod.is_liked ? t('workshop.likedHint') : t('workshop.unlikedHint')}>
+                      {mod.is_liked ? (
+                        <Heart24Filled style={{ color: tokens.colorPaletteRedForeground1, fontSize: '16px' }} />
+                      ) : (
+                        <Heart24Regular style={{ fontSize: '16px', color: tokens.colorNeutralForeground3 }} />
+                      )}
+                      <Text size="small">{mod.like_count || 0}</Text>
+                    </div>
                     <Badge appearance="outline" size="small" style={{ whiteSpace: 'nowrap' }}>
                       {mod.category ? t(`workshop.category_${mod.category}`) : t('workshop.uncategorized')}
                     </Badge>

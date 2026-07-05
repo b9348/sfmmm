@@ -2,14 +2,17 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import {
   Card, CardHeader, Text, Button, SearchBox,
   Spinner, makeStyles, tokens, Avatar, Badge,
+  Select,
 } from '@fluentui/react-components'
 import {
   ArrowClockwise24Regular,
   Search24Regular,
   Add24Regular,
+  Heart24Regular,
+  Heart24Filled,
 } from '@fluentui/react-icons'
 import { useTranslation } from 'react-i18next'
-import { listMods, getModDetail, getModForEdit } from '../../services/workshopApi'
+import { listMods, getModDetail, getModForEdit, getDeviceId } from '../../services/workshopApi'
 import ModDetailPage from './ModDetailPage'
 import { useAuth } from '../../contexts/useAuth'
 import { EditModPage, CreateModPage } from './MyMods'
@@ -123,7 +126,9 @@ export function BrowseMods({ initialModId, initialCommentId }) {
   const styles = useStyles()
   const { t } = useTranslation()
   const { user, isLoggedIn } = useAuth()
+  const deviceIdRef = useRef(getDeviceId())
   const [search, setSearch] = useState('')
+  const [sortBy, setSortBy] = useState(() => sessionStorage.getItem('workshop_browse_sort') || 'created_at')
   const [mods, setMods] = useState([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(() => {
@@ -150,7 +155,7 @@ export function BrowseMods({ initialModId, initialCommentId }) {
       return match ? parseInt(match[1]) : null
     })()
     if (!modId) return
-    getModDetail(modId, 'zh', user?.user_id)
+    getModDetail(modId, 'zh', user?.user_id, deviceIdRef.current)
       .then(data => {
         if (data.data?.mod) {
           setDetailMod(data.data.mod)
@@ -165,7 +170,14 @@ export function BrowseMods({ initialModId, initialCommentId }) {
     setLoading(true)
     setError('')
     try {
-      const data = await listMods({ lang: 'zh', search: keyword, page: p, limit: 20 })
+      const data = await listMods({
+        lang: 'zh',
+        search: keyword,
+        page: p,
+        limit: 20,
+        sort_by: sortBy,
+        device_id: deviceIdRef.current,
+      })
       setMods(data.mods || [])
       setTotal(data.total || 0)
       setPage(data.page || 1)
@@ -175,11 +187,15 @@ export function BrowseMods({ initialModId, initialCommentId }) {
     } finally {
       setLoading(false)
     }
-  }, [search])
+  }, [search, sortBy])
 
   useEffect(() => {
     sessionStorage.setItem('workshop_browse_page', String(page))
   }, [page])
+
+  useEffect(() => {
+    sessionStorage.setItem('workshop_browse_sort', sortBy)
+  }, [sortBy])
 
   useEffect(() => {
     if (!initialFetch.current) {
@@ -254,6 +270,13 @@ export function BrowseMods({ initialModId, initialCommentId }) {
           <Button size="small" icon={<ArrowClockwise24Regular />} onClick={() => fetchMods(1)} disabled={loading}>
             {t('workshop.refresh')}
           </Button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginLeft: 'auto' }}>
+            <Text size="small">{t('workshop.sortBy')}</Text>
+            <Select size="small" value={sortBy} onChange={(_, d) => { setSortBy(d.value); setPage(1); fetchMods(1) }} disabled={loading}>
+              <option value="created_at">{t('workshop.sortNewest')}</option>
+              <option value="likes">{t('workshop.sortLikes')}</option>
+            </Select>
+          </div>
         </div>
       </Card>
 
@@ -289,7 +312,7 @@ export function BrowseMods({ initialModId, initialCommentId }) {
               <Card key={mod.id} className={styles.card} appearance="outline" onClick={() => {
                 window.location.hash = `#/mod/${mod.id}`
                 setDetailMod(mod)
-                getModDetail(mod.id, 'zh', user?.user_id)
+                getModDetail(mod.id, 'zh', user?.user_id, deviceIdRef.current)
                   .then(data => { if (data.data?.mod) setDetailMod(data.data.mod) })
                   .catch(() => {})
               }}>
@@ -304,9 +327,19 @@ export function BrowseMods({ initialModId, initialCommentId }) {
                     </div>
                   }
                   action={
-                    <Badge appearance="outline" size="small" style={{ whiteSpace: 'nowrap' }}>
-                      {cat ? t(`workshop.category_${cat.value}`) : (mod.category ? t(`workshop.category_${mod.category}`, mod.category) : t('workshop.uncategorized'))}
-                    </Badge>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '3px' }} title={mod.is_liked ? t('workshop.likedHint') : t('workshop.unlikedHint')}>
+                        {mod.is_liked ? (
+                          <Heart24Filled style={{ color: tokens.colorPaletteRedForeground1, fontSize: '16px' }} />
+                        ) : (
+                          <Heart24Regular style={{ fontSize: '16px', color: tokens.colorNeutralForeground3 }} />
+                        )}
+                        <Text size="small">{mod.like_count || 0}</Text>
+                      </div>
+                      <Badge appearance="outline" size="small" style={{ whiteSpace: 'nowrap' }}>
+                        {cat ? t(`workshop.category_${cat.value}`) : (mod.category ? t(`workshop.category_${mod.category}`, mod.category) : t('workshop.uncategorized'))}
+                      </Badge>
+                    </div>
                   }
                 />
                 <div className={styles.cardBody}>
