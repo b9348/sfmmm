@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   Card,
@@ -18,10 +18,9 @@ import {
 import { makeStyles, tokens } from '@fluentui/react-components'
 import { invoke } from '@tauri-apps/api/core'
 import { open as openDialog } from '@tauri-apps/plugin-dialog'
-import { open as openUrl } from '@tauri-apps/plugin-shell'
 import Database from '@tauri-apps/plugin-sql'
 import i18n from '../../i18n'
-import { checkVersion } from '../../services/updateApi'
+import { checkVersion, prepareUpdate, applyUpdate } from '../../services/updateApi'
 import APP_VERSION from '../../version.js'
 
 const useStyles = makeStyles({
@@ -73,6 +72,9 @@ export function GameSettings({ config, onConfigChange }) {
   const [gamePath, setGamePath] = useState(config?.game_path || '')
   const [language, setLanguage] = useState(config?.language || i18nInstance.language || 'zh')
   const [checking, setChecking] = useState(false)
+  const [downloading, setDownloading] = useState(false)
+  const [prepared, setPrepared] = useState(false)
+  const [pendingUpdate, setPendingUpdate] = useState(false)
   const [updateInfo, setUpdateInfo] = useState(null)
 
   const browseGameFolder = async () => {
@@ -111,9 +113,25 @@ export function GameSettings({ config, onConfigChange }) {
     }
   }
 
+  // Load pending update flag on mount
+  useEffect(() => {
+    (async () => {
+      try {
+        const db = await Database.load('sqlite:config.db')
+        const rows = await db.select(`SELECT value FROM config WHERE \`key\` = 'pending_update'`)
+        if (rows[0]?.value === 'true') {
+          setPendingUpdate(true)
+        }
+      } catch (e) {
+        console.warn('[Update] 读取待更新状态失败:', e)
+      }
+    })()
+  }, [])
+
   const handleCheckUpdate = async () => {
     setChecking(true)
     setUpdateInfo(null)
+    setPrepared(false)
     try {
       const info = await checkVersion(APP_VERSION)
       setUpdateInfo(info)
@@ -125,9 +143,38 @@ export function GameSettings({ config, onConfigChange }) {
     }
   }
 
-  const handleDownloadUpdate = () => {
-    if (updateInfo?.updateUrl) {
-      openUrl(updateInfo.updateUrl)
+  const handleDownloadUpdate = async () => {
+    if (!updateInfo?.updateUrl || downloading) return
+    setDownloading(true)
+    try {
+      await prepareUpdate(updateInfo.updateUrl)
+      setPrepared(true)
+      setPendingUpdate(false)
+      await saveConfig({ pending_update: 'false' })
+    } catch (e) {
+      console.error('[Update] 下载更新失败:', e)
+      setUpdateInfo(prev => ({ ...prev, error: e.message }))
+    } finally {
+      setDownloading(false)
+    }
+  }
+
+  const handleApplyUpdate = async () => {
+    try {
+      await applyUpdate()
+    } catch (e) {
+      console.error('[Update] 启动更新失败:', e)
+      setUpdateInfo(prev => ({ ...prev, error: e.message }))
+    }
+  }
+
+  const handleLater = async () => {
+    try {
+      await saveConfig({ pending_update: 'true' })
+      setPendingUpdate(true)
+      setPrepared(false)
+    } catch (e) {
+      console.error('[Update] 保存待更新状态失败:', e)
     }
   }
 
@@ -197,29 +244,47 @@ export function GameSettings({ config, onConfigChange }) {
             >
 {checking ? t('settings.checking') : t('settings.checkUpdateBtn')}
             </Button>
-            {updateInfo && (
-              <div className={styles.updateInfo}>
-                {updateInfo.hasUpdate ? (
-                  <>
-                    <span className={styles.currentTag}>v{APP_VERSION}</span>
-                    <Text>→</Text>
-                    <span className={styles.newTag}>v{updateInfo.latestVersion}</span>
-                    <Button
-                      size="small"
-                      appearance="primary"
-                      icon={<ArrowDownload24Regular />}
-                      onClick={handleDownloadUpdate}
-                    >
-                      {t('settings.downloadUpdate')}
-                    </Button>
-                  </>
-                ) : updateInfo.error ? (
-                  <Text className={styles.noUpdate}>{t('settings.checkFailed', { msg: updateInfo.error })}</Text>
-                ) : (
-                  <span className={styles.noUpdate}>{t('settings.alreadyLatest')}</span>
-                )}
-              </div>
-            )}
+            <div className={styles.updateInfo}>
+              {prepared ? (
+                <>
+                  <span className={styles.currentTag}>v{APP_VERSION}</span>
+                  <Text>→</Text>
+                  <span className={styles.newTag}>v{updateInfo?.latestVersion}</span>
+                  <Button
+                    size="small"
+                    appearance="primary"
+                    icon={<ArrowDownload24Regular />}
+                    onClick={handleApplyUpdate}
+                  >
+                    {t('settings.restartAndUpdate')}
+                  </Button>
+                  <Button size="small" onClick={handleLater}>
+                    {t('settings.updateLater')}
+                  </Button>
+                </>
+              ) : updateInfo?.hasUpdate ? (
+                <>
+                  <span className={styles.currentTag}>v{APP_VERSION}</span>
+                  <Text>→</Text>
+                  <span className={styles.newTag}>v{updateInfo.latestVersion}</span>
+                  <Button
+                    size="small"
+                    appearance="primary"
+                    icon={downloading ? <Spinner size="tiny" /> : <ArrowDownload24Regular />}
+                    onClick={handleDownloadUpdate}
+                    disabled={downloading}
+                  >
+                    {downloading ? t('settings.downloadingUpdate') : t('settings.downloadUpdate')}
+                  </Button>
+                </>
+              ) : pendingUpdate ? (
+                <Text className={styles.noUpdate}>{t('settings.updateOnNextStart')}</Text>
+              ) : updateInfo?.error ? (
+                <Text className={styles.noUpdate}>{t('settings.checkFailed', { msg: updateInfo.error })}</Text>
+              ) : updateInfo ? (
+                <span className={styles.noUpdate}>{t('settings.alreadyLatest')}</span>
+              ) : null}
+            </div>
           </div>
           <Text size="small" style={{ color: tokens.colorNeutralForeground3 }}>
             {t('settings.currentVersion', { version: APP_VERSION })}

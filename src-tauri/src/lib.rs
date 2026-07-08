@@ -754,7 +754,8 @@ pub fn run() {
             db::db_add_comment, db::db_get_comments, db::db_get_replies, db::db_edit_comment, db::db_delete_comment,
             db::db_like_mod, db::db_unlike_mod,
             db::db_check_updates,
-            db::db_install_update,
+            db::db_prepare_update,
+            db::db_apply_update,
             // 权限系统
             db::db_set_mod_permissions,
             db::db_submit_application,

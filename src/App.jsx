@@ -7,7 +7,7 @@ import { AuthProvider } from './contexts/AuthContext.jsx'
 import { NotificationProvider } from './contexts/NotificationContext'
 import { usePersistUI } from './hooks/usePersistUI'
 import Database from '@tauri-apps/plugin-sql'
-import { checkVersion } from './services/updateApi'
+import { checkVersion, applyUpdate } from './services/updateApi'
 import { uninstallMod } from './services/installMod'
 import { useTranslation } from 'react-i18next'
 import APP_VERSION from './version.js'
@@ -82,6 +82,36 @@ function App() {
     }
     doCheck()
     return () => { cancelled = true }
+  }, [])
+
+  // 启动时检查是否有待更新安装包，有则自动应用（仅已完成首次设置后）
+  useEffect(() => {
+    (async () => {
+      let db
+      try {
+        db = await Database.load('sqlite:config.db')
+        const rows = await db.select(`SELECT \`key\`, value FROM config WHERE \`key\` IN ('pending_update', 'initialized')`)
+        const cfg = {}
+        rows.forEach(r => { cfg[r.key] = r.value })
+
+        // 首次运行时不自动应用更新，避免在欢迎屏/设置流程中退出
+        if (cfg.initialized !== 'true') return
+        if (cfg.pending_update !== 'true') return
+
+        await applyUpdate()
+      } catch (e) {
+        console.warn('[Update] 自动应用待更新失败:', e)
+        // 失败后重置标志，避免每次启动都重试失败的更新
+        try {
+          if (!db) db = await Database.load('sqlite:config.db')
+          await db.execute(
+            `INSERT OR REPLACE INTO config (id, \`key\`, value) VALUES ((SELECT id FROM config WHERE \`key\` = 'pending_update'), 'pending_update', 'false')`
+          )
+        } catch (clearErr) {
+          console.warn('[Update] 清除 pending_update 失败:', clearErr)
+        }
+      }
+    })()
   }, [])
 
   useEffect(() => {

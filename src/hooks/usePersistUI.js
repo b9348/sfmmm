@@ -90,7 +90,8 @@ export function usePersistUI() {
         }
         const x = parseInt(cfg.window_x)
         const y = parseInt(cfg.window_y)
-        if (!isNaN(x) && !isNaN(y)) {
+        // Ignore minimized/off-screen coordinates (Windows may report -32000 when minimized)
+        if (!isNaN(x) && !isNaN(y) && x > -30000 && y > -30000) {
           await appWindow.current.setPosition(new PhysicalPosition(x, y))
         }
         if (cfg.window_maximized === 'true') {
@@ -103,14 +104,20 @@ export function usePersistUI() {
           if (!win) return
           try {
             const maximized = await win.isMaximized()
+            const minimized = await win.isMinimized()
             writeConfig('window_maximized', maximized ? 'true' : 'false')
-            if (!maximized) {
+            // Do not save size/position while minimized to avoid invalid values
+            if (!maximized && !minimized) {
               const size = await win.outerSize()
-              writeConfig('window_width', String(size.width))
-              writeConfig('window_height', String(size.height))
+              if (size.width > 100 && size.height > 100) {
+                writeConfig('window_width', String(size.width))
+                writeConfig('window_height', String(size.height))
+              }
               const pos = await win.outerPosition()
-              writeConfig('window_x', String(pos.x))
-              writeConfig('window_y', String(pos.y))
+              if (pos.x > -30000 && pos.y > -30000) {
+                writeConfig('window_x', String(pos.x))
+                writeConfig('window_y', String(pos.y))
+              }
             }
           } catch (e) {
             console.warn('[usePersistUI] saveWindowState error:', e)

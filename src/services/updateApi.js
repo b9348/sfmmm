@@ -55,9 +55,16 @@ export async function checkVersion(currentVersion) {
 }
 
 /**
- * 自动下载并静默安装更新
+ * 下载更新安装包到本地（不立即安装）
  * @param {string} url - 安装包下载地址
  */
-export async function installUpdate(url) {
-  return await invoke('db_install_update', { url })
+export async function prepareUpdate(url) {
+  return await invoke('db_prepare_update', { url })
+}
+
+/**
+ * 启动已下载的安装包并退出当前应用
+ */
+export async function applyUpdate() {
+  return await invoke('db_apply_update')
 }

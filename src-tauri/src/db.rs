@@ -2,6 +2,7 @@ use mysql::prelude::*;
 use mysql::*;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
+use tauri::Manager;
 
 // 单个应用实例最多占用 1 个 MySQL 连接，闲置时不保留连接
 const DB_POOL_MIN: usize = 0;
@@ -1559,23 +1560,45 @@ pub async fn db_get_version(
     }).await.map_err(|e| e.to_string())?
 }
 
-/// 下载并静默安装更新
+fn installer_path(app_handle: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
+    let data_dir = app_handle.path().app_data_dir().map_err(|e| format!("无法获取应用数据目录: {}", e))?;
+    std::fs::create_dir_all(&data_dir).map_err(|e| format!("创建应用数据目录失败: {}", e))?;
+    Ok(data_dir.join("sfmmm_update.exe"))
+}
+
+/// 下载更新安装包到应用数据目录，返回保存路径
 #[tauri::command]
-pub async fn db_install_update(url: String) -> Result<String, String> {
-    let response = reqwest::get(&url).await.map_err(|e| format!("下载失败: {}", e))?;
+pub async fn db_prepare_update(app_handle: tauri::AppHandle, url: String) -> Result<String, String> {
+    let response = reqwest::get(&url)
+        .await
+        .and_then(|r| r.error_for_status())
+        .map_err(|e| format!("下载失败: {}", e))?;
     let bytes = response.bytes().await.map_err(|e| format!("读取响应失败: {}", e))?;
 
-    let temp_dir = std::env::temp_dir();
-    let installer_path = temp_dir.join("sfmmm_update.exe");
+    let path = installer_path(&app_handle)?;
+    std::fs::write(&path, &bytes)
+        .map_err(|e| format!("写入安装包失败: {}", e))?;
 
-    std::fs::write(&installer_path, &bytes)
-        .map_err(|e| format!("写入临时文件失败: {}", e))?;
+    Ok(path.to_string_lossy().into_owned())
+}
+
+/// 启动已下载的安装包并退出当前应用
+#[tauri::command]
+pub async fn db_apply_update(app_handle: tauri::AppHandle) -> Result<String, String> {
+    let path = installer_path(&app_handle)?;
+    if !path.exists() {
+        return Err("未找到更新安装包，请重新检查更新".into());
+    }
 
     // 静默安装（NSIS /S 参数），安装器会等待安装完成后启动新版本
-    std::process::Command::new(&installer_path)
+    std::process::Command::new(&path)
         .arg("/S")
         .spawn()
         .map_err(|e| format!("启动安装程序失败: {}", e))?;
+
+    // 退出当前应用，避免安装程序无法覆盖运行中的 exe
+    // 注意：exit 会终止进程，因此 Ok 返回值不会到达前端
+    app_handle.exit(0);
 
     Ok("安装程序已启动，应用将自动更新".into())
 }
