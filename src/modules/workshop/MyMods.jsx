@@ -31,7 +31,8 @@ const LANGUAGES = [
 
 const LANG_LABELS = { zh: '中文', en: 'English', ja: '日本語' }
 const MAX_INSTRUCTIONS_LENGTH = 10000
-const MAX_ZIP_SIZE = 20 * 1024 * 1024 // 20MB 限制
+const MAX_ZIP_SIZE_BASE = 20 * 1024 * 1024 // 20MB 限制
+const MAX_ZIP_SIZE_R2 = 100 * 1024 * 1024 // 100MB 限制（R2 权限）
 
 const useStyles = makeStyles({
   root: {
@@ -219,8 +220,11 @@ export function CreateModPage({ onClose, onCreated }) {
   const [error, setError] = useState('')
   const [modFiles, setModFiles] = useState({})
   const [uploadingLang, setUploadingLang] = useState('')
+  const [uploadProgress, setUploadProgress] = useState(0)
   const [fileDialogLang, setFileDialogLang] = useState(null)
   const [permissions, setPermissions] = useState({ mode: 'author_only', open_langs: [], allow_mod_info: true, allow_lang: true, apply_langs: [] })
+
+  const maxZipSize = user?.r2_enabled ? MAX_ZIP_SIZE_R2 : MAX_ZIP_SIZE_BASE
 
   const firstLang = Object.keys(translations)[0]
   const version = translations[firstLang]?.version || ''
@@ -401,15 +405,26 @@ export function CreateModPage({ onClose, onCreated }) {
           zip.file(file.name, file.data)
         }
         const blob = await zip.generateAsync({ type: 'blob' })
-        if (blob.size > MAX_ZIP_SIZE) {
-          setError(t('workshop.modFileSizeWarning', { size: (blob.size / 1024 / 1024).toFixed(1) }))
+        if (blob.size > maxZipSize) {
+          setError(t('workshop.modFileSizeWarning', { size: (blob.size / 1024 / 1024).toFixed(1), max: (maxZipSize / 1024 / 1024) }))
           setBusy(false)
           return
         }
         const zipFile = new File([blob], `${modKey}_${lang}.zip`, { type: 'application/zip' })
-        await uploadModFile({ author_id: user.user_id, mod_id: newModId, lang_code: lang, version: translations[lang]?.version, file: zipFile, manifest })
+        setUploadProgress(0)
+        await uploadModFile({
+          author_id: user.user_id,
+          mod_id: newModId,
+          lang_code: lang,
+          version: translations[lang]?.version,
+          file: zipFile,
+          manifest,
+          r2_enabled: user?.r2_enabled,
+          onProgress: (loaded, total) => setUploadProgress(Math.round((loaded / total) * 100)),
+        })
       }
       setUploadingLang('')
+      setUploadProgress(0)
 
       // 3. 上传说明中的图片并替换占位符
       const resolvedTranslations = await resolveTranslationImages(translations, newModId)
@@ -527,7 +542,15 @@ export function CreateModPage({ onClose, onCreated }) {
               <div className={styles.formRow}>
                 <Text className={styles.formLabel}>{t('workshop.modFile')} {category === 'v2' ? `(${t('workshop.hint_v2')})` : category === 'composite' ? `(${t('workshop.hint_composite')})` : category === 'dll' ? `(${t('workshop.hint_dll')})` : `(${t('workshop.hint_v1')})`}</Text>
                 <Text size="small" style={{ color: tokens.colorNeutralForeground3, lineHeight: '1.4', whiteSpace: 'pre-wrap' }}>
-                  {t('workshop.uploadLimitWarning')}
+                  <span style={{ textDecoration: user?.r2_enabled ? 'line-through' : 'none' }}>
+                    {t('workshop.uploadLimitWarning', { max: (maxZipSize / 1024 / 1024) })}
+                  </span>
+                  {user?.r2_enabled && (
+                    <>
+                      <br />
+                      {t('workshop.uploadLimitR2Enabled', { max: (maxZipSize / 1024 / 1024) })}
+                    </>
+                  )}
                 </Text>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                   {category === 'composite' ? (
@@ -564,7 +587,10 @@ export function CreateModPage({ onClose, onCreated }) {
         })}
 
         {uploadingLang && (
-          <Text size="small" className={styles.meta}>{t('workshop.uploadingLang', { lang: uploadingLang })}</Text>
+          <Text size="small" className={styles.meta}>
+            {t('workshop.uploadingLang', { lang: uploadingLang })}
+            {uploadProgress > 0 && ` (${uploadProgress}%)`}
+          </Text>
         )}
         {error && <Text size="small" style={{ color: tokens.colorPaletteRedForeground1 }}>{error}</Text>}
       </div>
@@ -662,6 +688,7 @@ export function EditModPage({ mod: initialMod, onClose, onUpdated }) {
   const [modFiles, setModFiles] = useState({})
   const [existingFiles, setExistingFiles] = useState(initFiles)
   const [uploadingLang, setUploadingLang] = useState('')
+  const [uploadProgress, setUploadProgress] = useState(0)
   const [uploadError, setUploadError] = useState('')
   const [fileDialogLang, setFileDialogLang] = useState(null)
   const [confirmRemoveLang, setConfirmRemoveLang] = useState(null)
@@ -675,6 +702,8 @@ export function EditModPage({ mod: initialMod, onClose, onUpdated }) {
   const editableLangs = userPermissions?.editable_langs || []
   const canEditLang = (lang) => canEditAllLangs || editableLangs.includes(lang)
   const hasAnyEditPermission = canEditModInfo || canEditAllLangs || editableLangs.length > 0
+
+  const maxZipSize = user?.r2_enabled ? MAX_ZIP_SIZE_R2 : MAX_ZIP_SIZE_BASE
 
   const handleSelectFolders = async (lang) => {
     try {
@@ -830,13 +859,23 @@ export function EditModPage({ mod: initialMod, onClose, onUpdated }) {
         zip.file(file.name, file.data)
       }
       const blob = await zip.generateAsync({ type: 'blob' })
-      if (blob.size > MAX_ZIP_SIZE) {
-        setUploadError(t('workshop.modFileSizeWarning', { size: (blob.size / 1024 / 1024).toFixed(1) }))
+      if (blob.size > maxZipSize) {
+        setUploadError(t('workshop.modFileSizeWarning', { size: (blob.size / 1024 / 1024).toFixed(1), max: (maxZipSize / 1024 / 1024) }))
         setUploadingLang('')
         return
       }
       const zipFile = new File([blob], `${modKey}_${lang}.zip`, { type: 'application/zip' })
-      const res = await uploadModFile({ author_id: user.user_id, mod_id: initialMod.id, lang_code: lang, version: translations[lang]?.version, file: zipFile, manifest })
+      setUploadProgress(0)
+      const res = await uploadModFile({
+        author_id: user.user_id,
+        mod_id: initialMod.id,
+        lang_code: lang,
+        version: translations[lang]?.version,
+        file: zipFile,
+        manifest,
+        r2_enabled: user?.r2_enabled,
+        onProgress: (loaded, total) => setUploadProgress(Math.round((loaded / total) * 100)),
+      })
       setExistingFiles(prev => ({ ...prev, [lang]: res.data }))
       setModFiles(prev => { const n = { ...prev }; delete n[lang]; return n })
       onUpdated()
@@ -844,6 +883,7 @@ export function EditModPage({ mod: initialMod, onClose, onUpdated }) {
       setUploadError(e.message)
     } finally {
       setUploadingLang('')
+      setUploadProgress(0)
     }
   }
 
@@ -878,18 +918,29 @@ export function EditModPage({ mod: initialMod, onClose, onUpdated }) {
           zip.file(file.name, file.data)
         }
         const blob = await zip.generateAsync({ type: 'blob' })
-        if (blob.size > MAX_ZIP_SIZE) {
-          setError(t('workshop.modFileSizeWarning', { size: (blob.size / 1024 / 1024).toFixed(1) }))
+        if (blob.size > maxZipSize) {
+          setError(t('workshop.modFileSizeWarning', { size: (blob.size / 1024 / 1024).toFixed(1), max: (maxZipSize / 1024 / 1024) }))
           setBusy(false)
           return
         }
         const zipFile = new File([blob], `${modKey}_${lang}.zip`, { type: 'application/zip' })
-        const res = await uploadModFile({ author_id: user.user_id, mod_id: initialMod.id, lang_code: lang, version: translations[lang]?.version, file: zipFile, manifest })
+        setUploadProgress(0)
+        const res = await uploadModFile({
+          author_id: user.user_id,
+          mod_id: initialMod.id,
+          lang_code: lang,
+          version: translations[lang]?.version,
+          file: zipFile,
+          manifest,
+          r2_enabled: user?.r2_enabled,
+          onProgress: (loaded, total) => setUploadProgress(Math.round((loaded / total) * 100)),
+        })
         setExistingFiles(prev => ({ ...prev, [lang]: res.data }))
       }
       // 清空待上传队列
       setModFiles({})
       setUploadingLang('')
+      setUploadProgress(0)
 
       // 2. 上传说明中的图片并替换占位符
       const resolvedTranslations = await resolveTranslationImages(translations, initialMod.id)
@@ -1021,7 +1072,15 @@ export function EditModPage({ mod: initialMod, onClose, onUpdated }) {
               <div className={styles.formRow}>
                 <Text className={styles.formLabel}>{t('workshop.modFile')} {category === 'v2' ? `(${t('workshop.hint_v2')})` : category === 'composite' ? `(${t('workshop.hint_composite')})` : category === 'dll' ? `(${t('workshop.hint_dll')})` : `(${t('workshop.hint_v1')})`}</Text>
                 <Text size="small" style={{ color: tokens.colorNeutralForeground3, lineHeight: '1.4', whiteSpace: 'pre-wrap' }}>
-                  {t('workshop.uploadLimitWarning')}
+                  <span style={{ textDecoration: user?.r2_enabled ? 'line-through' : 'none' }}>
+                    {t('workshop.uploadLimitWarning', { max: (maxZipSize / 1024 / 1024) })}
+                  </span>
+                  {user?.r2_enabled && (
+                    <>
+                      <br />
+                      {t('workshop.uploadLimitR2Enabled', { max: (maxZipSize / 1024 / 1024) })}
+                    </>
+                  )}
                 </Text>
                 {existingFiles[lang] && (
                   <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px', flexWrap: 'wrap' }}>
@@ -1075,6 +1134,12 @@ export function EditModPage({ mod: initialMod, onClose, onUpdated }) {
           )
         })}
 
+        {uploadingLang && (
+          <Text size="small" className={styles.meta}>
+            {t('workshop.uploadingLang', { lang: uploadingLang })}
+            {uploadProgress > 0 && ` (${uploadProgress}%)`}
+          </Text>
+        )}
         {uploadError && <Text size="small" style={{ color: tokens.colorPaletteRedForeground1 }}>{uploadError}</Text>}
         {error && <Text size="small" style={{ color: tokens.colorPaletteRedForeground1 }}>{error}</Text>}
       </div>

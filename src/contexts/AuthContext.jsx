@@ -20,9 +20,10 @@ export function AuthProvider({ children }) {
   }, [])
 
   const loginSuccess = useCallback(async (userData) => {
-    // userData = { user_id, username }
-    setUser({ user_id: userData.user_id, username: userData.username })
-    await saveUserToDb(userData)
+    // userData = { user_id, username, r2_enabled }
+    const user = { user_id: userData.user_id, username: userData.username, r2_enabled: !!userData.r2_enabled }
+    setUser(user)
+    await saveUserToDb(user)
   }, [])
 
   const logout = useCallback(async () => {

@@ -192,34 +192,73 @@ export async function getImgbedConfig() {
   return await invoke('db_get_imgbed_config')
 }
 
-export async function uploadModFile({ author_id, mod_id, lang_code, version, file, manifest }) {
+const TELEGRAM_MAX_SIZE = 20 * 1024 * 1024 // 20MB
+const R2_MAX_SIZE = 100 * 1024 * 1024 // 100MB
+
+// 单文件上传到 ImgBed，支持进度回调
+function uploadFile({ imgbed, file, folder, channel = 'telegram', onProgress }) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest()
+    const formData = new FormData()
+    formData.append('file', file)
+
+    const url = `${imgbed.url}/upload?uploadChannel=${channel}&uploadFolder=${encodeURIComponent(folder)}&returnFormat=full`
+
+    xhr.open('POST', url)
+    xhr.setRequestHeader('Authorization', `Bearer ${imgbed.token}`)
+
+    if (onProgress) {
+      xhr.upload.onprogress = (event) => {
+        if (event.lengthComputable) {
+          onProgress(event.loaded, event.total)
+        }
+      }
+    }
+
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          const data = JSON.parse(xhr.responseText)
+          if (!Array.isArray(data) || data.length === 0) {
+            reject(new Error('ImgBed upload failed: unexpected response'))
+          } else {
+            resolve(data[0])
+          }
+        } catch (e) {
+          reject(new Error(`ImgBed upload failed: ${e.message}`))
+        }
+      } else {
+        reject(new Error(`ImgBed upload failed: HTTP ${xhr.status} - ${xhr.responseText.slice(0, 200)}`))
+      }
+    }
+
+    xhr.onerror = () => reject(new Error('ImgBed upload failed: network error'))
+    xhr.ontimeout = () => reject(new Error('ImgBed upload failed: timeout'))
+    xhr.send(formData)
+  })
+}
+
+export async function uploadModFile({ author_id, mod_id, lang_code, version, file, manifest, r2_enabled = false, onProgress }) {
   // 1. 读 ImgBed 配置
   const imgbed = await getImgbedConfig()
 
-  // 2. 构造 FormData
-  const formData = new FormData()
-  formData.append('file', file)
-
+  // 2. 根据权限和大小选择上传渠道
   const folder = `sfm/${mod_id}/${lang_code}/${version || '1.0.0'}`
-  const url = `${imgbed.url}/upload?uploadChannel=telegram&uploadFolder=${encodeURIComponent(folder)}&returnFormat=full`
 
-  const uploadRes = await fetch(url, {
-    method: 'POST',
-    headers: { 'Authorization': `Bearer ${imgbed.token}` },
-    body: formData,
-  })
-
-  if (!uploadRes.ok) {
-    const text = await uploadRes.text()
-    throw new Error(`ImgBed upload failed: HTTP ${uploadRes.status} - ${text.slice(0, 200)}`)
+  if (file.size > R2_MAX_SIZE) {
+    throw new Error(`文件大小超过 100MB 限制: ${(file.size / 1024 / 1024).toFixed(1)}MB`)
   }
 
-  const uploadData = await uploadRes.json()
-  if (!Array.isArray(uploadData) || uploadData.length === 0) {
-    throw new Error('ImgBed upload failed: unexpected response')
+  let channel = 'telegram'
+  if (file.size > TELEGRAM_MAX_SIZE) {
+    if (!r2_enabled) {
+      throw new Error(`文件大小超过 20MB，需要 R2 存储权限: ${(file.size / 1024 / 1024).toFixed(1)}MB`)
+    }
+    channel = 'cfr2'
   }
 
-  const { src, publicUrl } = uploadData[0]
+  const uploadResult = await uploadFile({ imgbed, file, folder, channel, onProgress })
+  const fileUrl = uploadResult.publicUrl || uploadResult.src
 
   // 3. 计算文件哈希（浏览器端）
   const fileHash = await computeFileHash(file)
@@ -229,7 +268,7 @@ export async function uploadModFile({ author_id, mod_id, lang_code, version, fil
     mod_id: Number(mod_id),
     author_id,
     lang_code,
-    file_url: publicUrl || src,
+    file_url: fileUrl,
     file_name: file.name,
     file_size: file.size,
     file_hash: fileHash,
@@ -241,7 +280,7 @@ export async function uploadModFile({ author_id, mod_id, lang_code, version, fil
     success: true,
     data: {
       lang_code,
-      file_url: publicUrl || src,
+      file_url: fileUrl,
       file_name: file.name,
       file_size: file.size,
       file_hash: fileHash,
@@ -253,16 +292,10 @@ export async function uploadModFile({ author_id, mod_id, lang_code, version, fil
 }
 
 export async function deleteModFile({ author_id, mod_id, lang_code, fileUrl }) {
-  // 1. 删除 ImgBed CDN 文件
-  const imgbed = await getImgbedConfig()
-  const deleteUrl = `${imgbed.url}/delete?fileUrl=${encodeURIComponent(fileUrl)}`
-  const deleteRes = await fetch(deleteUrl, {
-    method: 'DELETE',
-    headers: { 'Authorization': `Bearer ${imgbed.token}` },
-  })
-  if (!deleteRes.ok) {
-    const text = await deleteRes.text()
-    throw new Error(`ImgBed delete failed: HTTP ${deleteRes.status} - ${text.slice(0, 200)}`)
+  // 1. 通过 Rust 后端代理删除 ImgBed CDN 文件（避免前端 CORS）
+  const res = await dbCall('db_delete_imgbed_file', { file_url: fileUrl })
+  if (!res.success) {
+    throw new Error(res.message || 'ImgBed delete failed')
   }
 
   // 2. 删除数据库记录

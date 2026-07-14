@@ -258,14 +258,14 @@ pub async fn db_login(
         let mut conn = pool.get_conn().map_err(|e| e.to_string())?;
         let pwd_hash = hash_password(&password);
 
-        let row: Option<(u64, String)> = conn.exec_first(
-            "SELECT id, username FROM users WHERE username = ? AND password_hash = ?",
+        let row: Option<(u64, String, bool)> = conn.exec_first(
+            "SELECT id, username, r2_enabled FROM users WHERE username = ? AND password_hash = ?",
             (&username, &pwd_hash),
         ).map_err(|e| e.to_string())?;
 
         match row {
-            Some((id, uname)) => Ok(ApiResponse::ok_val(serde_json::json!({
-                "user_id": id, "username": uname
+            Some((id, uname, r2_enabled)) => Ok(ApiResponse::ok_val(serde_json::json!({
+                "user_id": id, "username": uname, "r2_enabled": r2_enabled
             }), "Login successful")),
             None => Ok(ApiResponse::err("Invalid username or password")),
         }
@@ -306,7 +306,7 @@ pub async fn db_register(
 
         let new_id: u64 = conn.last_insert_id();
         Ok(ApiResponse::ok_val(serde_json::json!({
-            "user_id": new_id, "username": uname
+            "user_id": new_id, "username": uname, "r2_enabled": false
         }), "Registration successful"))
     }).await.map_err(|e| e.to_string())?
 }
@@ -1533,6 +1533,80 @@ pub async fn db_get_imgbed_config() -> Result<serde_json::Value, String> {
         "url": "https://img.b9349.dpdns.org",
         "token": "imgbed_07c42496787100e0d269df984f727561fdeb01064a469ad78580c1b651cd571c"
     }))
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn db_delete_imgbed_file(file_url: String) -> Result<ApiResponse, String> {
+    let config = db_get_imgbed_config().await?;
+    let url = config["url"].as_str().ok_or("imgbed url missing")?;
+    let token = config["token"].as_str().ok_or("imgbed token missing")?;
+
+    // 从 file_url 中提取文件路径（支持 publicUrl 和 src 两种形式）
+    let path = reqwest::Url::parse(&file_url)
+        .map_err(|e| e.to_string())?
+        .path()
+        .trim_start_matches('/')
+        .to_string();
+
+    if path.is_empty() {
+        return Ok(ApiResponse {
+            success: false,
+            message: "Invalid file_url".into(),
+            data: None,
+            mods: None,
+            total: None,
+            page: None,
+            page_size: None,
+        });
+    }
+
+    let base = reqwest::Url::parse(url).map_err(|e| e.to_string())?;
+    let delete_url = base
+        .join(&format!("api/manage/delete/{}", path))
+        .map_err(|e| e.to_string())?;
+
+    let client = reqwest::Client::new();
+    let res = client
+        .get(delete_url)
+        .header("Authorization", format!("Bearer {}", token))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let status = res.status();
+    let text = res.text().await.unwrap_or_default();
+
+    // ImgBed 返回的 JSON 里也有 success 字段，优先以它为准
+    let body_ok = serde_json::from_str::<serde_json::Value>(&text)
+        .ok()
+        .and_then(|v| v.get("success").and_then(|s| s.as_bool()))
+        .unwrap_or(status.is_success());
+
+    if body_ok {
+        Ok(ApiResponse {
+            success: true,
+            message: "ImgBed file deleted".into(),
+            data: None,
+            mods: None,
+            total: None,
+            page: None,
+            page_size: None,
+        })
+    } else {
+        let err_msg = serde_json::from_str::<serde_json::Value>(&text)
+            .ok()
+            .and_then(|v| v.get("error").and_then(|e| e.as_str()).map(|s| s.to_string()))
+            .unwrap_or_else(|| format!("HTTP {} - {}", status, text));
+        Ok(ApiResponse {
+            success: false,
+            message: format!("ImgBed delete failed: {}", err_msg),
+            data: None,
+            mods: None,
+            total: None,
+            page: None,
+            page_size: None,
+        })
+    }
 }
 
 #[tauri::command(rename_all = "snake_case")]
