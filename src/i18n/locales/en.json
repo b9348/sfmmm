@@ -130,7 +130,10 @@
     "alreadyLatest": "You're up to date",
     "currentVersion": "Current version: v{{version}}. Click \"Check update\" to check for the latest version from the server.",
     "language": "Interface Language",
-    "languageDesc": "Select the display language (restart required to take full effect)"
+    "languageDesc": "Select the display language (restart required to take full effect)",
+    "aboutTitle": "About",
+    "aboutDesc": "Feel free to submit issues and feedback to help us improve this tool.",
+    "openGitHub": "Open GitHub Repository"
   },
 
   "workshop": {
@@ -180,6 +183,9 @@
     "alreadyUploaded": "Already Uploaded",
     "availableVersions": "Available Versions",
     "back": "Back",
+    "createdAt": "Created",
+    "updatedAt": "Updated",
+    "itemsPerRow": "Per row",
     "category": "Category",
     "delete": "Delete",
     "edit": "Edit",

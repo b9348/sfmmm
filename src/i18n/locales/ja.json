@@ -130,7 +130,10 @@
     "alreadyLatest": "現在最新バージョンです",
     "currentVersion": "現在のバージョン：v{{version}}。「更新を確認」をクリックしてサーバーから最新バージョンを取得します。",
     "language": "表示言語",
-    "languageDesc": "アプリケーションの表示言語を選択します（再起動後に完全に反映されます）"
+    "languageDesc": "アプリケーションの表示言語を選択します（再起動後に完全に反映されます）",
+    "aboutTitle": "について",
+    "aboutDesc": "Issue やフィードバックをお送りいただき、このツールの改善にご協力ください。",
+    "openGitHub": "GitHub リポジトリを開く"
   },
 
   "workshop": {
@@ -180,6 +183,9 @@
     "alreadyUploaded": "アップロード済み",
     "availableVersions": "利用可能なバージョン",
     "back": "戻る",
+    "createdAt": "作成日",
+    "updatedAt": "更新日",
+    "itemsPerRow": "1行あたり",
     "category": "カテゴリ",
     "delete": "削除",
     "edit": "編集",

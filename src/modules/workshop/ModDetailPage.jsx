@@ -115,11 +115,6 @@ export default function ModDetailPage({ mod, onBack, onEdit, scrollToCommentId }
   const [isLiked, setIsLiked] = useState(!!mod.is_liked)
   const [likeBusy, setLikeBusy] = useState(false)
 
-  useEffect(() => {
-    setLikeCount(mod.like_count || 0)
-    setIsLiked(!!mod.is_liked)
-  }, [mod.id, mod.like_count, mod.is_liked])
-
   const handleLikeToggle = async () => {
     if (likeBusy) return
     setLikeBusy(true)
@@ -238,6 +233,28 @@ export default function ModDetailPage({ mod, onBack, onEdit, scrollToCommentId }
           <Text size="small">{t('workshop.displayLang')}</Text>
           {LANGUAGES.map(lang => {
             const hasTrans = !!mod.translations?.[lang.value]?.instructions
+            if (!hasTrans) {
+              return (
+                <div key={lang.value} style={{ display: 'flex', alignItems: 'center', gap: '6px', opacity: 0.5 }}>
+                  <div
+                    style={{
+                      width: '16px',
+                      height: '16px',
+                      border: `1px solid ${tokens.colorNeutralStroke1}`,
+                      borderRadius: '4px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontSize: '12px',
+                      lineHeight: 1,
+                    }}
+                  >
+                    ×
+                  </div>
+                  <Text size="small">{lang.label}</Text>
+                </div>
+              )
+            }
             return (
               <Checkbox
                 key={lang.value}
@@ -245,7 +262,6 @@ export default function ModDetailPage({ mod, onBack, onEdit, scrollToCommentId }
                 label={lang.label}
                 checked={selectedLangs.includes(lang.value)}
                 onChange={() => handleLangToggle(lang.value)}
-                disabled={!hasTrans}
               />
             )
           })}
@@ -261,6 +277,12 @@ export default function ModDetailPage({ mod, onBack, onEdit, scrollToCommentId }
             </Badge>
           )}
         </div>
+        {(mod.created_at || mod.updated_at) && (
+          <div className={styles.meta} style={{ display: 'flex', gap: '12px' }}>
+            {mod.created_at && <Text size="small">{t('workshop.createdAt')}: {new Date(mod.created_at).toLocaleString()}</Text>}
+            {mod.updated_at && mod.updated_at !== mod.created_at && <Text size="small">{t('workshop.updatedAt')}: {new Date(mod.updated_at).toLocaleString()}</Text>}
+          </div>
+        )}
         {mod.description && (
           <Text size="small" style={{ lineHeight: '1.6' }}>{mod.description}</Text>
         )}
@@ -271,10 +293,23 @@ export default function ModDetailPage({ mod, onBack, onEdit, scrollToCommentId }
               const trans = mod.translations?.[langCode]
               if (!trans?.instructions) return null
               return (
-                <div key={langCode}>
-                  <Badge appearance="outline" size="small" style={{ marginBottom: '8px' }}>
-                    {LANG_LABELS[langCode] || langCode}
-                  </Badge>
+                <div
+                  key={langCode}
+                  style={{
+                    border: `1px solid ${tokens.colorNeutralStroke2}`,
+                    borderRadius: '8px',
+                    padding: '12px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '8px',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                    <Badge appearance="outline" size="small">
+                      {LANG_LABELS[langCode] || langCode}
+                    </Badge>
+                    {trans.name && <Text size="small" weight="semibold">{trans.name}</Text>}
+                  </div>
                   {(trans.instructions_format || 'markdown') === 'richtext'
                     ? <RichTextContent html={trans.instructions} />
                     : <MarkdownContent markdown={trans.instructions} />}
@@ -299,14 +334,16 @@ export default function ModDetailPage({ mod, onBack, onEdit, scrollToCommentId }
           <div style={{ borderTop: `1px solid ${tokens.colorNeutralStroke2}`, paddingTop: '8px' }}>
             <Text size="small" weight="semibold" block style={{ marginBottom: '8px' }}>{t('workshop.availableVersions')}</Text>
             {mod.files.map(f => {
-              const langName = mod.translations?.[f.lang_code]?.name || mod.display_name
               return (
               <div key={f.lang_code} className={styles.fileRow}>
                 <Badge appearance="outline" size="small" style={{ whiteSpace: 'nowrap' }}>{LANG_LABELS[f.lang_code] || f.lang_code}</Badge>
-                <Text size="small" truncate>{langName}</Text>
-                {f.file_name && <Text size="small" truncate className={styles.meta} style={{ flex: '0 1 auto', maxWidth: '160px' }}>{f.file_name}</Text>}
+                {f.file_name && <Text size="small" truncate>{f.file_name}</Text>}
                 <Text size="small">v{f.version}</Text>
-                <Text size="small" className={styles.meta}>{(f.file_size / 1024).toFixed(1)}KB</Text>
+                <Text size="small" className={styles.meta}>
+                  {f.file_size >= 1024 * 1024
+                    ? `${(f.file_size / (1024 * 1024)).toFixed(2)}MB`
+                    : `${(f.file_size / 1024).toFixed(1)}KB`}
+                </Text>
                 <Button
                   size="small"
                   icon={<ArrowDownload24Regular />}
@@ -413,6 +450,16 @@ export default function ModDetailPage({ mod, onBack, onEdit, scrollToCommentId }
       </Dialog>
 
       <div className={styles.fabContainer}>
+        <div className={styles.fabItem}>
+          <Button
+            size="large"
+            icon={<ArrowLeft24Regular />}
+            appearance="outline"
+            shape="circular"
+            onClick={onBack}
+            title={t('workshop.back')}
+          />
+        </div>
         <div className={styles.fabItem}>
           <Button
             size="large"

@@ -1016,8 +1016,44 @@ pub async fn db_delete_mod(
 
         match owner {
             Some((aid,)) if aid == author_id => {
-                conn.exec_drop("DELETE FROM mods WHERE id = ?", (mod_id,))
+                // 按外键依赖顺序清理关联数据，避免删除 mods 时触发外键约束失败
+                let mut tx = conn.start_transaction(TxOpts::default()).map_err(|e| e.to_string())?;
+
+                tx.exec_drop("DELETE FROM mod_notifications WHERE mod_id = ?", (mod_id,))
                     .map_err(|e| e.to_string())?;
+                // comments 存在 parent_id 自引用，先删子评论再删顶层评论
+                tx.exec_drop("DELETE FROM mod_comments WHERE mod_id = ? AND parent_id IS NOT NULL", (mod_id,))
+                    .map_err(|e| e.to_string())?;
+                tx.exec_drop("DELETE FROM mod_comments WHERE mod_id = ?", (mod_id,))
+                    .map_err(|e| e.to_string())?;
+                tx.exec_drop("DELETE FROM mod_collaborators WHERE mod_id = ?", (mod_id,))
+                    .map_err(|e| e.to_string())?;
+                tx.exec_drop("DELETE FROM mod_permissions WHERE mod_id = ?", (mod_id,))
+                    .map_err(|e| e.to_string())?;
+                tx.exec_drop("DELETE FROM mod_files WHERE mod_id = ?", (mod_id,))
+                    .map_err(|e| e.to_string())?;
+                tx.exec_drop("DELETE FROM mod_translations WHERE mod_id = ?", (mod_id,))
+                    .map_err(|e| e.to_string())?;
+                tx.exec_drop("DELETE FROM mod_likes WHERE mod_id = ?", (mod_id,))
+                    .map_err(|e| e.to_string())?;
+                tx.exec_drop("DELETE FROM mod_images WHERE mod_id = ?", (mod_id,))
+                    .map_err(|e| e.to_string())?;
+                tx.exec_drop("DELETE FROM download_logs WHERE mod_id = ?", (mod_id,))
+                    .map_err(|e| e.to_string())?;
+                tx.exec_drop("DELETE FROM edit_applications WHERE mod_id = ?", (mod_id,))
+                    .map_err(|e| e.to_string())?;
+                tx.exec_drop("DELETE FROM user_favorites WHERE mod_id = ?", (mod_id,))
+                    .map_err(|e| e.to_string())?;
+                tx.exec_drop("DELETE FROM user_ratings WHERE mod_id = ?", (mod_id,))
+                    .map_err(|e| e.to_string())?;
+                // 该 mod 作为依赖/被依赖的关系也一并清理
+                tx.exec_drop("DELETE FROM mod_dependencies WHERE mod_id = ? OR dependency_mod_id = ?", (mod_id, mod_id))
+                    .map_err(|e| e.to_string())?;
+
+                tx.exec_drop("DELETE FROM mods WHERE id = ?", (mod_id,))
+                    .map_err(|e| e.to_string())?;
+                tx.commit().map_err(|e| e.to_string())?;
+
                 Ok(ApiResponse::ok_msg("Mod deleted"))
             }
             Some(_) => Ok(ApiResponse::err("You can only delete your own mods")),

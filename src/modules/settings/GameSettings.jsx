@@ -14,10 +14,12 @@ import {
   Folder24Regular,
   ArrowSync24Regular,
   ArrowDownload24Regular,
+  Link24Regular,
 } from '@fluentui/react-icons'
 import { makeStyles, tokens } from '@fluentui/react-components'
 import { invoke } from '@tauri-apps/api/core'
 import { open as openDialog } from '@tauri-apps/plugin-dialog'
+import { open as openUrl } from '@tauri-apps/plugin-shell'
 import Database from '@tauri-apps/plugin-sql'
 import i18n from '../../i18n'
 import { checkVersion, prepareUpdate, applyUpdate } from '../../services/updateApi'
@@ -289,6 +291,25 @@ export function GameSettings({ config, onConfigChange }) {
           <Text size="small" style={{ color: tokens.colorNeutralForeground3 }}>
             {t('settings.currentVersion', { version: APP_VERSION })}
           </Text>
+        </div>
+      </Card>
+
+      <Card appearance="outline">
+        <CardHeader header={<Title2>{t('settings.aboutTitle')}</Title2>} />
+        <div style={{ padding: '8px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+          <Text size="small">{t('settings.aboutDesc')}</Text>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+            <Button
+              size="small"
+              icon={<Link24Regular />}
+              onClick={() => openUrl('https://github.com/b9348/sfmmm')}
+            >
+              {t('settings.openGitHub')}
+            </Button>
+            <Text size="small" style={{ color: tokens.colorNeutralForeground3 }}>
+              https://github.com/b9348/sfmmm
+            </Text>
+          </div>
         </div>
       </Card>
     </div>

@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import {
   Card, CardHeader, Text, Button, SearchBox,
-  Spinner, makeStyles, tokens, Avatar, Badge,
+  Spinner, makeStyles, tokens, Badge,
   Select,
 } from '@fluentui/react-components'
 import {
@@ -10,12 +10,15 @@ import {
   Add24Regular,
   Heart24Regular,
   Heart24Filled,
+  Add20Regular,
+  Subtract20Regular,
 } from '@fluentui/react-icons'
 import { useTranslation } from 'react-i18next'
 import { listMods, getModDetail, getModForEdit, getDeviceId } from '../../services/workshopApi'
 import ModDetailPage from './ModDetailPage'
 import { useAuth } from '../../contexts/useAuth'
 import { EditModPage, CreateModPage } from './MyMods'
+import Database from '@tauri-apps/plugin-sql'
 
 const CATEGORIES = [
   { value: 'v1', label: 'v1' },
@@ -115,11 +118,6 @@ const useStyles = makeStyles({
     zIndex: 1000,
     boxShadow: tokens.shadow8,
   },
-  authorRow: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '6px',
-  },
 })
 
 export function BrowseMods({ initialModId, initialCommentId }) {
@@ -142,6 +140,7 @@ export function BrowseMods({ initialModId, initialCommentId }) {
   const [detailLoading, setDetailLoading] = useState(!!initialModId)
   const [editingMod, setEditingMod] = useState(null)
   const [showCreatePage, setShowCreatePage] = useState(false)
+  const [itemsPerRow, setItemsPerRow] = useState(3)
   const initialFetch = useRef(false)
 
   // 从 URL hash 恢复详情页（Ctrl+R 刷新后）或从导航参数进入
@@ -198,6 +197,44 @@ export function BrowseMods({ initialModId, initialCommentId }) {
   }, [sortBy])
 
   useEffect(() => {
+    const loadItemsPerRow = async () => {
+      try {
+        const db = await Database.load('sqlite:config.db')
+        const rows = await db.select('SELECT value FROM config WHERE `key` = $1', ['workshop_items_per_row'])
+        if (rows.length > 0) {
+          const value = parseInt(rows[0].value, 10)
+          if (!Number.isNaN(value) && value >= 1 && value <= 10) {
+            setItemsPerRow(value)
+          }
+        }
+      } catch (e) {
+        console.warn('[BrowseMods] 读取每行展示数量失败:', e)
+      }
+    }
+    loadItemsPerRow()
+  }, [])
+
+  const saveItemsPerRow = useCallback(async (value) => {
+    try {
+      const db = await Database.load('sqlite:config.db')
+      await db.execute(
+        `INSERT OR REPLACE INTO config (id, \`key\`, value) VALUES ((SELECT id FROM config WHERE \`key\` = $1), $1, $2)`,
+        ['workshop_items_per_row', String(value)]
+      )
+    } catch (e) {
+      console.warn('[BrowseMods] 保存每行展示数量失败:', e)
+    }
+  }, [])
+
+  const handleItemsPerRowChange = useCallback((delta) => {
+    setItemsPerRow(prev => {
+      const next = Math.min(10, Math.max(1, prev + delta))
+      saveItemsPerRow(next)
+      return next
+    })
+  }, [saveItemsPerRow])
+
+  useEffect(() => {
     if (!initialFetch.current) {
       initialFetch.current = true
       fetchMods(page)
@@ -243,7 +280,7 @@ export function BrowseMods({ initialModId, initialCommentId }) {
   if (editingMod) return <EditModPage mod={editingMod} onClose={() => setEditingMod(null)} onUpdated={() => { setEditingMod(null); fetchMods() }} />
 
   if (detailMod) {
-    return <ModDetailPage mod={detailMod} onBack={() => { setDetailMod(null); setDetailCommentId(null); window.location.hash = '' }} onEdit={handleEdit} scrollToCommentId={detailCommentId} />
+    return <ModDetailPage key={detailMod.id} mod={detailMod} onBack={() => { setDetailMod(null); setDetailCommentId(null); window.location.hash = '' }} onEdit={handleEdit} scrollToCommentId={detailCommentId} />
   }
 
   if (detailLoading) {
@@ -277,6 +314,24 @@ export function BrowseMods({ initialModId, initialCommentId }) {
               <option value="likes">{t('workshop.sortLikes')}</option>
             </Select>
           </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <Text size="small">{t('workshop.itemsPerRow')}</Text>
+            <Button
+              size="small"
+              icon={<Subtract20Regular />}
+              appearance="subtle"
+              onClick={() => handleItemsPerRowChange(-1)}
+              disabled={itemsPerRow <= 1 || loading}
+            />
+            <Text size="small" style={{ minWidth: '20px', textAlign: 'center' }}>{itemsPerRow}</Text>
+            <Button
+              size="small"
+              icon={<Add20Regular />}
+              appearance="subtle"
+              onClick={() => handleItemsPerRowChange(1)}
+              disabled={itemsPerRow >= 10 || loading}
+            />
+          </div>
         </div>
       </Card>
 
@@ -305,7 +360,7 @@ export function BrowseMods({ initialModId, initialCommentId }) {
 
       {!loading && !error && mods.length > 0 && (
         <>
-          <div className={styles.grid}>
+          <div className={styles.grid} style={{ gridTemplateColumns: `repeat(${itemsPerRow}, 1fr)` }}>
             {mods.map(mod => {
               const cat = CATEGORIES.find(c => c.value === mod.category)
               return (
@@ -321,10 +376,7 @@ export function BrowseMods({ initialModId, initialCommentId }) {
                     <Text size="small" className={styles.meta} truncate>{mod.mod_key}</Text>
                   }
                   description={
-                    <div className={styles.authorRow}>
-                      <Avatar name={mod.author_name} size={20} />
-                      <Text size="small" className={styles.meta}>{mod.author_name}</Text>
-                    </div>
+                    <Text size="small" className={styles.meta}>{mod.author_name}</Text>
                   }
                   action={
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>

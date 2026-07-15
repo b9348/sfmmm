@@ -3,7 +3,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import {
   Card, CardHeader, Text, Button, Spinner,
   Input, Textarea, Select, makeStyles, tokens,
-  Avatar, Badge, Dialog, DialogTrigger, DialogSurface,
+  Badge, Dialog, DialogTrigger, DialogSurface,
   DialogBody, DialogTitle, DialogContent,
 } from '@fluentui/react-components'
 import {
@@ -73,11 +73,7 @@ const useStyles = makeStyles({
     padding: '32px',
     textAlign: 'center',
   },
-  authorRow: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '6px',
-  },
+
   description: {
     display: '-webkit-box',
     WebkitLineClamp: 2,
@@ -1292,7 +1288,7 @@ export function MyMods() {
   }
 
   if (detailMod) {
-    return <ModDetailPage mod={detailMod} onBack={() => setDetailMod(null)} />
+    return <ModDetailPage key={detailMod.id} mod={detailMod} onBack={() => setDetailMod(null)} />
   }
 
   return (
@@ -1340,10 +1336,7 @@ export function MyMods() {
                   <Text size="small" className={styles.meta} truncate>{mod.mod_key}</Text>
                 }
                 description={
-                  <div className={styles.authorRow}>
-                    <Avatar name={user.username} size={20} />
-                    <Text size="small" className={styles.meta}>{user.username}</Text>
-                  </div>
+                  <Text size="small" className={styles.meta}>{user.username}</Text>
                 }
                 action={
                   <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
