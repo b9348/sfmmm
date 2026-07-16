@@ -81,7 +81,11 @@
     "enableAll": "一键恢复全部",
     "disableAll": "一键禁用全部",
     "uninstall": "退订",
-    "unknownError": "未知错误"
+    "unknownError": "未知错误",
+    "downloadInstallBepInEx": "下载安装 BepInEx",
+    "installingBepInEx": "正在安装 BepInEx...",
+    "downloadingBepInEx": "正在下载 BepInEx",
+    "extractingBepInEx": "正在解压 BepInEx..."
   },
 
   "saves": {

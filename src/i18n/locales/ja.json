@@ -81,7 +81,11 @@
     "enableAll": "すべて有効化",
     "disableAll": "すべて無効化",
     "uninstall": "アンインストール",
-    "unknownError": "不明なエラー"
+    "unknownError": "不明なエラー",
+    "downloadInstallBepInEx": "BepInEx をダウンロードしてインストール",
+    "installingBepInEx": "BepInEx をインストール中...",
+    "downloadingBepInEx": "BepInEx をダウンロード中",
+    "extractingBepInEx": "BepInEx を展開中..."
   },
 
   "saves": {

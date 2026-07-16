@@ -6,6 +6,7 @@ import {
   SearchBox,
   Spinner,
   Tooltip,
+  ProgressBar,
 } from '@fluentui/react-components'
 import {
   ArrowClockwise24Regular,
@@ -14,9 +15,10 @@ import {
   Play24Regular,
   Pause24Regular,
   Delete24Regular,
+  ArrowDownload24Regular,
 } from '@fluentui/react-icons'
 import { makeStyles, tokens, mergeClasses } from '@fluentui/react-components'
-import { invoke } from '@tauri-apps/api/core'
+import { invoke, Channel } from '@tauri-apps/api/core'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useInstalledMods } from '../../hooks/useInstalledMods'
@@ -153,6 +155,13 @@ const useStyles = makeStyles({
     flex: 1,
     minWidth: 0,
   },
+  progressRow: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '4px',
+    width: '100%',
+    maxWidth: '280px',
+  },
 })
 
 function formatScanTime(value, t) {
@@ -185,6 +194,9 @@ export function ModList({ config, onUninstall }) {
   const [scanInfo, setScanInfo] = useState(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [installingBepInEx, setInstallingBepInEx] = useState(false)
+  const [bepInExProgress, setBepInExProgress] = useState(0)
+  const [bepInExStage, setBepInExStage] = useState('')
   const { installed, updates, modDetails } = useInstalledMods()
 
   const scanMods = useCallback(async () => {
@@ -285,6 +297,31 @@ export function ModList({ config, onUninstall }) {
     }
   }, [filteredMods, scanMods])
 
+  const installBepInEx = useCallback(async () => {
+    if (!gamePath) return
+    setInstallingBepInEx(true)
+    setBepInExProgress(0)
+    setBepInExStage('downloading')
+    setError('')
+    try {
+      const channel = new Channel((msg) => {
+        setBepInExProgress(msg.percent)
+        setBepInExStage(msg.stage)
+      })
+      await invoke('download_and_extract_7z', {
+        url: 'https://img.b9349.dpdns.org/file/sfm/BepInEx6/BepInEx6.7z',
+        targetDir: gamePath,
+        onProgress: channel,
+      })
+      await scanMods()
+    } catch (e) {
+      setError(String(e))
+    } finally {
+      setInstallingBepInEx(false)
+      setBepInExStage('')
+    }
+  }, [gamePath, scanMods])
+
   const activeDir = scanInfo?.activeDirs?.[0]
   const missingCoreFiles = scanInfo?.missingCoreFiles || []
   const prerequisiteInstalled = scanInfo?.bepinExInstalled === true
@@ -344,9 +381,28 @@ export function ModList({ config, onUninstall }) {
             )}
           </div>
           <div className={styles.toolbarRow}>
-            <Button size="small" icon={<ArrowClockwise24Regular />} onClick={scanMods}>{t('mods.reDetect')}</Button>
-            <Button size="small" icon={<FolderOpen24Regular />} onClick={() => openPath(gamePath)}>{t('mods.openGameDir')}</Button>
+            <Button size="small" icon={<ArrowClockwise24Regular />} onClick={scanMods} disabled={loading || installingBepInEx}>{t('mods.reDetect')}</Button>
+            <Button size="small" icon={<FolderOpen24Regular />} onClick={() => openPath(gamePath)} disabled={installingBepInEx}>{t('mods.openGameDir')}</Button>
           </div>
+          <div className={styles.toolbarRow}>
+            <Button
+              size="small"
+              icon={installingBepInEx ? <Spinner size="tiny" /> : <ArrowDownload24Regular />}
+              onClick={installBepInEx}
+              disabled={installingBepInEx || loading}
+            >
+              {installingBepInEx ? t('mods.installingBepInEx') : t('mods.downloadInstallBepInEx')}
+            </Button>
+          </div>
+          {installingBepInEx && (
+            <div className={styles.progressRow}>
+              <ProgressBar value={bepInExProgress} />
+              <Text size="small" className={styles.muted}>
+                {bepInExStage === 'downloading' && `${t('mods.downloadingBepInEx')} ${bepInExProgress}%`}
+                {bepInExStage === 'extracting' && t('mods.extractingBepInEx')}
+              </Text>
+            </div>
+          )}
         </div>
       )
     }

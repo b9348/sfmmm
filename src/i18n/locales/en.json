@@ -81,7 +81,11 @@
     "enableAll": "Enable All",
     "disableAll": "Disable All",
     "uninstall": "Uninstall",
-    "unknownError": "Unknown error"
+    "unknownError": "Unknown error",
+    "downloadInstallBepInEx": "Download & Install BepInEx",
+    "installingBepInEx": "Installing BepInEx...",
+    "downloadingBepInEx": "Downloading BepInEx",
+    "extractingBepInEx": "Extracting BepInEx..."
   },
 
   "saves": {

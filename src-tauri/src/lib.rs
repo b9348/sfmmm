@@ -1,12 +1,15 @@
 use std::{
     fs,
+    io::Write,
     path::PathBuf,
     process::Command,
     time::{SystemTime, UNIX_EPOCH},
 };
 
 use serde::Serialize;
+use tauri::ipc::Channel;
 use tauri_plugin_sql::{Builder, Migration, MigrationKind};
+use futures_util::StreamExt;
 
 mod db;
 
@@ -353,6 +356,74 @@ fn open_folder(path: String) -> Result<(), String> {
         .arg(path)
         .spawn()
         .map_err(|e| e.to_string())?;
+
+    Ok(())
+}
+
+#[derive(Clone, Serialize)]
+struct DownloadProgress {
+    percent: u32,
+    stage: String,
+}
+
+#[tauri::command]
+async fn download_and_extract_7z(
+    url: String,
+    target_dir: String,
+    on_progress: Channel<DownloadProgress>,
+) -> Result<(), String> {
+    let target_path = PathBuf::from(&target_dir);
+    if !target_path.is_dir() {
+        return Err("目标目录不存在".into());
+    }
+
+    let _ = on_progress.send(DownloadProgress {
+        percent: 0,
+        stage: "downloading".into(),
+    });
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(300))
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    let response = client.get(&url).send().await.map_err(|e| format!("下载失败: {}", e))?;
+    let status = response.status();
+    if !status.is_success() {
+        return Err(format!("下载失败，HTTP {}", status));
+    }
+
+    let total = response.content_length().unwrap_or(0);
+    let temp_path = std::env::temp_dir().join(format!("bepinex_download_{}.7z", current_timestamp()));
+    let mut file = fs::File::create(&temp_path).map_err(|e| format!("创建临时文件失败: {}", e))?;
+    let mut stream = response.bytes_stream();
+    let mut downloaded = 0u64;
+
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| format!("下载失败: {}", e))?;
+        file.write_all(&chunk).map_err(|e| format!("写入临时文件失败: {}", e))?;
+        downloaded += chunk.len() as u64;
+        if total > 0 {
+            let percent = (downloaded * 100 / total) as u32;
+            let _ = on_progress.send(DownloadProgress {
+                percent,
+                stage: "downloading".into(),
+            });
+        }
+    }
+
+    let _ = on_progress.send(DownloadProgress {
+        percent: 100,
+        stage: "extracting".into(),
+    });
+
+    sevenz_rust::decompress_file(&temp_path, &target_path).map_err(|e| format!("解压失败: {}", e))?;
+
+    let _ = fs::remove_file(&temp_path);
+    let _ = on_progress.send(DownloadProgress {
+        percent: 100,
+        stage: "done".into(),
+    });
 
     Ok(())
 }
@@ -741,7 +812,7 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_http::init())
         .invoke_handler(tauri::generate_handler![
-            open_folder, scan_mods, toggle_mod_enabled, batch_toggle_mod_enabled, http_request, test_network,
+            open_folder, scan_mods, toggle_mod_enabled, batch_toggle_mod_enabled, http_request, test_network, download_and_extract_7z,
             db::db_login, db::db_register,
             db::db_list_mods, db::db_list_my_mods,
             db::db_get_mod_detail, db::db_get_mod_for_edit,
