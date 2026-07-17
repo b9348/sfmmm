@@ -79,7 +79,7 @@ export function getDeviceId() {
 
 // ── Mod 浏览 ──
 
-export async function listMods({ lang = 'zh', search, page = 1, limit = 20, sort_by, device_id } = {}) {
+export async function listMods({ lang = 'zh', search, page = 1, limit = 20, sort_by, device_id, category } = {}) {
   const res = await dbCall('db_list_mods', {
     lang,
     search: search || null,
@@ -87,6 +87,7 @@ export async function listMods({ lang = 'zh', search, page = 1, limit = 20, sort
     limit,
     sort_by: sort_by || null,
     device_id: device_id || null,
+    category: category || null,
   })
   return {
     success: true,

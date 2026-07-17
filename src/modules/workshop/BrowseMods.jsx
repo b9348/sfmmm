@@ -3,6 +3,8 @@ import {
   Card, CardHeader, Text, Button, SearchBox,
   Spinner, makeStyles, tokens, Badge,
   Select,
+  Dialog, DialogSurface, DialogBody, DialogTitle,
+  DialogContent, DialogActions, DialogTrigger, Input,
 } from '@fluentui/react-components'
 import {
   ArrowClockwise24Regular,
@@ -14,7 +16,7 @@ import {
   Subtract20Regular,
 } from '@fluentui/react-icons'
 import { useTranslation } from 'react-i18next'
-import { listMods, getModDetail, getModForEdit, getDeviceId } from '../../services/workshopApi'
+import { listMods, getModDetail, getModForEdit, getDeviceId, login, register } from '../../services/workshopApi'
 import ModDetailPage from './ModDetailPage'
 import { useAuth } from '../../contexts/useAuth'
 import { EditModPage, CreateModPage } from './MyMods'
@@ -111,22 +113,47 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground3,
     fontSize: tokens.fontSizeSmall,
   },
-  fab: {
+  fabContainer: {
     position: 'fixed',
     bottom: '24px',
     right: '24px',
     zIndex: 1000,
-    boxShadow: tokens.shadow8,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '12px',
+    alignItems: 'center',
+  },
+  fabItem: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    gap: '4px',
+  },
+  fabLabel: {
+    fontSize: tokens.fontSizeSmall,
+    color: tokens.colorNeutralForeground2,
+    backgroundColor: tokens.colorNeutralBackground1,
+    padding: '2px 6px',
+    borderRadius: '4px',
+    boxShadow: tokens.shadow4,
+    whiteSpace: 'nowrap',
   },
 })
 
 export function BrowseMods({ initialModId, initialCommentId }) {
   const styles = useStyles()
   const { t } = useTranslation()
-  const { user, isLoggedIn } = useAuth()
+  const { user, isLoggedIn, loginSuccess } = useAuth()
   const deviceIdRef = useRef(getDeviceId())
   const [search, setSearch] = useState('')
+  const [loginOpen, setLoginOpen] = useState(false)
+  const [loginUsername, setLoginUsername] = useState('')
+  const [loginPassword, setLoginPassword] = useState('')
+  const [loginBusy, setLoginBusy] = useState(false)
+  const [loginError, setLoginError] = useState('')
+  const [isRegister, setIsRegister] = useState(false)
   const [sortBy, setSortBy] = useState(() => sessionStorage.getItem('workshop_browse_sort') || 'created_at')
+  const [categoryFilter, setCategoryFilter] = useState('')
   const [mods, setMods] = useState([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(() => {
@@ -165,7 +192,7 @@ export function BrowseMods({ initialModId, initialCommentId }) {
       .finally(() => setDetailLoading(false))
   }, [initialModId, initialCommentId, user])
 
-  const fetchMods = useCallback(async (p, keyword = search) => {
+  const fetchMods = useCallback(async (p, keyword = search, cat = categoryFilter, sort = sortBy) => {
     setLoading(true)
     setError('')
     try {
@@ -174,8 +201,9 @@ export function BrowseMods({ initialModId, initialCommentId }) {
         search: keyword,
         page: p,
         limit: 20,
-        sort_by: sortBy,
+        sort_by: sort,
         device_id: deviceIdRef.current,
+        category: cat,
       })
       setMods(data.mods || [])
       setTotal(data.total || 0)
@@ -186,7 +214,7 @@ export function BrowseMods({ initialModId, initialCommentId }) {
     } finally {
       setLoading(false)
     }
-  }, [search, sortBy])
+  }, [search, sortBy, categoryFilter])
 
   useEffect(() => {
     sessionStorage.setItem('workshop_browse_page', String(page))
@@ -268,6 +296,34 @@ export function BrowseMods({ initialModId, initialCommentId }) {
     }
   }
 
+  const handlePublishClick = () => {
+    if (isLoggedIn) {
+      setShowCreatePage(true)
+    } else {
+      setIsRegister(false)
+      setLoginError('')
+      setLoginOpen(true)
+    }
+  }
+
+  const handleLoginSubmit = async () => {
+    setLoginError('')
+    setLoginBusy(true)
+    try {
+      const fn = isRegister ? register : login
+      const data = await fn(loginUsername, loginPassword)
+      loginSuccess(data.data)
+      setLoginOpen(false)
+      setLoginUsername('')
+      setLoginPassword('')
+      setShowCreatePage(true)
+    } catch (e) {
+      setLoginError(e.message)
+    } finally {
+      setLoginBusy(false)
+    }
+  }
+
   if (showCreatePage) {
     return (
       <CreateModPage
@@ -307,9 +363,20 @@ export function BrowseMods({ initialModId, initialCommentId }) {
           <Button size="small" icon={<ArrowClockwise24Regular />} onClick={() => fetchMods(1)} disabled={loading}>
             {t('workshop.refresh')}
           </Button>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginLeft: 'auto' }}>
+          <div style={{ flex: 1 }} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <Text size="small">{t('workshop.type')}</Text>
+            <Select size="small" value={categoryFilter} onChange={(_, d) => { const v = d.value; setCategoryFilter(v); setPage(1); fetchMods(1, search, v, sortBy) }} disabled={loading}>
+              <option value="">{t('workshop.typeAll')}</option>
+              <option value="v1">{t('workshop.category_v1')}</option>
+              <option value="v2">{t('workshop.category_v2')}</option>
+              <option value="dll">{t('workshop.category_dll')}</option>
+              <option value="composite">{t('workshop.category_composite')}</option>
+            </Select>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
             <Text size="small">{t('workshop.sortBy')}</Text>
-            <Select size="small" value={sortBy} onChange={(_, d) => { setSortBy(d.value); setPage(1); fetchMods(1) }} disabled={loading}>
+            <Select size="small" value={sortBy} onChange={(_, d) => { const v = d.value; setSortBy(v); setPage(1); fetchMods(1, search, categoryFilter, v) }} disabled={loading}>
               <option value="created_at">{t('workshop.sortNewest')}</option>
               <option value="likes">{t('workshop.sortLikes')}</option>
             </Select>
@@ -430,16 +497,70 @@ export function BrowseMods({ initialModId, initialCommentId }) {
         </>
       )}
 
-      {isLoggedIn && (
-        <Button
-          size="large"
-          icon={<Add24Regular />}
-          appearance="primary"
-          className={styles.fab}
-          onClick={() => setShowCreatePage(true)}
-          title={t('workshop.publishMod')}
-        />
-      )}
+      <div className={styles.fabContainer}>
+        <div className={styles.fabItem}>
+          <Button
+            size="large"
+            icon={<ArrowClockwise24Regular />}
+            appearance="outline"
+            shape="circular"
+            onClick={() => fetchMods(page)}
+            disabled={loading}
+            title={t('workshop.refresh')}
+          />
+          <Text className={styles.fabLabel}>{t('workshop.refresh')}</Text>
+        </div>
+        <div className={styles.fabItem}>
+          <Button
+            size="large"
+            icon={<Add24Regular />}
+            appearance="primary"
+            shape="circular"
+            onClick={handlePublishClick}
+            title={t('workshop.publishMod')}
+          />
+          <Text className={styles.fabLabel}>{t('workshop.publishMod')}</Text>
+        </div>
+      </div>
+
+      <Dialog open={loginOpen} onOpenChange={(_, d) => { setLoginOpen(d.open); if (!d.open) setLoginError('') }}>
+        <DialogSurface>
+          <DialogBody>
+            <DialogTitle>{isRegister ? t('workshop.register') : t('workshop.login')}</DialogTitle>
+            <DialogContent>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '4px' }}>
+                <Input
+                  size="small"
+                  placeholder={t('workshop.username')}
+                  value={loginUsername}
+                  onChange={(_, d) => setLoginUsername(d.value)}
+                />
+                <Input
+                  size="small"
+                  type="password"
+                  placeholder={t('workshop.password')}
+                  value={loginPassword}
+                  onChange={(_, d) => setLoginPassword(d.value)}
+                />
+                {loginError && (
+                  <Text size="small" style={{ color: tokens.colorPaletteRedForeground1 }}>{loginError}</Text>
+                )}
+              </div>
+            </DialogContent>
+            <DialogActions>
+              <Button size="small" appearance="subtle" onClick={() => { setIsRegister(!isRegister); setLoginError('') }}>
+                {isRegister ? t('workshop.hasAccount') : t('workshop.noAccount')}
+              </Button>
+              <DialogTrigger disableButtonEnhancement>
+                <Button size="small" appearance="subtle">{t('workshop.cancel')}</Button>
+              </DialogTrigger>
+              <Button size="small" appearance="primary" onClick={handleLoginSubmit} disabled={loginBusy}>
+                {loginBusy ? t('workshop.processing') : isRegister ? t('workshop.registerBtn') : t('workshop.login')}
+              </Button>
+            </DialogActions>
+          </DialogBody>
+        </DialogSurface>
+      </Dialog>
     </div>
   )
 }

@@ -205,6 +205,7 @@
     "uploading": "上传中...",
     "logout": "退出登录",
     "type": "类型",
+    "typeAll": "全部",
     "displayLang": "展示语言",
     "detailedDesc": "详细说明",
     "downloadCount": "{{count}} 次下载",

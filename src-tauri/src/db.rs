@@ -411,6 +411,7 @@ pub async fn db_list_mods(
     limit: Option<u64>,
     sort_by: Option<String>,
     device_id: Option<String>,
+    category: Option<String>,
 ) -> Result<ApiResponse, String> {
     let pool = state.pool.clone();
     tokio::task::spawn_blocking(move || {
@@ -425,13 +426,22 @@ pub async fn db_list_mods(
             _ => "ORDER BY m.created_at DESC",
         };
 
-        // 构建搜索条件：支持 mod_key、翻译名称、描述、语言代码模糊匹配
-        let (where_sql, mut params): (String, Vec<Value>) = if let Some(ref s) = search {
+        // 构建搜索条件：支持 mod_key、翻译名称、描述、语言代码模糊匹配，以及类型筛选
+        let mut conditions: Vec<String> = Vec::new();
+        let mut params: Vec<Value> = Vec::new();
+        if let Some(ref s) = search {
             let p = format!("%{}%", s);
-            ("WHERE (m.mod_id LIKE ? OR m.id IN (SELECT mod_id FROM mod_translations WHERE name LIKE ? OR description LIKE ? OR lang_code LIKE ?))".into(),
-             vec![p.clone().into(), p.clone().into(), p.clone().into(), p.into()])
+            conditions.push("(m.mod_id LIKE ? OR m.id IN (SELECT mod_id FROM mod_translations WHERE name LIKE ? OR description LIKE ? OR lang_code LIKE ?))".into());
+            params.extend(vec![p.clone().into(), p.clone().into(), p.clone().into(), p.into()]);
+        }
+        if let Some(ref c) = category {
+            conditions.push("m.category = ?".into());
+            params.push(c.clone().into());
+        }
+        let where_sql = if conditions.is_empty() {
+            String::new()
         } else {
-            (String::new(), vec![])
+            format!("WHERE {}", conditions.join(" AND "))
         };
 
         // 总数
