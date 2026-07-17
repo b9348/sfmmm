@@ -87,11 +87,9 @@ impl ManagedPool {
             return;
         }
         let inner = self.inner.clone();
-        tokio::spawn(async move {
-            let mut interval = tokio::time::interval(Duration::from_secs(IDLE_CHECK_INTERVAL_SECS));
-            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        std::thread::spawn(move || {
             loop {
-                interval.tick().await;
+                std::thread::sleep(Duration::from_secs(IDLE_CHECK_INTERVAL_SECS));
                 let last = inner.last_activity.load(Ordering::Relaxed);
                 if last == 0 {
                     continue;
