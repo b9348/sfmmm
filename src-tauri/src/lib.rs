@@ -8,6 +8,7 @@ use std::{
 
 use serde::Serialize;
 use tauri::ipc::Channel;
+use tauri::Manager;
 use tauri_plugin_sql::{Builder, Migration, MigrationKind};
 use futures_util::StreamExt;
 
@@ -844,6 +845,9 @@ pub fn run() {
         )
         .manage(db::DbState::new().expect("failed to init MySQL pool"))
         .setup(|app| {
+            // 启动 MySQL 连接池空闲检查器：超过 60 秒无请求则释放连接
+            app.state::<db::DbState>().pool.start_idle_checker();
+
             if cfg!(debug_assertions) {
                 app.handle().plugin(
                     tauri_plugin_log::Builder::default()

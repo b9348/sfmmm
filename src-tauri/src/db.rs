@@ -2,11 +2,16 @@ use mysql::prelude::*;
 use mysql::*;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
+use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::Manager;
 
 // 单个应用实例最多占用 1 个 MySQL 连接，闲置时不保留连接
 const DB_POOL_MIN: usize = 0;
 const DB_POOL_MAX: usize = 1;
+const IDLE_TIMEOUT_SECS: i64 = 60;
+const IDLE_CHECK_INTERVAL_SECS: u64 = 10;
 
 // 语义版本比较：返回 -1, 0, 1
 fn semver_cmp(a: &str, b: &str) -> i32 {
@@ -44,20 +49,108 @@ fn db_url() -> String {
     std::env::var("DB_URL").expect("DB_URL 未设置：请在 exe 同目录或 src-tauri/.env 中配置数据库连接")
 }
 
+/// 对 mysql::Pool 的包装：惰性创建，并在空闲超时时主动释放。
+/// 所有数据库命令仍通过 `pool.get_conn()` 使用，因此无需改动命令代码。
+#[derive(Clone)]
+pub struct ManagedPool {
+    inner: Arc<ManagedPoolInner>,
+}
+
+struct ManagedPoolInner {
+    pool: Mutex<Option<Pool>>,
+    db_url: String,
+    last_activity: AtomicI64,
+    checker_started: AtomicBool,
+}
+
+impl ManagedPool {
+    fn new(db_url: String) -> Self {
+        Self {
+            inner: Arc::new(ManagedPoolInner {
+                pool: Mutex::new(None),
+                db_url,
+                last_activity: AtomicI64::new(0),
+                checker_started: AtomicBool::new(false),
+            }),
+        }
+    }
+
+    /// 启动后台任务，定期检查并释放长时间空闲的连接池。
+    /// 多次调用只有第一次会生效。
+    pub(crate) fn start_idle_checker(&self) {
+        if self
+            .inner
+            .checker_started
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .is_err()
+        {
+            return;
+        }
+        let inner = self.inner.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_secs(IDLE_CHECK_INTERVAL_SECS));
+            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            loop {
+                interval.tick().await;
+                let last = inner.last_activity.load(Ordering::Relaxed);
+                if last == 0 {
+                    continue;
+                }
+                let now = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs() as i64;
+                if now - last > IDLE_TIMEOUT_SECS {
+                    let mut guard = inner.pool.lock().unwrap_or_else(|e| e.into_inner());
+                    if guard.is_some() {
+                        println!("[ManagedPool] idle over {}s, dropping MySQL pool", IDLE_TIMEOUT_SECS);
+                        *guard = None;
+                        inner.last_activity.store(0, Ordering::Relaxed);
+                    }
+                }
+            }
+        });
+    }
+
+    /// 获取连接。若连接池尚未创建或已被释放，则自动重建。
+    pub fn get_conn(&self) -> Result<PooledConn, String> {
+        let inner = self.inner.clone();
+
+        let pool = {
+            let mut guard = inner.pool.lock().unwrap_or_else(|e| e.into_inner());
+            if guard.is_none() {
+                let opts = Opts::from_url(&inner.db_url).map_err(|e| e.to_string())?;
+                let pool_opts = opts
+                    .get_pool_opts()
+                    .clone()
+                    .with_constraints(PoolConstraints::new(DB_POOL_MIN, DB_POOL_MAX).unwrap_or_default());
+                let opts: Opts = OptsBuilder::from_opts(opts).pool_opts(pool_opts).into();
+                let new_pool = Pool::new(opts).map_err(|e| e.to_string())?;
+                *guard = Some(new_pool);
+            }
+            let pool = guard.as_ref().unwrap().clone();
+            inner.last_activity.store(
+                SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs() as i64,
+                Ordering::Relaxed,
+            );
+            pool
+        };
+
+        pool.get_conn().map_err(|e| e.to_string())
+    }
+}
+
 pub struct DbState {
-    pub pool: Pool,
+    pub pool: ManagedPool,
 }
 
 impl DbState {
     pub fn new() -> Result<Self, Box<dyn std::error::Error>> {
-        let opts = Opts::from_url(&db_url())?;
-        // 限制连接池大小，避免单个客户端占用过多 MySQL 连接
-        let pool_opts = opts
-            .get_pool_opts()
-            .clone()
-            .with_constraints(PoolConstraints::new(DB_POOL_MIN, DB_POOL_MAX).unwrap_or_default());
-        let opts: Opts = OptsBuilder::from_opts(opts).pool_opts(pool_opts).into();
-        let pool = Pool::new(opts)?;
+        let pool = ManagedPool::new(db_url());
+        // 注意：空闲检查器在 lib.rs 的 setup 中启动，因为此处 Tokio runtime 尚未就绪。
         Ok(Self { pool })
     }
 }
