@@ -69,6 +69,10 @@ jobs:
           echo "DB_URL=${{ secrets.DB_URL }}" > src-tauri/.env
         shell: bash
 
+      - name: Remove local Cargo config for CI
+        run: rm -f src-tauri/.cargo/config.toml
+        shell: bash
+
       - name: Build Tauri (NSIS)
         run: pnpm tauri build
         env:
