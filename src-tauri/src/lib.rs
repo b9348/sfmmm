@@ -2,7 +2,6 @@ use std::{
     fs,
     io::Write,
     path::PathBuf,
-    process::Command,
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -333,7 +332,7 @@ fn missing_bepinex_core_files(game_path: &PathBuf) -> Vec<String> {
 }
 
 #[tauri::command]
-fn open_folder(path: String) -> Result<(), String> {
+fn open_folder(path: String, selected_items: Option<Vec<String>>) -> Result<(), String> {
     let path = PathBuf::from(path);
 
     if !path.is_dir() {
@@ -341,19 +340,102 @@ fn open_folder(path: String) -> Result<(), String> {
     }
 
     #[cfg(target_os = "windows")]
-    Command::new("explorer")
-        .arg(path)
-        .spawn()
-        .map_err(|e| e.to_string())?;
+    {
+        use std::ffi::{OsStr, c_void};
+        use std::iter::once;
+        use std::os::windows::ffi::OsStrExt;
+
+        type HRESULT = i32;
+        type LPITEMIDLIST = *mut c_void;
+        type LPBC = *mut c_void;
+
+        #[link(name = "ole32")]
+        extern "system" {
+            fn CoInitializeEx(pvReserved: *mut c_void, dwCoInit: u32) -> HRESULT;
+        }
+
+        #[link(name = "shell32")]
+        extern "system" {
+            fn SHParseDisplayName(
+                pszName: *const u16,
+                pbc: LPBC,
+                ppidl: *mut LPITEMIDLIST,
+                sfgaoIn: u32,
+                psfgaoOut: *mut u32,
+            ) -> HRESULT;
+            fn SHOpenFolderAndSelectItems(
+                pidlFolder: LPITEMIDLIST,
+                cidl: u32,
+                apidl: *const LPITEMIDLIST,
+                dwFlags: u32,
+            ) -> HRESULT;
+            fn ILFree(pidl: LPITEMIDLIST);
+        }
+
+        const COINIT_APARTMENTTHREADED: u32 = 0x2;
+
+        fn to_wide(s: &str) -> Vec<u16> {
+            OsStr::new(s).encode_wide().chain(once(0)).collect()
+        }
+
+        unsafe {
+            let _ = CoInitializeEx(std::ptr::null_mut(), COINIT_APARTMENTTHREADED);
+        }
+
+        let path_str = path.to_string_lossy().to_string();
+        let folder_wide = to_wide(&path_str);
+        let mut folder_pidl: LPITEMIDLIST = std::ptr::null_mut();
+        let hr = unsafe {
+            SHParseDisplayName(folder_wide.as_ptr(), std::ptr::null_mut(), &mut folder_pidl, 0, std::ptr::null_mut())
+        };
+        if hr < 0 {
+            return Err(format!("解析目录失败: 0x{:08X}", hr));
+        }
+
+        let mut item_pidls: Vec<LPITEMIDLIST> = Vec::new();
+        if let Some(items) = selected_items {
+            for item in items {
+                let item_path = path.join(&item);
+                let item_wide = to_wide(&item_path.to_string_lossy());
+                let mut item_pidl: LPITEMIDLIST = std::ptr::null_mut();
+                let hr = unsafe {
+                    SHParseDisplayName(item_wide.as_ptr(), std::ptr::null_mut(), &mut item_pidl, 0, std::ptr::null_mut())
+                };
+                if hr >= 0 && !item_pidl.is_null() {
+                    item_pidls.push(item_pidl);
+                }
+            }
+        }
+
+        let result = unsafe {
+            SHOpenFolderAndSelectItems(
+                folder_pidl,
+                item_pidls.len() as u32,
+                if item_pidls.is_empty() { std::ptr::null() } else { item_pidls.as_ptr() },
+                0,
+            )
+        };
+
+        unsafe {
+            for pidl in item_pidls {
+                ILFree(pidl);
+            }
+            ILFree(folder_pidl);
+        }
+
+        if result < 0 {
+            return Err(format!("打开目录失败: 0x{:08X}", result));
+        }
+    }
 
     #[cfg(target_os = "macos")]
-    Command::new("open")
+    std::process::Command::new("open")
         .arg(path)
         .spawn()
         .map_err(|e| e.to_string())?;
 
     #[cfg(target_os = "linux")]
-    Command::new("xdg-open")
+    std::process::Command::new("xdg-open")
         .arg(path)
         .spawn()
         .map_err(|e| e.to_string())?;
@@ -803,6 +885,21 @@ pub fn run() {
             version: 5,
             description: "add_manifest_to_installed_workshop_mods",
             sql: "ALTER TABLE installed_workshop_mods ADD COLUMN manifest TEXT DEFAULT '';",
+            kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 6,
+            description: "create_installed_workshop_mod_files",
+            sql: "CREATE TABLE IF NOT EXISTS installed_workshop_mod_files (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                mod_key TEXT NOT NULL,
+                lang_code TEXT NOT NULL,
+                installed_version TEXT NOT NULL,
+                file_hash TEXT DEFAULT '',
+                manifest TEXT DEFAULT '',
+                installed_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(mod_key, lang_code)
+            );",
             kind: MigrationKind::Up,
         },
     ];

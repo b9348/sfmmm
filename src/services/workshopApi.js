@@ -305,6 +305,15 @@ export async function deleteModFile({ author_id, mod_id, lang_code, fileUrl }) {
   return { success: true }
 }
 
+// 仅删除 ImgBed CDN 文件（不删数据库记录），用于 v1 替换流程
+export async function deleteImgbedFile(fileUrl) {
+  const res = await dbCall('db_delete_imgbed_file', { file_url: fileUrl })
+  if (!res.success) {
+    throw new Error(res.message || 'ImgBed delete failed')
+  }
+  return { success: true }
+}
+
 // ── 评论系统 ──
 
 export async function addComment({ mod_id, author_id, content, parent_id }) {

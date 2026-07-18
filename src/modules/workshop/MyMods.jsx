@@ -11,16 +11,18 @@ import {
   ArrowClockwise24Regular, Cloud24Regular,
   ArrowUpload24Regular, Save24Regular,
   Heart24Regular, Heart24Filled,
+  ArrowLeft24Regular,
 } from '@fluentui/react-icons'
-import { listMyMods, createMod, updateMod, uploadModFile, deleteModFile, login, register, getModForEdit, getModDetail, deleteModWithFiles, checkModKey, setModPermissions, getDeviceId } from '../../services/workshopApi'
+import { listMyMods, createMod, updateMod, uploadModFile, deleteModFile, deleteImgbedFile, login, register, getModForEdit, getModDetail, deleteModWithFiles, checkModKey, setModPermissions, getDeviceId } from '../../services/workshopApi'
 import { resolveTranslationImages, extractImgbedUrls, deleteImageFromImgbed } from '../../services/imageApi'
 import { useAuth } from '../../contexts/useAuth'
 import { RichTextEditor, MarkdownEditor } from '../../components/common/RichTextEditor'
 import JSZip from 'jszip'
 import { open } from '@tauri-apps/plugin-dialog'
 import { readFile, readDir } from '@tauri-apps/plugin-fs'
+import Database from '@tauri-apps/plugin-sql'
 import ModDetailPage from './ModDetailPage'
-import { ConfirmDialog, BackButton } from '../../components'
+import { ConfirmDialog, BackButton, ProgressModal } from '../../components'
 import PermissionSettings from './PermissionSettings'
 
 const LANGUAGES = [
@@ -31,6 +33,15 @@ const LANGUAGES = [
 
 const LANG_LABELS = { zh: '中文', en: 'English', ja: '日本語' }
 const MAX_INSTRUCTIONS_LENGTH = 10000
+
+function getRelativePath(filePath, baseDir) {
+  const normalizedFile = filePath.replace(/\\/g, '/')
+  const normalizedBase = baseDir.replace(/\\/g, '/').replace(/\/+$/, '')
+  if (!normalizedBase || !normalizedFile.startsWith(normalizedBase + '/')) {
+    return filePath.split(/[/\\]/).pop()
+  }
+  return normalizedFile.substring(normalizedBase.length + 1)
+}
 const MAX_ZIP_SIZE_BASE = 20 * 1024 * 1024 // 20MB 限制
 const MAX_ZIP_SIZE_R2 = 100 * 1024 * 1024 // 100MB 限制（R2 权限）
 
@@ -131,6 +142,25 @@ const useStyles = makeStyles({
     zIndex: 1000,
     boxShadow: tokens.shadow8,
   },
+  fabContainer: {
+    position: 'fixed',
+    bottom: '24px',
+    right: '24px',
+    zIndex: 1000,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '12px',
+    alignItems: 'flex-end',
+  },
+  stickyToolbar: {
+    position: 'sticky',
+    top: 0,
+    zIndex: 10,
+    backgroundColor: tokens.colorNeutralBackground1,
+    paddingTop: '8px',
+    paddingBottom: '8px',
+    borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
+  },
 })
 
 function LoginForm() {
@@ -216,6 +246,16 @@ export function CreateModPage({ onClose, onCreated }) {
   const [uploadProgress, setUploadProgress] = useState(0)
   const [fileDialogLang, setFileDialogLang] = useState(null)
   const [permissions, setPermissions] = useState({ mode: 'author_only', open_langs: [], allow_mod_info: true, allow_lang: true, apply_langs: [] })
+  const [gamePath, setGamePath] = useState('')
+
+  useEffect(() => {
+    const loadGamePath = async () => {
+      const db = await Database.load('sqlite:config.db')
+      const rows = await db.select("SELECT value FROM config WHERE `key` = 'game_path'")
+      setGamePath(rows[0]?.value || '')
+    }
+    loadGamePath()
+  }, [])
 
   const maxZipSize = user?.r2_enabled ? MAX_ZIP_SIZE_R2 : MAX_ZIP_SIZE_BASE
 
@@ -316,10 +356,12 @@ export function CreateModPage({ onClose, onCreated }) {
         const selected = await open({ multiple: true, filters: [{ name: 'Mod Files', extensions: ['json', 'code', 'txt', 'zip'] }] })
         if (!selected || selected.length === 0) return
         const files = []
+        const baseDir = category === 'v1' && gamePath ? `${gamePath}\\CustomMissions` : null
         for (const filePath of selected) {
           const data = await readFile(filePath)
           const name = filePath.split(/[/\\]/).pop()
-          files.push({ name, data, size: data.byteLength })
+          const zipPath = baseDir ? getRelativePath(filePath, baseDir) : name
+          files.push({ name, zipPath, data, size: data.byteLength })
         }
         setModFiles(prev => ({ ...prev, [lang]: files }))
       }
@@ -364,6 +406,25 @@ export function CreateModPage({ onClose, onCreated }) {
     setError('')
     setBusy(true)
     try {
+      // 0. 预压缩并检查所有文件大小，避免创建空 mod
+      const fileLangs = Object.keys(modFiles).filter(lang => modFiles[lang] && modFiles[lang].length > 0)
+      const zipBlobs = {}
+      for (const lang of fileLangs) {
+        const files = modFiles[lang]
+        const manifest = JSON.stringify(files.map(f => f.zipPath || f.name))
+        const zip = new JSZip()
+        for (const file of files) {
+          zip.file(file.zipPath || file.name, file.data)
+        }
+        const blob = await zip.generateAsync({ type: 'blob' })
+        if (blob.size > maxZipSize) {
+          setError(t('workshop.modFileSizeWarning', { size: (blob.size / 1024 / 1024).toFixed(1), max: (maxZipSize / 1024 / 1024) }))
+          setBusy(false)
+          return
+        }
+        zipBlobs[lang] = { blob, manifest }
+      }
+
       // 1. 先检查 mod_key 是否可用
       const keyCheck = await checkModKey(modKey.trim())
       if (keyCheck.exists) {
@@ -379,22 +440,10 @@ export function CreateModPage({ onClose, onCreated }) {
       const createResult = await createMod({ author_id: user.user_id, mod_key: modKey.trim(), translations: emptyInstructionsTranslations, category })
       const newModId = createResult.data.mod_id
 
-      // 2. 上传 mod 文件
-      const fileLangs = Object.keys(modFiles).filter(lang => modFiles[lang] && modFiles[lang].length > 0)
+      // 3. 上传 mod 文件
       for (const lang of fileLangs) {
         setUploadingLang(lang)
-        const files = modFiles[lang]
-        const manifest = JSON.stringify(files.map(f => f.name))
-        const zip = new JSZip()
-        for (const file of files) {
-          zip.file(file.name, file.data)
-        }
-        const blob = await zip.generateAsync({ type: 'blob' })
-        if (blob.size > maxZipSize) {
-          setError(t('workshop.modFileSizeWarning', { size: (blob.size / 1024 / 1024).toFixed(1), max: (maxZipSize / 1024 / 1024) }))
-          setBusy(false)
-          return
-        }
+        const { blob, manifest } = zipBlobs[lang]
         const zipFile = new File([blob], `${modKey}_${lang}.zip`, { type: 'application/zip' })
         setUploadProgress(0)
         await uploadModFile({
@@ -667,6 +716,20 @@ export function EditModPage({ mod: initialMod, onClose, onUpdated }) {
   const [uploadError, setUploadError] = useState('')
   const [fileDialogLang, setFileDialogLang] = useState(null)
   const [confirmRemoveLang, setConfirmRemoveLang] = useState(null)
+  const [progressOpen, setProgressOpen] = useState(false)
+  const [progressPercent, setProgressPercent] = useState(0)
+  const [progressStep, setProgressStep] = useState('')
+  const [replaceErrors, setReplaceErrors] = useState([])
+  const [gamePath, setGamePath] = useState('')
+
+  useEffect(() => {
+    const loadGamePath = async () => {
+      const db = await Database.load('sqlite:config.db')
+      const rows = await db.select("SELECT value FROM config WHERE `key` = 'game_path'")
+      setGamePath(rows[0]?.value || '')
+    }
+    loadGamePath()
+  }, [])
 
   // 权限设置
   const pc = initialMod.perm_config || { mode: 'author_only', open_langs: [], allow_mod_info: true, allow_lang: true, apply_langs: [] }
@@ -767,10 +830,12 @@ export function EditModPage({ mod: initialMod, onClose, onUpdated }) {
         const selected = await open({ multiple: true, filters: [{ name: 'Mod Files', extensions: ['json', 'code', 'txt', 'zip'] }] })
         if (!selected || selected.length === 0) return
         const files = []
+        const baseDir = category === 'v1' && gamePath ? `${gamePath}\\CustomMissions` : null
         for (const filePath of selected) {
           const data = await readFile(filePath)
           const name = filePath.split(/[/\\]/).pop()
-          files.push({ name, data, size: data.byteLength })
+          const zipPath = baseDir ? getRelativePath(filePath, baseDir) : name
+          files.push({ name, zipPath, data, size: data.byteLength })
         }
         setModFiles(prev => ({ ...prev, [lang]: files }))
       }
@@ -828,10 +893,10 @@ export function EditModPage({ mod: initialMod, onClose, onUpdated }) {
       if (existingFiles[lang]) {
         await deleteModFile({ author_id: user.user_id, mod_id: initialMod.id, lang_code: lang, fileUrl: existingFiles[lang].file_url })
       }
-      const manifest = JSON.stringify(files.map(f => f.name))
+      const manifest = JSON.stringify(files.map(f => f.zipPath || f.name))
       const zip = new JSZip()
       for (const file of files) {
-        zip.file(file.name, file.data)
+        zip.file(file.zipPath || file.name, file.data)
       }
       const blob = await zip.generateAsync({ type: 'blob' })
       if (blob.size > maxZipSize) {
@@ -862,9 +927,17 @@ export function EditModPage({ mod: initialMod, onClose, onUpdated }) {
     }
   }
 
+  const handleReplaceErrorClose = () => {
+    setReplaceErrors([])
+    setProgressOpen(false)
+    onUpdated()
+    onClose()
+  }
+
   const handleSubmit = async () => {
     setError('')
     setBusy(true)
+    setReplaceErrors([])
     try {
       // 1. 收集需要处理的语言
       const pendingLangs = Object.keys(modFiles).filter(lang => modFiles[lang] && modFiles[lang].length > 0)
@@ -881,16 +954,97 @@ export function EditModPage({ mod: initialMod, onClose, onUpdated }) {
       }
 
       // 处理所有有待上传文件的语言
-      for (const lang of pendingLangs) {
+      const v1PendingLangs = category === 'v1' ? pendingLangs : []
+      const otherPendingLangs = category === 'v1' ? [] : pendingLangs
+
+      // v1：保存时统一替换，先上传后删除旧文件，显示进度
+      let replaceErrorList = []
+      if (v1PendingLangs.length > 0) {
+        setProgressOpen(true)
+        setProgressPercent(0)
+        setProgressStep(t('workshop.updatingFiles'))
+        const total = v1PendingLangs.length
+        for (let i = 0; i < v1PendingLangs.length; i++) {
+          const lang = v1PendingLangs[i]
+          const langLabel = LANGUAGES.find(l => l.value === lang)?.label || lang
+          const updateProgress = (subProgress, stepText) => {
+            setProgressPercent(Math.round(((i + subProgress) / total) * 100))
+            setProgressStep(stepText)
+          }
+
+          setUploadingLang(lang)
+          const files = modFiles[lang]
+          const manifest = JSON.stringify(files.map(f => f.zipPath || f.name))
+
+          updateProgress(0, t('workshop.compressingFile', { lang: langLabel }))
+
+          const zip = new JSZip()
+          for (const file of files) {
+            zip.file(file.zipPath || file.name, file.data)
+          }
+          const blob = await zip.generateAsync({ type: 'blob' })
+          if (blob.size > maxZipSize) {
+            setProgressOpen(false)
+            setError(t('workshop.modFileSizeWarning', { size: (blob.size / 1024 / 1024).toFixed(1), max: (maxZipSize / 1024 / 1024) }))
+            setModFiles(prev => {
+              const next = { ...prev }
+              for (let j = 0; j < i; j++) {
+                delete next[v1PendingLangs[j]]
+              }
+              return next
+            })
+            setBusy(false)
+            return
+          }
+
+          const oldFile = existingFiles[lang]
+          const zipFileName = oldFile ? oldFile.file_name : `${modKey}_${lang}.zip`
+          const zipFile = new File([blob], zipFileName, { type: 'application/zip' })
+
+          setUploadProgress(0)
+          const res = await uploadModFile({
+            author_id: user.user_id,
+            mod_id: initialMod.id,
+            lang_code: lang,
+            version: translations[lang]?.version,
+            file: zipFile,
+            manifest,
+            r2_enabled: user?.r2_enabled,
+            onProgress: (loaded, total) => {
+              const subProgress = total ? (loaded / total) * 0.8 : 0
+              updateProgress(subProgress, t('workshop.uploadingLang', { lang: langLabel }))
+              setUploadProgress(Math.round((loaded / total) * 100))
+            },
+          })
+
+          updateProgress(0.9, t('workshop.deletingOldFile', { lang: langLabel }))
+          if (oldFile?.file_url) {
+            try {
+              await deleteImgbedFile(oldFile.file_url)
+            } catch (e) {
+              console.warn(`删除旧文件失败: ${oldFile.file_url}`, e)
+              replaceErrorList.push({ lang: langLabel, msg: e.message })
+            }
+          }
+
+          setExistingFiles(prev => ({ ...prev, [lang]: res.data }))
+        }
+        setProgressStep(t('workshop.updatingDatabase'))
+        setProgressPercent(100)
+      }
+      setReplaceErrors(replaceErrorList)
+
+      // 非 v1：保持原有独立上传逻辑
+      for (const lang of otherPendingLangs) {
         if (existingFiles[lang]) {
           await deleteModFile({ author_id: user.user_id, mod_id: initialMod.id, lang_code: lang, fileUrl: existingFiles[lang].file_url })
         }
         setUploadingLang(lang)
         const files = modFiles[lang]
-        const manifest = JSON.stringify(files.map(f => f.name))
+        const manifest = JSON.stringify(files.map(f => f.zipPath || f.name))
         const zip = new JSZip()
         for (const file of files) {
-          zip.file(file.name, file.data)
+          zip.file(file.zipPath || file.name, file.data)
         }
         const blob = await zip.generateAsync({ type: 'blob' })
         if (blob.size > maxZipSize) {
@@ -957,10 +1111,16 @@ export function EditModPage({ mod: initialMod, onClose, onUpdated }) {
         }
       }
 
-      onUpdated()
-      onClose()
+      if (replaceErrorList.length > 0) {
+        setProgressOpen(false)
+      } else {
+        setProgressOpen(false)
+        onUpdated()
+        onClose()
+      }
     } catch (e) {
       setError(e.message)
+      setProgressOpen(false)
     } finally {
       setBusy(false)
     }
@@ -968,7 +1128,7 @@ export function EditModPage({ mod: initialMod, onClose, onUpdated }) {
 
   return (
     <div className={styles.root}>
-      <div className={styles.toolbarRow}>
+      <div className={`${styles.toolbarRow} ${styles.stickyToolbar}`}>
         <BackButton onClick={onClose} />
         <Text weight="semibold">{t('workshop.editMod')}</Text>
       </div>
@@ -1070,23 +1230,34 @@ export function EditModPage({ mod: initialMod, onClose, onUpdated }) {
                     )}
                   </div>
                 )}
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
                   {category === 'composite' ? (
                     <>
                       <Button size="small" icon={<ArrowUpload24Regular />} onClick={() => handleSelectFolders(lang)} disabled={!langEditable}>{t('workshop.hint_v2')}</Button>
-                      <Button size="small" icon={<ArrowUpload24Regular />} onClick={() => handleSelectFiles(lang)} disabled={!langEditable}>{t('workshop.selectFile')}</Button>
+                      <Button size="small" icon={<ArrowUpload24Regular />} onClick={() => handleSelectFiles(lang)} disabled={!langEditable}>{category === 'v1' ? t('workshop.updateFile') : t('workshop.selectFile')}</Button>
                     </>
                   ) : (
                     <Button size="small" icon={<ArrowUpload24Regular />} onClick={() => handleSelectFiles(lang)} disabled={!langEditable}>
-                      {category === 'v2' ? t('workshop.hint_v2') : category === 'dll' ? t('workshop.hint_dll') : t('workshop.selectFile')}
+                      {category === 'v2' ? t('workshop.hint_v2') : category === 'dll' ? t('workshop.hint_dll') : category === 'v1' ? t('workshop.updateFile') : t('workshop.selectFile')}
                     </Button>
                   )}
                   {modFiles[lang] && (
                     <>
-                      <Button size="small" appearance="primary" onClick={() => handleUploadFile(lang)} disabled={uploadingLang === lang || !langEditable}>
-                        {uploadingLang === lang ? t('workshop.uploading') : t('workshop.upload')}
-                      </Button>
-                      <Button size="small" icon={<Delete24Regular />} appearance="subtle" onClick={() => setModFiles(prev => { const n = { ...prev }; delete n[lang]; return n })} disabled={!langEditable} />
+                      {category !== 'v1' && (
+                        <Button size="small" appearance="primary" onClick={() => handleUploadFile(lang)} disabled={uploadingLang === lang || !langEditable}>
+                          {uploadingLang === lang ? t('workshop.uploading') : t('workshop.upload')}
+                        </Button>
+                      )}
+                      {category === 'v1' ? (
+                        <Button size="small" icon={<Delete24Regular />} appearance="subtle" onClick={() => setModFiles(prev => { const n = { ...prev }; delete n[lang]; return n })} disabled={!langEditable}>
+                          {t('workshop.cancelSelection')}
+                        </Button>
+                      ) : (
+                        <Button size="small" icon={<Delete24Regular />} appearance="subtle" onClick={() => setModFiles(prev => { const n = { ...prev }; delete n[lang]; return n })} disabled={!langEditable} />
+                      )}
+                      {category === 'v1' && existingFiles[lang] && (
+                        <Text size="small" style={{ color: tokens.colorPaletteRedForeground1 }}>{t('workshop.replaceFileHint')}</Text>
+                      )}
                     </>
                   )}
                 </div>
@@ -1145,6 +1316,26 @@ export function EditModPage({ mod: initialMod, onClose, onUpdated }) {
         </DialogSurface>
       </Dialog>
 
+      <ProgressModal
+        open={progressOpen}
+        title={t('workshop.updatingFiles')}
+        percent={progressPercent}
+        stepText={progressStep}
+      />
+
+      <ConfirmDialog
+        open={replaceErrors.length > 0}
+        onClose={handleReplaceErrorClose}
+        title={t('workshop.replaceFileWarning')}
+        onConfirm={handleReplaceErrorClose}
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+          {replaceErrors.map((e, i) => (
+            <Text key={i} size="small">{e.lang}: {e.msg}</Text>
+          ))}
+        </div>
+      </ConfirmDialog>
+
       <ConfirmDialog
         open={!!confirmRemoveLang}
         onClose={() => setConfirmRemoveLang(null)}
@@ -1159,15 +1350,25 @@ export function EditModPage({ mod: initialMod, onClose, onUpdated }) {
         )}
       </ConfirmDialog>
 
-      <Button
-        size="large"
-        icon={<Save24Regular />}
-        appearance="primary"
-        className={styles.fab}
-        onClick={handleSubmit}
-        disabled={busy || !hasAnyEditPermission}
-        title={t('workshop.save')}
-      />
+      <div className={styles.fabContainer}>
+        <Button
+          size="large"
+          icon={<ArrowLeft24Regular />}
+          appearance="outline"
+          shape="circular"
+          onClick={onClose}
+          title={t('workshop.back')}
+        />
+        <Button
+          size="large"
+          icon={<Save24Regular />}
+          appearance="primary"
+          shape="circular"
+          onClick={handleSubmit}
+          disabled={busy || !hasAnyEditPermission}
+          title={t('workshop.save')}
+        />
+      </div>
     </div>
   )
 }

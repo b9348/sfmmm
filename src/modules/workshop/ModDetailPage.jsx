@@ -5,11 +5,13 @@ import {
   makeStyles, tokens,
   Dialog, DialogSurface, DialogBody, DialogTitle,
   DialogContent, DialogTrigger, DialogActions, Textarea, Select, Checkbox,
+  Popover, PopoverTrigger, PopoverSurface,
 } from '@fluentui/react-components'
 import {
   ArrowLeft24Regular, ArrowDownload24Regular,
   Edit24Regular, Add24Regular, Delete24Regular,
   Heart24Regular, Heart24Filled,
+  Folder24Regular, Document24Regular,
 } from '@fluentui/react-icons'
 import { installMod, uninstallMod } from '../../services/installMod'
 import { RichTextContent, MarkdownContent } from '../../components/common/RichTextEditor'
@@ -21,6 +23,18 @@ import Database from '@tauri-apps/plugin-sql'
 import { BackButton } from '../../components'
 
 const LANG_LABELS = { zh: '中文', en: 'English', ja: '日本語' }
+
+function compareSemver(a, b) {
+  const normalize = v => (v || '').replace(/^v/i, '')
+  const pa = normalize(a).split('.').map(Number)
+  const pb = normalize(b).split('.').map(Number)
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const na = pa[i] || 0
+    const nb = pb[i] || 0
+    if (na !== nb) return na - nb
+  }
+  return 0
+}
 
 const LANGUAGES = [
   { value: 'zh', label: '中文' },
@@ -104,6 +118,8 @@ export default function ModDetailPage({ mod, onBack, onEdit, scrollToCommentId }
   const [installingLang, setInstallingLang] = useState('')
   const [installError, setInstallError] = useState('')
   const [installedDir, setInstalledDir] = useState('')
+  const [installedFiles, setInstalledFiles] = useState([])
+  const [installedByLang, setInstalledByLang] = useState({})
   const [isInstalled, setIsInstalled] = useState(false)
   const [uninstalling, setUninstalling] = useState(false)
   const [uninstallError, setUninstallError] = useState('')
@@ -146,16 +162,77 @@ export default function ModDetailPage({ mod, onBack, onEdit, scrollToCommentId }
       try {
         const db = await Database.load('sqlite:config.db')
         const rows = await db.select(
-          'SELECT id FROM installed_workshop_mods WHERE mod_key = $1',
+          'SELECT category, installed_version, lang_code, manifest FROM installed_workshop_mods WHERE mod_key = $1',
           [mod.mod_key]
         )
-        setIsInstalled(rows.length > 0)
+        let langRows = []
+        try {
+          langRows = await db.select(
+            'SELECT lang_code, installed_version, file_hash, manifest FROM installed_workshop_mod_files WHERE mod_key = $1',
+            [mod.mod_key]
+          )
+        } catch (newTableErr) {
+          console.warn('[ModDetailPage] 查询 installed_workshop_mod_files 失败:', newTableErr)
+        }
+        const byLang = {}
+        // 优先使用新表按语言记录
+        for (const r of langRows) {
+          byLang[r.lang_code] = r
+        }
+        // 兼容旧数据：旧表中有记录但新表中没有时，用旧表数据兜底
+        if (rows.length > 0 && langRows.length === 0) {
+          const old = rows[0]
+          const fallback = {
+            lang_code: old.lang_code || '',
+            installed_version: old.installed_version || '',
+            manifest: old.manifest || '',
+          }
+          if (old.lang_code) {
+            byLang[old.lang_code] = fallback
+          } else {
+            // 旧数据没有记录 lang_code，给所有文件语言都加上兜底记录
+            mod.files?.forEach(f => {
+              byLang[f.lang_code] = { ...fallback, lang_code: f.lang_code }
+            })
+          }
+        }
+        setInstalledByLang(byLang)
+        if (rows.length > 0 || langRows.length > 0) {
+          setIsInstalled(true)
+          let manifest = rows[0]?.manifest || ''
+          if (!manifest && langRows.length > 0) {
+            manifest = langRows[0].manifest || ''
+          }
+          try {
+            setInstalledFiles(manifest ? JSON.parse(manifest) : [])
+          } catch (parseErr) {
+            console.warn('[ModDetailPage] 解析 manifest 失败:', parseErr)
+            setInstalledFiles([])
+          }
+          const configRows = await db.select("SELECT value FROM config WHERE `key` = 'game_path'")
+          const gamePath = configRows[0]?.value
+          if (gamePath) {
+            const base = gamePath.replace(/\/+$/, '')
+            const category = rows[0]?.category || 'v1'
+            let targetDir
+            if (category === 'v2') {
+              targetDir = `${base}\\CustomMissions2\\${mod.mod_key}`
+            } else if (category === 'dll') {
+              targetDir = `${base}\\BepInEx\\plugins`
+            } else if (category === 'composite') {
+              targetDir = `${base}\\BepInEx\\plugins\\${mod.mod_key}`
+            } else {
+              targetDir = `${base}\\CustomMissions`
+            }
+            setInstalledDir(targetDir)
+          }
+        }
       } catch (e) {
         console.warn('[ModDetailPage] 查询安装状态失败:', e)
       }
     }
     checkInstalled()
-  }, [mod.mod_key])
+  }, [mod.mod_key, mod.files])
 
   const handleApply = async () => {
     if (!user) return
@@ -191,6 +268,16 @@ export default function ModDetailPage({ mod, onBack, onEdit, scrollToCommentId }
         manifest: file.manifest,
       })
       setInstalledDir(result.targetDir)
+      setInstalledFiles(file.manifest ? JSON.parse(file.manifest) : [])
+      setInstalledByLang(prev => ({
+        ...prev,
+        [file.lang_code]: {
+          lang_code: file.lang_code,
+          installed_version: file.version,
+          file_hash: file.file_hash,
+          manifest: file.manifest,
+        },
+      }))
       setIsInstalled(true)
     } catch (e) {
       setInstallError(e.message)
@@ -207,6 +294,8 @@ export default function ModDetailPage({ mod, onBack, onEdit, scrollToCommentId }
       setIsInstalled(false)
       setConfirmUninstall(false)
       setInstalledDir('')
+      setInstalledByLang({})
+      setInstalledFiles([])
     } catch (e) {
       setUninstallError(e.message)
     } finally {
@@ -340,6 +429,11 @@ export default function ModDetailPage({ mod, onBack, onEdit, scrollToCommentId }
                 <Badge appearance="outline" size="small" style={{ whiteSpace: 'nowrap' }}>{LANG_LABELS[f.lang_code] || f.lang_code}</Badge>
                 {f.file_name && <Text size="small" truncate>{f.file_name}</Text>}
                 <Text size="small">v{f.version}</Text>
+                {installedByLang[f.lang_code] && (
+                  <Text size="small" className={styles.meta}>
+                    {t('workshop.localVersion', { version: installedByLang[f.lang_code].installed_version })}
+                  </Text>
+                )}
                 <Text size="small" className={styles.meta}>
                   {f.file_size >= 1024 * 1024
                     ? `${(f.file_size / (1024 * 1024)).toFixed(2)}MB`
@@ -348,28 +442,78 @@ export default function ModDetailPage({ mod, onBack, onEdit, scrollToCommentId }
                 <Button
                   size="small"
                   icon={<ArrowDownload24Regular />}
-                  appearance={isInstalled ? 'outline' : 'primary'}
+                  appearance={
+                    installingLang === f.lang_code
+                      ? 'outline'
+                      : installedByLang[f.lang_code]
+                        ? compareSemver(installedByLang[f.lang_code].installed_version, f.version) < 0
+                          ? 'primary'
+                          : 'outline'
+                        : 'primary'
+                  }
                   disabled={installingLang === f.lang_code}
                   onClick={(e) => {
                     e.stopPropagation()
                     handleInstall(f)
                   }}
                 >
-{isInstalled ? t('workshop.reinstall') : installingLang === f.lang_code ? t('workshop.installing') : t('workshop.install')}
+                  {installingLang === f.lang_code
+                    ? t('workshop.installing')
+                    : installedByLang[f.lang_code]
+                      ? compareSemver(installedByLang[f.lang_code].installed_version, f.version) < 0
+                        ? t('workshop.update')
+                        : t('workshop.reinstall')
+                      : t('workshop.install')}
                 </Button>
                 {isInstalled && (
-                  <Button
-                    size="small"
-                    icon={<Delete24Regular />}
-                    appearance="subtle"
-                    disabled={uninstalling}
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      setConfirmUninstall(true)
-                    }}
-                  >
-                    {t('workshop.uninstall')}
-                  </Button>
+                  <>
+                    <Button
+                      size="small"
+                      icon={<Folder24Regular />}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        if (installedDir) {
+                          invoke('open_folder', { path: installedDir, selected_items: installedFiles })
+                        }
+                      }}
+                    >
+                      {t('workshop.openDir')}
+                    </Button>
+                    <Popover withArrow positioning="below-start">
+                      <PopoverTrigger>
+                        <Button
+                          size="small"
+                          icon={<Document24Regular />}
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          {t('workshop.viewFileList')}
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverSurface style={{ maxHeight: '300px', overflow: 'auto', minWidth: '240px' }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                          {installedFiles.length === 0 ? (
+                            <Text size="small">{t('workshop.noFiles')}</Text>
+                          ) : (
+                            installedFiles.map((filePath, idx) => (
+                              <Text key={idx} size="small" block>{filePath}</Text>
+                            ))
+                          )}
+                        </div>
+                      </PopoverSurface>
+                    </Popover>
+                    <Button
+                      size="small"
+                      icon={<Delete24Regular />}
+                      appearance="subtle"
+                      disabled={uninstalling}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setConfirmUninstall(true)
+                      }}
+                    >
+                      {t('workshop.uninstall')}
+                    </Button>
+                  </>
                 )}
                 <Text size="small" className={styles.meta}>{f.file_hash?.slice(0, 8)}</Text>
                 <div style={{ flex: 1 }} />
@@ -382,7 +526,7 @@ export default function ModDetailPage({ mod, onBack, onEdit, scrollToCommentId }
             <Text size="small" style={{ color: tokens.colorPaletteGreenForeground1 }}>
               {t('workshop.installSuccess')}{installedDir}
             </Text>
-            <Button size="small" appearance="subtle" style={{ marginLeft: '8px' }} onClick={() => invoke('open_folder', { path: installedDir })}>
+            <Button size="small" appearance="subtle" style={{ marginLeft: '8px' }} onClick={() => invoke('open_folder', { path: installedDir, selected_items: installedFiles })}>
               {t('workshop.openDir')}
             </Button>
           </div>

@@ -27,8 +27,8 @@ export async function installMod({ modKey, category, fileUrl, version, fileHash,
   } else if (category === 'composite') {
     targetDir = `${pluginsDir}\\${modKey}`
   } else {
-    // 'v1' 或默认
-    targetDir = `${base}\\CustomMissions\\${modKey}`
+    // 'v1' 直接解压到 CustomMissions，zip 内保留相对 CustomMissions 的路径
+    targetDir = `${base}\\CustomMissions`
   }
 
   const url = fileUrl.startsWith('http') ? fileUrl : `${IMGBED_URL}${fileUrl}`
@@ -74,9 +74,10 @@ export async function installMod({ modKey, category, fileUrl, version, fileHash,
       targetPath = `${pluginsDir}\\${fileName}`
       extractedFiles.push(fileName)
     } else {
-      targetPath = `${targetDir}/${path}`
+      const normalizedPath = path.replace(/\//g, '\\')
+      targetPath = `${targetDir}\\${normalizedPath}`
       extractedFiles.push(path)
-      const lastSlash = targetPath.lastIndexOf('/')
+      const lastSlash = targetPath.lastIndexOf('\\')
       if (lastSlash > 0) {
         const dirPath = targetPath.substring(0, lastSlash)
         const subDirExists = await exists(dirPath)
@@ -102,7 +103,7 @@ export async function installMod({ modKey, category, fileUrl, version, fileHash,
   // 保存安装记录到本地 SQLite，用于侧边栏展示"创意工坊"标签
   try {
     const db = await Database.load('sqlite:config.db')
-    // 先检查是否存在
+    // 兼容旧表：保留 mod 级记录
     const existing = await db.select('SELECT id FROM installed_workshop_mods WHERE mod_key = $1', [modKey])
     if (existing.length > 0) {
       await db.execute(
@@ -115,6 +116,17 @@ export async function installMod({ modKey, category, fileUrl, version, fileHash,
         [modKey, category, version || '1.0.0', fileHash || '', langCode || '', finalManifest]
       )
     }
+    // 按语言保存安装记录，用于判断是否需要更新
+    await db.execute(
+      `INSERT INTO installed_workshop_mod_files (mod_key, lang_code, installed_version, file_hash, manifest)
+       VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT(mod_key, lang_code) DO UPDATE SET
+         installed_version = excluded.installed_version,
+         file_hash = excluded.file_hash,
+         manifest = excluded.manifest,
+         installed_at = CURRENT_TIMESTAMP`,
+      [modKey, langCode || '', version || '1.0.0', fileHash || '', finalManifest]
+    )
   } catch (e) {
     console.warn('[installMod] 保存安装记录失败:', e)
   }
@@ -168,15 +180,51 @@ export async function uninstallMod({ modKey }) {
         // 目录非空则忽略
       }
     }
+  } else if (category === 'v1') {
+    // v1: 按 manifest 中的相对路径逐个删除文件，并清理空目录
+    const fileList = manifest ? JSON.parse(manifest) : []
+    const dirsToCheck = new Set()
+    for (const filePath of fileList) {
+      const normalizedPath = filePath.replace(/\//g, '\\')
+      const fullPath = `${base}\\CustomMissions\\${normalizedPath}`
+      try {
+        if (await exists(fullPath)) {
+          await remove(fullPath)
+        }
+        const parts = normalizedPath.split('\\')
+        if (parts.length > 1) {
+          dirsToCheck.add(`${base}\\CustomMissions\\${parts.slice(0, -1).join('\\')}`)
+        }
+      } catch (e) {
+        console.warn(`[uninstallMod] 删除文件失败: ${fullPath}`, e)
+      }
+    }
+    const sortedDirs = [...dirsToCheck].sort((a, b) => b.length - a.length)
+    for (const dir of sortedDirs) {
+      try {
+        if (await exists(dir)) {
+          await remove(dir)
+        }
+      } catch {
+        // 目录非空则忽略
+      }
+    }
+    // 兼容旧逻辑：尝试删除以 modKey 命名的旧目录
+    try {
+      const oldDir = `${base}\\CustomMissions\\${modKey}`
+      if (await exists(oldDir)) {
+        await remove(oldDir, { recursive: true })
+      }
+    } catch (e) {
+      console.warn(`[uninstallMod] 删除旧目录失败: ${base}\\CustomMissions\\${modKey}`, e)
+    }
   } else {
-    // v1/v2/composite: 删除整个 modKey 目录
+    // v2/composite: 删除整个 modKey 目录
     let targetDir
     if (category === 'v2') {
       targetDir = `${base}\\CustomMissions2\\${modKey}`
-    } else if (category === 'composite') {
-      targetDir = `${pluginsDir}\\${modKey}`
     } else {
-      targetDir = `${base}\\CustomMissions\\${modKey}`
+      targetDir = `${pluginsDir}\\${modKey}`
     }
 
     try {
@@ -190,4 +238,5 @@ export async function uninstallMod({ modKey }) {
 
   // 删除 SQLite 安装记录
   await db.execute('DELETE FROM installed_workshop_mods WHERE mod_key = $1', [modKey])
+  await db.execute('DELETE FROM installed_workshop_mod_files WHERE mod_key = $1', [modKey])
 }

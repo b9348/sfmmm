@@ -10,3 +10,4 @@ git-fetch-with-cli = true
 [http]
 timeout = 120
 check-revoke = false
+proxy = "http://127.0.0.1:7890"
