@@ -18,6 +18,7 @@ import { useAuth } from '../../contexts/useAuth'
 import { submitApplication, likeMod, unlikeMod, getDeviceId } from '../../services/workshopApi'
 import CommentSection from './CommentSection'
 import Database from '@tauri-apps/plugin-sql'
+import { BackButton } from '../../components'
 
 const LANG_LABELS = { zh: '中文', en: 'English', ja: '日本語' }
 
@@ -226,7 +227,7 @@ export default function ModDetailPage({ mod, onBack, onEdit, scrollToCommentId }
   return (
     <div className={styles.root}>
         <div className={styles.toolbarRow}>
-        <Button size="small" icon={<ArrowLeft24Regular />} appearance="subtle" onClick={onBack}>{t('workshop.back')}</Button>
+        <BackButton onClick={onBack} />
         <Text weight="semibold">{mod.mod_key}</Text>
         <div style={{ flex: 1 }} />
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>

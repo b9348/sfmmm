@@ -20,7 +20,7 @@ import JSZip from 'jszip'
 import { open } from '@tauri-apps/plugin-dialog'
 import { readFile, readDir } from '@tauri-apps/plugin-fs'
 import ModDetailPage from './ModDetailPage'
-import { ConfirmDialog } from '../../components'
+import { ConfirmDialog, BackButton } from '../../components'
 import PermissionSettings from './PermissionSettings'
 
 const LANGUAGES = [
@@ -203,9 +203,6 @@ export function CreateModPage({ onClose, onCreated }) {
   const { t } = useTranslation()
   const { user } = useAuth()
   const [modKey, setModKey] = useState('')
-  const [modKeyValidated, setModKeyValidated] = useState(false)
-  const [modKeyChecking, setModKeyChecking] = useState(false)
-  const [modKeyChecked, setModKeyChecked] = useState(false)
   const [category, setCategory] = useState('v1')
   const [translations, setTranslations] = useState({ zh: { name: '', description: '', instructions: '', instructions_format: 'markdown', changelog: '', version: '1.0.0' } })
   const allLangs = LANGUAGES.map(l => l.value)
@@ -225,6 +222,10 @@ export function CreateModPage({ onClose, onCreated }) {
   const firstLang = Object.keys(translations)[0]
   const version = translations[firstLang]?.version || ''
   const canSelectFile = modKey.trim() && version.trim()
+
+  const isFormValid = modKey.trim() && Object.values(translations).every(
+    trans => trans.name.trim() && trans.version.trim() && trans.description.trim()
+  )
 
   const handleSelectFolders = async (lang) => {
     if (!canSelectFile) return
@@ -355,34 +356,22 @@ export function CreateModPage({ onClose, onCreated }) {
     }))
   }
 
-  const handleCheckModKey = async () => {
-    if (!modKey.trim()) return
-    setModKeyChecking(true)
-    setModKeyValidated(false)
-    try {
-      const res = await checkModKey(modKey.trim())
-      setModKeyValidated(!res.exists)
-      setModKeyChecked(true)
-    } catch (e) {
-      setError(e.message)
-    } finally {
-      setModKeyChecking(false)
-    }
-  }
-
   const handleSubmit = async () => {
     if (!modKey.trim()) {
       setError(t('workshop.modIdEmpty'))
       return
     }
-    if (!modKeyValidated) {
-      setError('请先检查 Mod 标识名是否可用')
-      return
-    }
     setError('')
     setBusy(true)
     try {
-      // 1. 先创建 mod 拿到 mod_id（instructions 先留空，避免图片上传失败时数据库残留占位符）
+      // 1. 先检查 mod_key 是否可用
+      const keyCheck = await checkModKey(modKey.trim())
+      if (keyCheck.exists) {
+        setError('已存在，请前往更新对应语言文件')
+        return
+      }
+
+      // 2. 先创建 mod 拿到 mod_id（instructions 先留空，避免图片上传失败时数据库残留占位符）
       const emptyInstructionsTranslations = {}
       for (const [lang, trans] of Object.entries(translations)) {
         emptyInstructionsTranslations[lang] = { ...trans, instructions: '' }
@@ -447,28 +436,18 @@ export function CreateModPage({ onClose, onCreated }) {
   return (
     <div className={styles.root}>
       <div className={styles.toolbarRow}>
-        <Button size="small" appearance="subtle" onClick={onClose}>
-          {t('workshop.back')}
-        </Button>
+        <BackButton onClick={onClose} />
         <Text weight="semibold">{t('workshop.publishMod')}</Text>
       </div>
       <div style={{ flex: 1, overflow: 'auto', padding: '8px', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
         <div className={styles.formRow}>
           <Text className={styles.formLabel}>{t('workshop.modId')}</Text>
-          <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-            <Input
-              size="small"
-              placeholder={t('workshop.modIdCreatePlaceholder')}
-              value={modKey}
-              onChange={(_, d) => { setModKey(d.value); setModKeyValidated(false); setModKeyChecked(false) }}
-              style={{ flex: 1 }}
-            />
-            <Button size="small" appearance="outline" onClick={handleCheckModKey} disabled={modKeyChecking || !modKey.trim()}>
-              {modKeyChecking ? t('workshop.checking') : t('workshop.check')}
-            </Button>
-          </div>
-          {modKeyChecked && modKeyValidated && <Text size="small" style={{ color: tokens.colorPaletteGreenForeground1 }}>可用</Text>}
-          {modKeyChecked && !modKeyValidated && <Text size="small" style={{ color: tokens.colorPaletteRedForeground1 }}>已存在，请前往更新对应语言文件</Text>}
+          <Input
+            size="small"
+            placeholder={t('workshop.modIdCreatePlaceholder')}
+            value={modKey}
+            onChange={(_, d) => setModKey(d.value)}
+          />
         </div>
 
         <div className={styles.formRow}>
@@ -592,7 +571,7 @@ export function CreateModPage({ onClose, onCreated }) {
       </div>
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '6px', padding: '12px 8px', borderTop: `1px solid ${tokens.colorNeutralStroke2}` }}>
         <Button size="small" appearance="subtle" onClick={onClose}>{t('workshop.cancel')}</Button>
-        <Button size="small" appearance="primary" onClick={handleSubmit} disabled={busy}>
+        <Button size="small" appearance="primary" onClick={handleSubmit} disabled={busy || !isFormValid}>
           {busy ? t('workshop.publishing') : t('workshop.publish')}
         </Button>
       </div>
@@ -990,7 +969,7 @@ export function EditModPage({ mod: initialMod, onClose, onUpdated }) {
   return (
     <div className={styles.root}>
       <div className={styles.toolbarRow}>
-        <Button size="small" appearance="subtle" onClick={onClose}>{t('workshop.back')}</Button>
+        <BackButton onClick={onClose} />
         <Text weight="semibold">{t('workshop.editMod')}</Text>
       </div>
       <div style={{ flex: 1, overflow: 'auto', padding: '8px', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
@@ -1288,7 +1267,7 @@ export function MyMods() {
   }
 
   if (detailMod) {
-    return <ModDetailPage key={detailMod.id} mod={detailMod} onBack={() => setDetailMod(null)} />
+    return <ModDetailPage key={detailMod.id} mod={detailMod} onBack={() => setDetailMod(null)} onEdit={handleEdit} />
   }
 
   return (
