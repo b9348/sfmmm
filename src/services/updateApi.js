@@ -2,7 +2,7 @@
  * 更新检查与自动安装
  */
 
-import { invoke } from '@tauri-apps/api/core'
+import { invoke, Channel } from '@tauri-apps/api/core'
 
 const API_BASE = import.meta.env.DEV
   ? 'http://localhost:3000'
@@ -55,11 +55,15 @@ export async function checkVersion(currentVersion) {
 }
 
 /**
- * 下载更新安装包到本地（不立即安装）
+ * 下载更新安装包到本地（不立即安装），带进度回调
  * @param {string} url - 安装包下载地址
+ * @param {function} onProgress - 进度回调 ({ percent: number, stage: string }) => void
  */
-export async function prepareUpdate(url) {
-  return await invoke('db_prepare_update', { url })
+export async function prepareUpdate(url, onProgress) {
+  const channel = new Channel((msg) => {
+    onProgress?.(msg)
+  })
+  return await invoke('db_prepare_update', { url, onProgress: channel })
 }
 
 /**

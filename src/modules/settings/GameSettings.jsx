@@ -9,6 +9,7 @@ import {
   Input,
   Spinner,
   Select,
+  ProgressBar,
 } from '@fluentui/react-components'
 import {
   Folder24Regular,
@@ -75,6 +76,8 @@ export function GameSettings({ config, onConfigChange }) {
   const [language, setLanguage] = useState(config?.language || i18nInstance.language || 'zh')
   const [checking, setChecking] = useState(false)
   const [downloading, setDownloading] = useState(false)
+  const [downloadProgress, setDownloadProgress] = useState(0)
+  const [downloadStage, setDownloadStage] = useState('')
   const [prepared, setPrepared] = useState(false)
   const [pendingUpdate, setPendingUpdate] = useState(false)
   const [updateInfo, setUpdateInfo] = useState(null)
@@ -148,8 +151,13 @@ export function GameSettings({ config, onConfigChange }) {
   const handleDownloadUpdate = async () => {
     if (!updateInfo?.updateUrl || downloading) return
     setDownloading(true)
+    setDownloadProgress(0)
+    setDownloadStage('downloading')
     try {
-      await prepareUpdate(updateInfo.updateUrl)
+      await prepareUpdate(updateInfo.updateUrl, (msg) => {
+        setDownloadProgress(msg.percent)
+        setDownloadStage(msg.stage)
+      })
       setPrepared(true)
       setPendingUpdate(false)
       await saveConfig({ pending_update: 'false' })
@@ -158,6 +166,7 @@ export function GameSettings({ config, onConfigChange }) {
       setUpdateInfo(prev => ({ ...prev, error: e.message }))
     } finally {
       setDownloading(false)
+      setDownloadStage('')
     }
   }
 
@@ -287,6 +296,14 @@ export function GameSettings({ config, onConfigChange }) {
                 <span className={styles.noUpdate}>{t('settings.alreadyLatest')}</span>
               ) : null}
             </div>
+            {downloading && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', padding: '4px 0' }}>
+                <ProgressBar value={downloadProgress / 100} />
+                <Text size="small" style={{ color: tokens.colorNeutralForeground3 }}>
+                  {downloadStage === 'downloading' && t('settings.downloadingUpdate') + ` ${downloadProgress}%`}
+                </Text>
+              </div>
+            )}
           </div>
           <Text size="small" style={{ color: tokens.colorNeutralForeground3 }}>
             {t('settings.currentVersion', { version: APP_VERSION })}

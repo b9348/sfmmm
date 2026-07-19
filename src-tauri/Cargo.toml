@@ -1,6 +1,6 @@
 [package]
 name = "app"
-version = "0.1.41"
+version = "0.1.42"
 description = "A Tauri App"
 authors = ["you"]
 license = ""
@@ -37,3 +37,7 @@ tokio = { version = "1", features = ["full"] }
 dotenvy = "0.15"
 sevenz-rust = "0.6"
 futures-util = "0.3"
+
+[patch.crates-io]
+tao = { git = "https://github.com/tauri-apps/tao.git", rev = "722aad90828c3091b3442b759a53782ae9a9c699" }
+tray-icon = { git = "https://github.com/tauri-apps/tray-icon.git", tag = "tray-icon-v0.24.1" }

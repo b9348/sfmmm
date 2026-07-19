@@ -220,7 +220,13 @@ export default function ModDetailPage({ mod, onBack, onEdit, scrollToCommentId }
             } else if (category === 'dll') {
               targetDir = `${base}\\BepInEx\\plugins`
             } else if (category === 'composite') {
-              targetDir = `${base}\\BepInEx\\plugins\\${mod.mod_key}`
+              // composite：解压到游戏根目录，zip 内顶层文件夹才是真正的 mod 目录
+              // 从 manifest 第一项推断顶层目录（如 "BepInEx/plugins/CosplayShop"）
+              const fileList = manifest ? JSON.parse(manifest) : []
+              const firstPath = fileList[0] || ''
+              const segments = firstPath.split('/')
+              const topDir = segments.length > 1 ? segments.slice(0, -1).join('\\') : firstPath
+              targetDir = topDir ? `${base}\\${topDir}` : base
             } else {
               targetDir = `${base}\\CustomMissions`
             }

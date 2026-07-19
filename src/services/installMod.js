@@ -10,6 +10,24 @@ async function getGamePath() {
   return rows[0]?.value || null
 }
 
+/**
+ * 安全检查：拒绝 zip slip / 绝对路径 / 跨越游戏根目录的 path。
+ * 返回归一化后的相对路径（用 / 分隔），失败抛错。
+ */
+function safeZipPath(path) {
+  if (!path) throw new Error('zip 内存在空路径')
+  // 防止 \ .. 等投递
+  const norm = path.replace(/\\/g, '/').replace(/^\/+/, '')
+  if (/(^|\/)\.\.(\/|$)/.test(norm)) {
+    throw new Error(`zip 内存在非法相对路径: ${path}`)
+  }
+  return norm
+}
+
+/**
+ * composite 类型：zip 内每条 path 已是相对游戏根目录的完整路径
+ * （例如 "BepInEx/plugins/CosplayShop/xxx.dll"），因此直接解到 gamePath 根目录。
+ */
 export async function installMod({ modKey, category, fileUrl, version, fileHash, langCode, manifest }) {
   const gamePath = await getGamePath()
   if (!gamePath) {
@@ -25,7 +43,8 @@ export async function installMod({ modKey, category, fileUrl, version, fileHash,
   } else if (category === 'dll') {
     targetDir = pluginsDir
   } else if (category === 'composite') {
-    targetDir = `${pluginsDir}\\${modKey}`
+    // composite：zip 内 path 是相对游戏根目录的全路径，直接解到 base
+    targetDir = base
   } else {
     // 'v1' 直接解压到 CustomMissions，zip 内保留相对 CustomMissions 的路径
     targetDir = `${base}\\CustomMissions`
@@ -57,11 +76,32 @@ export async function installMod({ modKey, category, fileUrl, version, fileHash,
 
   const entries = []
   const extractedFiles = []
+  const dirEntries = []
   zip.forEach((path, entry) => {
-    if (!entry.dir) {
+    if (entry.dir) {
+      dirEntries.push({ path, entry })
+    } else {
       entries.push({ path, entry })
     }
   })
+
+  // 先处理目录条目：mkdir 空文件夹（含选择时本身就是空文件夹的情况）
+  for (const { path } of dirEntries) {
+    if (category === 'dll') {
+      // DLL 不保留目录结构，跳过
+      continue
+    }
+    const safeRel = safeZipPath(path.replace(/\/+$/, ''))
+    const normalizedPath = safeRel.replace(/\//g, '\\')
+    const dirPath = `${targetDir}\\${normalizedPath}`
+    try {
+      if (!await exists(dirPath)) {
+        await mkdir(dirPath, { recursive: true })
+      }
+    } catch (e) {
+      console.warn(`[installMod] 创建目录失败: ${dirPath}`, e)
+    }
+  }
 
   let fileCount = 0
   for (const { path, entry } of entries) {
@@ -74,9 +114,11 @@ export async function installMod({ modKey, category, fileUrl, version, fileHash,
       targetPath = `${pluginsDir}\\${fileName}`
       extractedFiles.push(fileName)
     } else {
-      const normalizedPath = path.replace(/\//g, '\\')
+      // 安全检查（拒绝 zip slip）
+      const safeRel = safeZipPath(path)
+      const normalizedPath = safeRel.replace(/\//g, '\\')
       targetPath = `${targetDir}\\${normalizedPath}`
-      extractedFiles.push(path)
+      extractedFiles.push(safeRel)
       const lastSlash = targetPath.lastIndexOf('\\')
       if (lastSlash > 0) {
         const dirPath = targetPath.substring(0, lastSlash)
@@ -94,11 +136,6 @@ export async function installMod({ modKey, category, fileUrl, version, fileHash,
 
   // 如果没有传入 manifest，从 zip 提取的文件列表生成
   const finalManifest = manifest || JSON.stringify(extractedFiles)
-
-  // 组合：解压后删除压缩包（保持路径一致，避免残留）
-  if (category === 'composite') {
-    // 删除 zip 包已无意义(已解压到内存)，保持目标目录干净即可
-  }
 
   // 保存安装记录到本地 SQLite，用于侧边栏展示"创意工坊"标签
   try {
@@ -218,15 +255,48 @@ export async function uninstallMod({ modKey }) {
     } catch (e) {
       console.warn(`[uninstallMod] 删除旧目录失败: ${base}\\CustomMissions\\${modKey}`, e)
     }
-  } else {
-    // v2/composite: 删除整个 modKey 目录
-    let targetDir
-    if (category === 'v2') {
-      targetDir = `${base}\\CustomMissions2\\${modKey}`
-    } else {
-      targetDir = `${pluginsDir}\\${modKey}`
+  } else if (category === 'composite') {
+    // composite：manifest 内是相对游戏根目录的全路径
+    // （例如 "BepInEx/plugins/CosplayShop/xxx.dll"），逐个删除并清理空目录
+    const fileList = manifest ? JSON.parse(manifest) : []
+    const dirsToCheck = new Set()
+    for (const filePath of fileList) {
+      const normalizedPath = filePath.replace(/\//g, '\\')
+      const fullPath = `${base}\\${normalizedPath}`
+      try {
+        if (await exists(fullPath)) {
+          await remove(fullPath)
+        }
+        const parts = normalizedPath.split('\\')
+        if (parts.length > 1) {
+          dirsToCheck.add(`${base}\\${parts.slice(0, -1).join('\\')}`)
+        }
+      } catch (e) {
+        console.warn(`[uninstallMod] 删除文件失败: ${fullPath}`, e)
+      }
     }
-
+    const sortedDirs = [...dirsToCheck].sort((a, b) => b.length - a.length)
+    for (const dir of sortedDirs) {
+      try {
+        if (await exists(dir)) {
+          await remove(dir)
+        }
+      } catch {
+        // 目录非空则忽略
+      }
+    }
+    // 兼容旧版（修复前多套一层 modKey 的残留）
+    try {
+      const oldDir = `${pluginsDir}\\${modKey}`
+      if (await exists(oldDir)) {
+        await remove(oldDir, { recursive: true })
+      }
+    } catch (e) {
+      console.warn(`[uninstallMod] 删除旧目录失败: ${pluginsDir}\\${modKey}`, e)
+    }
+  } else {
+    // v2: 删除整个 modKey 目录
+    const targetDir = `${base}\\CustomMissions2\\${modKey}`
     try {
       if (await exists(targetDir)) {
         await remove(targetDir, { recursive: true })
