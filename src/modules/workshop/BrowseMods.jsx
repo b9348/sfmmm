@@ -19,7 +19,7 @@ import ModDetailPage from './ModDetailPage'
 import { useAuth } from '../../contexts/useAuth'
 import { EditModPage, CreateModPage } from './MyMods'
 import { getConfig, setConfig } from '../../services/dbHelper'
-import { Pagination, AsyncView, LoginDialog, FloatingActions, FileRow } from '../../components'
+import { Pagination, AsyncView, LoginDialog, FloatingActions, FileRow, EmptyState } from '../../components'
 import { getAvatarUrl } from '../../utils/avatars'
 
 const CATEGORIES = [
@@ -346,12 +346,10 @@ export function BrowseMods({ initialModId, initialCommentId }) {
 
       <AsyncView loading={loading} error={error} onRetry={() => fetchMods(1)} loadingLabel={t('workshop.loading')}>
         {mods.length === 0 ? (
-          <div className={styles.emptyState}>
-            <Text weight="semibold">{t('workshop.noMods')}</Text>
-            <Text size="small" className={styles.meta}>
-              {search ? t('workshop.noMatchHint') : t('workshop.noUploads')}
-            </Text>
-          </div>
+          <EmptyState
+            title={t('workshop.noMods')}
+            description={search ? t('workshop.noMatchHint') : t('workshop.noUploads')}
+          />
         ) : (
           <>
             <div className={styles.grid} style={{ gridTemplateColumns: `repeat(${itemsPerRow}, 1fr)` }}>

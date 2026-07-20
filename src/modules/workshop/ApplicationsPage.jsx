@@ -10,7 +10,7 @@ import {
 import { useAuth } from '../../contexts/useAuth'
 import { useNotification } from '../../contexts/NotificationContext'
 import { listApplications, handleApplication, getMyNotifications, markRead } from '../../services/workshopApi'
-import { Pagination } from '../../components'
+import { Pagination, EmptyState } from '../../components'
 import { getAvatarUrl } from '../../utils/avatars'
 
 const useStyles = makeStyles({
@@ -207,9 +207,7 @@ export default function ApplicationsPage({ onNavigate }) {
 
   if (!isLoggedIn) {
     return (
-      <div className={styles.emptyState}>
-        <Text weight="semibold">{t('workshop.loginRequired')}</Text>
-      </div>
+      <EmptyState title={t('workshop.loginRequired')} />
     )
   }
 
@@ -219,15 +217,13 @@ export default function ApplicationsPage({ onNavigate }) {
       <Text className={styles.sectionTitle}>{t('workshop.pendingApps')}</Text>
       <div className={styles.content}>
         {loadingApps && (
-          <div className={styles.emptyState}>
+          <EmptyState>
             <Spinner size="small" />
-          </div>
+          </EmptyState>
         )}
 
         {!loadingApps && apps.length === 0 && (
-          <div className={styles.emptyState}>
-            <Text className={styles.metaText}>{t('workshop.noPendingApps')}</Text>
-          </div>
+          <EmptyState description={t('workshop.noPendingApps')} />
         )}
 
         {!loadingApps && apps.map((app) => (
@@ -288,15 +284,13 @@ export default function ApplicationsPage({ onNavigate }) {
       </div>
       <div className={styles.content}>
         {loadingNotifs && (
-          <div className={styles.emptyState}>
+          <EmptyState>
             <Spinner size="small" />
-          </div>
+          </EmptyState>
         )}
 
         {!loadingNotifs && notifs.length === 0 && (
-          <div className={styles.emptyState}>
-            <Text className={styles.metaText}>{t('workshop.noNotifications')}</Text>
-          </div>
+          <EmptyState description={t('workshop.noNotifications')} />
         )}
 
         {!loadingNotifs && notifs.map((n) => (

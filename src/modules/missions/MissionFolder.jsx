@@ -5,7 +5,7 @@ import { FolderOpen24Regular, ArrowClockwise24Regular, Document24Regular, Folder
 import { invoke } from '@tauri-apps/api/core'
 import { readDir } from '@tauri-apps/plugin-fs'
 import { useInstalledMods } from '../../hooks/useInstalledMods'
-import { AsyncView } from '../../components'
+import { AsyncView, EmptyState } from '../../components'
 import { LANG_LABELS } from '../../i18n/languages'
 
 const useStyles = makeStyles({
@@ -397,13 +397,11 @@ export function MissionFolder({ config, subfolder, onUninstall }) {
 
       <AsyncView loading={loading} loadingLabel={t('app.loading')}>
         {files.length === 0 && (
-        <div className={styles.emptyState}>
-          <Text weight="semibold">{currentDir ? t('mission.folderEmpty') : t('mission.noGameDir')}</Text>
-          {currentDir && (
-            <Text size="small" className={styles.meta}>{t('mission.noFilesInDir')}</Text>
-          )}
-        </div>
-      )}
+          <EmptyState
+            title={currentDir ? t('mission.folderEmpty') : t('mission.noGameDir')}
+            description={currentDir ? t('mission.noFilesInDir') : undefined}
+          />
+        )}
 
       {files.length > 0 && (
         <div className={styles.grid}>

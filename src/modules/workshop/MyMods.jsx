@@ -9,35 +9,23 @@ import {
 import {
   Add24Regular, Delete24Regular, Edit24Regular,
   ArrowClockwise24Regular, Cloud24Regular,
-  ArrowUpload24Regular, Save24Regular,
+  Save24Regular,
   Heart24Regular, Heart24Filled,
   ArrowLeft24Regular,
 } from '@fluentui/react-icons'
 import { listMyMods, createMod, updateMod, uploadModFile, deleteModFile, deleteImgbedFile, getModForEdit, getModDetail, deleteMod, checkModKey, setModPermissions, getDeviceId } from '../../services/workshopApi'
 import { resolveTranslationImages, extractImgbedUrls, deleteImageFromImgbed } from '../../services/imageApi'
 import { useAuth } from '../../contexts/useAuth'
-import { RichTextEditor, MarkdownEditor } from '../../components/common/RichTextEditor'
+import { LanguageTranslationBlock } from './LanguageTranslationBlock'
+import { selectModFiles, selectModFolders } from '../../hooks/useFileSelection'
 import JSZip from 'jszip'
-import { open } from '@tauri-apps/plugin-dialog'
-import { readFile, readDir } from '@tauri-apps/plugin-fs'
-import { getGamePath } from '../../services/dbHelper'
-import { collectSelection } from './collectSelection'
 import { runReplaceFlow } from './runReplaceFlow'
 import ModDetailPage from './ModDetailPage'
-import { ConfirmDialog, BackButton, ProgressModal, AsyncView, LoginForm } from '../../components'
+import { ConfirmDialog, BackButton, ProgressModal, AsyncView, LoginForm, EmptyState } from '../../components'
 import PermissionSettings from './PermissionSettings'
 import { LANGUAGES, LANG_LABELS } from '../../i18n/languages'
 
 const MAX_INSTRUCTIONS_LENGTH = 10000
-
-function getRelativePath(filePath, baseDir) {
-  const normalizedFile = filePath.replace(/\\/g, '/')
-  const normalizedBase = baseDir.replace(/\\/g, '/').replace(/\/+$/, '')
-  if (!normalizedBase || !normalizedFile.startsWith(normalizedBase + '/')) {
-    return filePath.split(/[/\\]/).pop()
-  }
-  return normalizedFile.substring(normalizedBase.length + 1)
-}
 
 // 追加去重：按 zipPath（缺失时回退 name）合并条目，新条目覆盖同 key 旧条目
 function mergeEntries(existing, incoming) {
@@ -229,84 +217,28 @@ export function CreateModPage({ onClose, onCreated }) {
   const handleSelectFolders = async (lang) => {
     if (!canSelectFile) return
     try {
-      const folders = await open({ directory: true, multiple: true })
-      if (!folders || folders.length === 0) return
-      const selections = folders.map(p => ({ path: p, isDirectory: true }))
-      const { files, dirs } = await collectSelection({ selections, gamePath })
-      const entries = [
-        ...files.map(f => ({ zipPath: f.zipPath, data: f.data, size: f.size, isDir: false })),
-        ...dirs.map(d => ({ zipPath: d, isDir: true, size: 0 })),
-      ]
+      const entries = await selectModFolders({ gamePath })
       if (entries.length === 0) return
       setModFiles(prev => {
         const existing = prev[lang] || []
         return { ...prev, [lang]: mergeEntries(existing, entries) }
       })
     } catch (e) {
-      const msg = e?.message || (typeof e === 'string' ? e : JSON.stringify(e)) || t('mods.unknownError')
-      setError(t('workshop.selectFolderErr', { msg }))
+      setError(t('workshop.selectFolderErr', { msg: e.message || t('mods.unknownError') }))
     }
   }
 
   const handleSelectFiles = async (lang) => {
     if (!canSelectFile) return
     try {
-      if (category === 'v2') {
-        const folder = await open({ directory: true, multiple: false })
-        if (!folder) return
-        const files = []
-        const collectDir = async (dirPath, prefix) => {
-          const entries = await readDir(dirPath)
-          for (const entry of entries) {
-            const fullPath = prefix ? `${prefix}/${entry.name}` : entry.name
-            if (entry.isDirectory) {
-              await collectDir(`${dirPath}/${entry.name}`, fullPath)
-            } else if (entry.isFile) {
-              const data = await readFile(`${dirPath}/${entry.name}`)
-              files.push({ name: fullPath, data, size: data.byteLength })
-            }
-          }
-        }
-        await collectDir(folder, '')
-        setModFiles(prev => ({ ...prev, [lang]: files }))
-      } else if (category === 'composite') {
-        // 组合：多选文件，忠实保留相对游戏根目录的路径
-        const selected = await open({ multiple: true, filters: [{ name: 'All Files', extensions: ['*'] }] })
-        if (!selected || selected.length === 0) return
-        const selections = selected.map(p => ({ path: p, isDirectory: false }))
-        const { files } = await collectSelection({ selections, gamePath })
-        if (files.length === 0) return
-        const entries = files.map(f => ({ zipPath: f.zipPath, data: f.data, size: f.size, isDir: false }))
-        setModFiles(prev => {
-          const existing = prev[lang] || []
-          return { ...prev, [lang]: mergeEntries(existing, entries) }
-        })
-      } else if (category === 'dll') {
-        const selected = await open({ multiple: false, filters: [{ name: 'DLL 文件', extensions: ['dll'] }] })
-        if (!selected) return
-        const files = []
-        for (const filePath of [selected].flat()) {
-          const data = await readFile(filePath)
-          const name = filePath.split(/[/\\]/).pop()
-          files.push({ name, data, size: data.byteLength })
-        }
-        setModFiles(prev => ({ ...prev, [lang]: files }))
-      } else {
-        const selected = await open({ multiple: true, filters: [{ name: 'Mod Files', extensions: ['json', 'code', 'txt', 'zip'] }] })
-        if (!selected || selected.length === 0) return
-        const files = []
-        const baseDir = category === 'v1' && gamePath ? `${gamePath}\\CustomMissions` : null
-        for (const filePath of selected) {
-          const data = await readFile(filePath)
-          const name = filePath.split(/[/\\]/).pop()
-          const zipPath = baseDir ? getRelativePath(filePath, baseDir) : name
-          files.push({ name, zipPath, data, size: data.byteLength })
-        }
-        setModFiles(prev => ({ ...prev, [lang]: files }))
-      }
+      const files = await selectModFiles({ category, gamePath })
+      if (files.length === 0) return
+      setModFiles(prev => {
+        const existing = prev[lang] || []
+        return { ...prev, [lang]: mergeEntries(existing, files) }
+      })
     } catch (e) {
-      const msg = e?.message || (typeof e === 'string' ? e : JSON.stringify(e)) || t('mods.unknownError')
-      setError(t('workshop.selectFileErr', { msg }))
+      setError(t('workshop.selectFileErr', { msg: e.message || t('mods.unknownError') }))
     }
   }
 
@@ -466,106 +398,37 @@ export function CreateModPage({ onClose, onCreated }) {
           </Button>
         </div>
 
-        {langList.map(lang => {
-          const langLabel = LANGUAGES.find(l => l.value === lang)?.label || lang
-          const trans = translations[lang]
-          return (
-            <div key={lang} style={{ border: `1px solid ${tokens.colorNeutralStroke2}`, borderRadius: '4px', padding: '8px', marginBottom: '8px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-                <Text weight="semibold" size="small">{langLabel} ({lang})</Text>
-                <Button size="small" icon={<Delete24Regular />} appearance="subtle" onClick={() => handleRemoveLang(lang)} />
-              </div>
-              <div className={styles.formRow}>
-                <Text className={styles.formLabel}>{t('workshop.name')}</Text>
-                <Input size="small" placeholder={t('workshop.modName')} value={trans.name} onChange={(_, d) => handleTransChange(lang, 'name', d.value)} />
-              </div>
-              <div className={styles.formRow}>
-                <Text className={styles.formLabel}>{t('workshop.version')}</Text>
-                <Input size="small" placeholder="1.0.0" value={trans.version || '1.0.0'} onChange={(_, d) => handleTransChange(lang, 'version', d.value)} style={{ width: '100px' }} />
-              </div>
-              <div className={styles.formRow}>
-                <Text className={styles.formLabel}>{t('workshop.desc')}</Text>
-                <Textarea size="small" placeholder={t('workshop.briefDesc')} value={trans.description} onChange={(_, d) => handleTransChange(lang, 'description', d.value)} />
-              </div>
-              <div className={styles.expandableFormRow}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <Text className={styles.formLabel}>{t('workshop.detailedDesc')}</Text>
-                  <Select
-                    size="small"
-                    value={trans.instructions_format || 'markdown'}
-                    onChange={(_, d) => handleTransChange(lang, 'instructions_format', d.value)}
-                  >
-                    <option value="markdown">{t('workshop.markdown')}</option>
-                    <option value="richtext">{t('workshop.richtext')}</option>
-                  </Select>
-                </div>
-                {(trans.instructions_format || 'markdown') === 'richtext' ? (
-                  <RichTextEditor value={trans.instructions} onChange={(html) => handleTransChange(lang, 'instructions', html)} placeholder={t('workshop.instructions') + '（' + t('workshop.richtext') + '；' + t('workshop.lineBreakOnce') + '）'} maxLength={MAX_INSTRUCTIONS_LENGTH} />
-                ) : (
-                  <MarkdownEditor value={trans.instructions} onChange={(md) => handleTransChange(lang, 'instructions', md)} placeholder={t('workshop.instructions') + '（' + t('workshop.markdown') + '；' + t('workshop.lineBreakTwice') + '）'} maxLength={MAX_INSTRUCTIONS_LENGTH} />
-                )}
-              </div>
-              <div className={styles.formRow}>
-                <Text className={styles.formLabel}>{t('workshop.modFile')} {category === 'v2' ? `(${t('workshop.hint_v2')})` : category === 'composite' ? `(${t('workshop.hint_composite')})` : category === 'dll' ? `(${t('workshop.hint_dll')})` : `(${t('workshop.hint_v1')})`}</Text>
-                <Text size="small" style={{ color: tokens.colorNeutralForeground3, lineHeight: '1.4', whiteSpace: 'pre-wrap' }}>
-                  <span style={{ textDecoration: user?.r2_enabled ? 'line-through' : 'none' }}>
-                    {t('workshop.uploadLimitWarning', { max: (maxZipSize / 1024 / 1024) })}
-                  </span>
-                  {user?.r2_enabled && (
-                    <>
-                      <br />
-                      {t('workshop.uploadLimitR2Enabled', { max: (maxZipSize / 1024 / 1024) })}
-                    </>
-                  )}
-                </Text>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  {category === 'composite' ? (
-                    <>
-                      <Button size="small" icon={<ArrowUpload24Regular />} disabled={!canSelectFile} onClick={() => handleSelectFolders(lang)}>{modFiles[lang]?.length > 0 ? t('workshop.appendFolder') : t('workshop.updateFolder')}</Button>
-                      <Button size="small" icon={<ArrowUpload24Regular />} disabled={!canSelectFile} onClick={() => handleSelectFiles(lang)}>{modFiles[lang]?.length > 0 ? t('workshop.appendFile') : t('workshop.updateFile')}</Button>
-                    </>
-                  ) : (
-                    <Button size="small" icon={<ArrowUpload24Regular />} disabled={!canSelectFile} onClick={() => handleSelectFiles(lang)}>
-                      {category === 'v2' ? t('workshop.hint_v2') : category === 'dll' ? t('workshop.hint_dll') : t('workshop.selectFile')}
-                    </Button>
-                  )}
-                  {modFiles[lang] && (
-                    <Button size="small" icon={<Delete24Regular />} appearance="subtle" onClick={() => setModFiles(prev => { const n = { ...prev }; delete n[lang]; return n })} />
-                  )}
-                </div>
-                {modFiles[lang] && (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', marginTop: '4px' }}>
-                    {modFiles[lang].slice(0, 5).map((f, i) => (
-                      <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                        <Text size="small" className={styles.meta} style={{ flex: 1 }}>
-                          {f.isDir
-                            ? `${t('workshop.dirLabel')} ${f.zipPath}/`
-                            : `${f.zipPath || f.name} (${(f.size / 1024).toFixed(1)}KB)`}
-                        </Text>
-                        <Button
-                          size="small"
-                          icon={<Delete24Regular />}
-                          appearance="subtle"
-                          onClick={() => setModFiles(prev => {
-                            const next = { ...prev }
-                            next[lang] = (next[lang] || []).filter((_, idx) => idx !== i)
-                            if (next[lang].length === 0) delete next[lang]
-                            return next
-                          })}
-                        />
-                      </div>
-                    ))}
-                    {modFiles[lang].length > 5 && (
-                      <Text size="small" className={styles.meta} style={{ cursor: 'pointer', textDecoration: 'underline', color: tokens.colorBrandForeground1 }} onClick={() => setFileDialogLang(lang)}>
-                        {t('workshop.moreFilesCount', { count: modFiles[lang].length - 5 })}
-                      </Text>
-                    )}
-                  </div>
-                )}
-              </div>
-            </div>
-          )
-        })}
+        {langList.map(lang => (
+          <LanguageTranslationBlock
+            key={lang}
+            lang={lang}
+            translation={translations[lang]}
+            onChange={handleTransChange}
+            onRemove={() => handleRemoveLang(lang)}
+            canEdit={true}
+            disableFileSelect={!canSelectFile}
+            category={category}
+            maxZipSize={maxZipSize}
+            r2Enabled={user?.r2_enabled}
+            modFiles={modFiles[lang] || []}
+            uploadingLang={uploadingLang}
+            onSelectFiles={handleSelectFiles}
+            onSelectFolders={handleSelectFolders}
+            onRemoveFile={(l, index) => {
+              if (index === -1) {
+                setModFiles(prev => { const n = { ...prev }; delete n[l]; return n })
+              } else {
+                setModFiles(prev => {
+                  const next = { ...prev }
+                  next[l] = (next[l] || []).filter((_, idx) => idx !== index)
+                  if (next[l].length === 0) delete next[l]
+                  return next
+                })
+              }
+            }}
+            onShowMoreFiles={setFileDialogLang}
+          />
+        ))}
 
         {uploadingLang && (
           <Text size="small" className={styles.meta}>
@@ -707,83 +570,27 @@ export function EditModPage({ mod: initialMod, onClose, onUpdated }) {
 
   const handleSelectFolders = async (lang) => {
     try {
-      const folders = await open({ directory: true, multiple: true })
-      if (!folders || folders.length === 0) return
-      const selections = folders.map(p => ({ path: p, isDirectory: true }))
-      const { files, dirs } = await collectSelection({ selections, gamePath })
-      const entries = [
-        ...files.map(f => ({ zipPath: f.zipPath, data: f.data, size: f.size, isDir: false })),
-        ...dirs.map(d => ({ zipPath: d, isDir: true, size: 0 })),
-      ]
+      const entries = await selectModFolders({ gamePath })
       if (entries.length === 0) return
       setModFiles(prev => {
         const existing = prev[lang] || []
         return { ...prev, [lang]: mergeEntries(existing, entries) }
       })
     } catch (e) {
-      const msg = e?.message || (typeof e === 'string' ? e : JSON.stringify(e)) || t('mods.unknownError')
-      setUploadError(t('workshop.selectFolderErr', { msg }))
+      setUploadError(t('workshop.selectFolderErr', { msg: e.message || t('mods.unknownError') }))
     }
   }
 
   const handleSelectFiles = async (lang) => {
     try {
-      if (category === 'v2') {
-        const folder = await open({ directory: true, multiple: false })
-        if (!folder) return
-        const files = []
-        const collectDir = async (dirPath, prefix) => {
-          const entries = await readDir(dirPath)
-          for (const entry of entries) {
-            const fullPath = prefix ? `${prefix}/${entry.name}` : entry.name
-            if (entry.isDirectory) {
-              await collectDir(`${dirPath}/${entry.name}`, fullPath)
-            } else if (entry.isFile) {
-              const data = await readFile(`${dirPath}/${entry.name}`)
-              files.push({ name: fullPath, data, size: data.byteLength })
-            }
-          }
-        }
-        await collectDir(folder, '')
-        setModFiles(prev => ({ ...prev, [lang]: files }))
-      } else if (category === 'composite') {
-        // 组合：多选文件，忠实保留相对游戏根目录的路径
-        const selected = await open({ multiple: true, filters: [{ name: 'All Files', extensions: ['*'] }] })
-        if (!selected || selected.length === 0) return
-        const selections = selected.map(p => ({ path: p, isDirectory: false }))
-        const { files } = await collectSelection({ selections, gamePath })
-        if (files.length === 0) return
-        const entries = files.map(f => ({ zipPath: f.zipPath, data: f.data, size: f.size, isDir: false }))
-        setModFiles(prev => {
-          const existing = prev[lang] || []
-          return { ...prev, [lang]: mergeEntries(existing, entries) }
-        })
-      } else if (category === 'dll') {
-        const selected = await open({ multiple: false, filters: [{ name: 'DLL 文件', extensions: ['dll'] }] })
-        if (!selected) return
-        const files = []
-        for (const filePath of [selected].flat()) {
-          const data = await readFile(filePath)
-          const name = filePath.split(/[/\\]/).pop()
-          files.push({ name, data, size: data.byteLength })
-        }
-        setModFiles(prev => ({ ...prev, [lang]: files }))
-      } else {
-        const selected = await open({ multiple: true, filters: [{ name: 'Mod Files', extensions: ['json', 'code', 'txt', 'zip'] }] })
-        if (!selected || selected.length === 0) return
-        const files = []
-        const baseDir = category === 'v1' && gamePath ? `${gamePath}\\CustomMissions` : null
-        for (const filePath of selected) {
-          const data = await readFile(filePath)
-          const name = filePath.split(/[/\\]/).pop()
-          const zipPath = baseDir ? getRelativePath(filePath, baseDir) : name
-          files.push({ name, zipPath, data, size: data.byteLength })
-        }
-        setModFiles(prev => ({ ...prev, [lang]: files }))
-      }
+      const files = await selectModFiles({ category, gamePath })
+      if (files.length === 0) return
+      setModFiles(prev => {
+        const existing = prev[lang] || []
+        return { ...prev, [lang]: mergeEntries(existing, files) }
+      })
     } catch (e) {
-      const msg = e?.message || (typeof e === 'string' ? e : JSON.stringify(e)) || t('mods.unknownError')
-      setUploadError(t('workshop.selectFileErr', { msg }))
+      setUploadError(t('workshop.selectFileErr', { msg: e.message || t('mods.unknownError') }))
     }
   }
 
@@ -1056,138 +863,40 @@ export function EditModPage({ mod: initialMod, onClose, onUpdated }) {
         </div>
 
         {langList.map(lang => {
-          const langLabel = LANGUAGES.find(l => l.value === lang)?.label || lang
-          const trans = translations[lang]
           const langEditable = canEditLang(lang)
           return (
-            <div key={lang} style={{ border: `1px solid ${tokens.colorNeutralStroke2}`, borderRadius: '4px', padding: '8px', marginBottom: '8px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-                <Text weight="semibold" size="small">{langLabel} ({lang})</Text>
-                {canEditAllLangs && (
-                  <Button size="small" icon={<Delete24Regular />} appearance="subtle" onClick={() => setConfirmRemoveLang(lang)} />
-                )}
-              </div>
-              <div className={styles.formRow}>
-                <Text className={styles.formLabel}>{t('workshop.name')}</Text>
-                <Input size="small" placeholder={t('workshop.modName')} value={trans.name} onChange={(_, d) => handleTransChange(lang, 'name', d.value)} disabled={!langEditable} />
-              </div>
-              <div className={styles.formRow}>
-                <Text className={styles.formLabel}>{t('workshop.version')}</Text>
-                <Input size="small" placeholder="1.0.0" value={trans.version || '1.0.0'} onChange={(_, d) => handleTransChange(lang, 'version', d.value)} style={{ width: '100px' }} disabled={!langEditable} />
-              </div>
-              <div className={styles.formRow}>
-                <Text className={styles.formLabel}>{t('workshop.desc')}</Text>
-                <Textarea size="small" placeholder={t('workshop.briefDesc')} value={trans.description} onChange={(_, d) => handleTransChange(lang, 'description', d.value)} disabled={!langEditable} />
-              </div>
-              <div className={styles.expandableFormRow}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <Text className={styles.formLabel}>{t('workshop.detailedDesc')}</Text>
-                  <Select
-                    size="small"
-                    value={trans.instructions_format || 'markdown'}
-                    onChange={(_, d) => handleTransChange(lang, 'instructions_format', d.value)}
-                    disabled={!langEditable}
-                  >
-                    <option value="markdown">{t('workshop.markdown')}</option>
-                    <option value="richtext">{t('workshop.richtext')}</option>
-                  </Select>
-                </div>
-                {(trans.instructions_format || 'markdown') === 'richtext' ? (
-                  <RichTextEditor value={trans.instructions} onChange={(html) => handleTransChange(lang, 'instructions', html)} placeholder={t('workshop.instructions') + '（' + t('workshop.richtext') + '；' + t('workshop.lineBreakOnce') + '）'} maxLength={MAX_INSTRUCTIONS_LENGTH} disabled={!langEditable} />
-                ) : (
-                  <MarkdownEditor value={trans.instructions} onChange={(md) => handleTransChange(lang, 'instructions', md)} placeholder={t('workshop.instructions') + '（' + t('workshop.markdown') + '；' + t('workshop.lineBreakTwice') + '）'} maxLength={MAX_INSTRUCTIONS_LENGTH} disabled={!langEditable} />
-                )}
-              </div>
-              <div className={styles.formRow}>
-                <Text className={styles.formLabel}>{t('workshop.modFile')} {category === 'v2' ? `(${t('workshop.hint_v2')})` : category === 'composite' ? `(${t('workshop.hint_composite')})` : category === 'dll' ? `(${t('workshop.hint_dll')})` : `(${t('workshop.hint_v1')})`}</Text>
-                <Text size="small" style={{ color: tokens.colorNeutralForeground3, lineHeight: '1.4', whiteSpace: 'pre-wrap' }}>
-                  <span style={{ textDecoration: user?.r2_enabled ? 'line-through' : 'none' }}>
-                    {t('workshop.uploadLimitWarning', { max: (maxZipSize / 1024 / 1024) })}
-                  </span>
-                  {user?.r2_enabled && (
-                    <>
-                      <br />
-                      {t('workshop.uploadLimitR2Enabled', { max: (maxZipSize / 1024 / 1024) })}
-                    </>
-                  )}
-                </Text>
-                {existingFiles[lang] && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px', flexWrap: 'wrap' }}>
-                    <Text size="small" className={styles.meta}>
-                      {t('workshop.alreadyUploaded')}：{existingFiles[lang].file_name} ({(existingFiles[lang].file_size / 1024).toFixed(1)}KB)
-                    </Text>
-                    <Text size="small" className={styles.meta}>v{existingFiles[lang].version}</Text>
-                    {existingFiles[lang].file_url && (
-                      <a href={existingFiles[lang].file_url} target="_blank" rel="noreferrer" style={{ fontSize: '12px', color: tokens.colorBrandForeground1 }}>
-                        {existingFiles[lang].file_url}
-                      </a>
-                    )}
-                  </div>
-                )}
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
-                  {category === 'composite' ? (
-                    <>
-                      <Button size="small" icon={<ArrowUpload24Regular />} onClick={() => handleSelectFolders(lang)} disabled={!langEditable}>{modFiles[lang]?.length > 0 ? t('workshop.appendFolder') : t('workshop.updateFolder')}</Button>
-                      <Button size="small" icon={<ArrowUpload24Regular />} onClick={() => handleSelectFiles(lang)} disabled={!langEditable}>{modFiles[lang]?.length > 0 ? t('workshop.appendFile') : t('workshop.updateFile')}</Button>
-                    </>
-                  ) : (
-                    <Button size="small" icon={<ArrowUpload24Regular />} onClick={() => handleSelectFiles(lang)} disabled={!langEditable}>
-                      {category === 'v2' ? t('workshop.hint_v2') : category === 'dll' ? t('workshop.hint_dll') : category === 'v1' ? t('workshop.updateFile') : t('workshop.selectFile')}
-                    </Button>
-                  )}
-                  {modFiles[lang] && (
-                    <>
-                      {category !== 'v1' && category !== 'composite' && (
-                        <Button size="small" appearance="primary" onClick={() => handleUploadFile(lang)} disabled={uploadingLang === lang || !langEditable}>
-                          {uploadingLang === lang ? t('workshop.uploading') : t('workshop.upload')}
-                        </Button>
-                      )}
-                      {(category === 'v1' || category === 'composite') ? (
-                        <Button size="small" icon={<Delete24Regular />} appearance="subtle" onClick={() => setModFiles(prev => { const n = { ...prev }; delete n[lang]; return n })} disabled={!langEditable}>
-                          {t('workshop.cancelSelection')}
-                        </Button>
-                      ) : (
-                        <Button size="small" icon={<Delete24Regular />} appearance="subtle" onClick={() => setModFiles(prev => { const n = { ...prev }; delete n[lang]; return n })} disabled={!langEditable} />
-                      )}
-                      {(category === 'v1' || category === 'composite') && existingFiles[lang] && (
-                        <Text size="small" style={{ color: tokens.colorPaletteRedForeground1 }}>{t('workshop.replaceFileHint')}</Text>
-                      )}
-                    </>
-                  )}
-                </div>
-                {modFiles[lang] && (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', marginTop: '4px' }}>
-                    {modFiles[lang].slice(0, 5).map((f, i) => (
-                      <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                        <Text size="small" className={styles.meta} style={{ flex: 1 }}>
-                          {f.isDir
-                            ? `${t('workshop.dirLabel')} ${f.zipPath}/`
-                            : `${f.zipPath || f.name} (${(f.size / 1024).toFixed(1)}KB)`}
-                        </Text>
-                        <Button
-                          size="small"
-                          icon={<Delete24Regular />}
-                          appearance="subtle"
-                          onClick={() => setModFiles(prev => {
-                            const next = { ...prev }
-                            next[lang] = (next[lang] || []).filter((_, idx) => idx !== i)
-                            if (next[lang].length === 0) delete next[lang]
-                            return next
-                          })}
-                        />
-                      </div>
-                    ))}
-                    {modFiles[lang].length > 5 && (
-                      <Text size="small" className={styles.meta} style={{ cursor: 'pointer', textDecoration: 'underline', color: tokens.colorBrandForeground1 }} onClick={() => setFileDialogLang(lang)}>
-                        {t('workshop.moreFilesCount', { count: modFiles[lang].length - 5 })}
-                      </Text>
-                    )}
-                  </div>
-                )}
-              </div>
-            </div>
-          )
-        })}
+          <LanguageTranslationBlock
+            key={lang}
+            lang={lang}
+            translation={translations[lang]}
+            onChange={handleTransChange}
+            onRemove={() => setConfirmRemoveLang(lang)}
+            canEdit={langEditable}
+            canRemove={canEditAllLangs}
+            category={category}
+            maxZipSize={maxZipSize}
+            r2Enabled={user?.r2_enabled}
+            modFiles={modFiles[lang] || []}
+            existingFile={existingFiles[lang] || null}
+            uploadingLang={uploadingLang}
+            onSelectFiles={handleSelectFiles}
+            onSelectFolders={handleSelectFolders}
+            onUpload={handleUploadFile}
+            onRemoveFile={(l, index) => {
+              if (index === -1) {
+                setModFiles(prev => { const n = { ...prev }; delete n[l]; return n })
+              } else {
+                setModFiles(prev => {
+                  const next = { ...prev }
+                  next[l] = (next[l] || []).filter((_, idx) => idx !== index)
+                  if (next[l].length === 0) delete next[l]
+                  return next
+                })
+              }
+            }}
+            onShowMoreFiles={setFileDialogLang}
+          />
+        )})}
 
         {uploadingLang && (
           <Text size="small" className={styles.meta}>
@@ -1398,11 +1107,11 @@ export function MyMods() {
 
       <AsyncView loading={loading} error={error} onRetry={fetchMods} loadingLabel={t('workshop.loading')}>
         {mods.length === 0 ? (
-          <div className={styles.emptyState}>
-            <Cloud24Regular style={{ fontSize: '32px' }} />
-            <Text weight="semibold">{t('workshop.noModsYet')}</Text>
-            <Text size="small" className={styles.meta}>{t('workshop.uploadHint')}</Text>
-          </div>
+          <EmptyState
+            icon={<Cloud24Regular style={{ fontSize: '32px' }} />}
+            title={t('workshop.noModsYet')}
+            description={t('workshop.uploadHint')}
+          />
         ) : (
         <div className={styles.list}>
           {mods.map(mod => (
