@@ -39,7 +39,25 @@ const useStyles = makeStyles({
   emptyText: { color: tokens.colorNeutralForeground3, textAlign: 'center', padding: '24px' },
   loginPrompt: { textAlign: 'center', padding: '16px', color: tokens.colorNeutralForeground3 },
   actions: { display: 'flex', gap: '6px', marginTop: '4px' },
-  loadMoreRow: { textAlign: 'center', marginTop: '8px', marginBottom: '12px' },
+  loadMoreRow: { display: 'flex', justifyContent: 'center', marginTop: '8px', marginBottom: '12px', width: '100%' },
+  loadMoreBtn: { width: '200px', display: 'block', minWidth: '200px' },
+  replyActionBtn: {
+    width: '100%', height: '60px',
+    '&:hover': { backgroundColor: tokens.colorNeutralBackground1Hover },
+  },
+  quoteBlock: {
+    background: tokens.colorNeutralBackground1,
+    borderLeft: `3px solid ${tokens.colorNeutralStrokeAccessible}`,
+    padding: '8px 12px',
+    marginBottom: '8px',
+    fontSize: tokens.fontSizeSmall,
+    color: tokens.colorNeutralForeground2,
+    whiteSpace: 'pre-wrap',
+    wordBreak: 'break-word',
+    lineHeight: 1.4,
+    maxHeight: '80px',
+    overflow: 'hidden',
+  },
   pageRow: { display: 'flex', justifyContent: 'center', gap: '6px', marginTop: '12px', flexWrap: 'wrap' },
 })
 
@@ -114,6 +132,26 @@ export default function CommentSection({ modId, scrollToCommentId }) {
     return () => { if (scrollTimerRef.current) clearTimeout(scrollTimerRef.current) }
   }, [scrollToCommentId, loading])
 
+  // 点击回复时平滑滚动到 textarea 区域
+  useEffect(() => {
+    if (!replyTo) return
+    const timer = setTimeout(() => {
+      // 找到对应的 reply form 所在的 comment card
+      let targetId = replyTo.parentId
+      const topComment = comments.find(c => c.id === replyTo.parentId)
+      if (!topComment) {
+        const found = comments.find(c =>
+          c.replies?.some(r => r.id === replyTo.parentId) ||
+          replyState[c.id]?.replies?.some(r => r.id === replyTo.parentId)
+        )
+        if (found) targetId = found.id
+      }
+      const el = document.getElementById(`reply-form-${targetId}`)
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }, 100)
+    return () => clearTimeout(timer)
+  }, [replyTo, comments, replyState])
+
   const handleSubmitComment = async () => {
     const content = newComment.trim()
     if (!content || !user) return
@@ -164,7 +202,11 @@ export default function CommentSection({ modId, scrollToCommentId }) {
     const parentComment = comments.find(c => c.id === replyTo.parentId)
     if (!parentComment) {
       // parentId 是某条回复的 ID，找到它所属的一楼
-      const top = comments.find(c => c.replies?.some(r => r.id === replyTo.parentId))
+      // 同时检查 c.replies（前 2 条预览）和 replyState 中已加载的分页回复
+      const top = comments.find(c =>
+        c.replies?.some(r => r.id === replyTo.parentId) ||
+        replyState[c.id]?.replies?.some(r => r.id === replyTo.parentId)
+      )
       if (top) topId = top.id
     }
 
@@ -199,17 +241,26 @@ export default function CommentSection({ modId, scrollToCommentId }) {
         author_name: user.username,
         created_at: t('workshop.justNow'),
       }
-      // 找到所属一楼，只更新它的楼中楼
+      // 找到所属一楼，更新计数并把新回复追加到 rs.replies 末尾（保持正确顺序）
       setComments(prev => prev.map(c => {
         if (c.id === topId) {
           return {
             ...c,
-            replies: [...(c.replies || []), newReply],
             reply_count: (c.reply_count || 0) + 1,
             has_more: (c.reply_count || 0) + 1 > 2,
           }
         }
         return c
+      }))
+      setReplyState(prev => ({
+        ...prev,
+        [topId]: {
+          ...(prev[topId] || { replies: [], page: 0, hasMore: true, loading: false }),
+          replies: [...(prev[topId]?.replies || []), newReply],
+          hasMore: (prev[topId]?.replies?.length || 0) + 1 >= 10,
+          expanded: prev[topId]?.expanded ?? true,
+          loading: false,
+        },
       }))
       setReplyText('')
       setReplyTo(null)
@@ -393,6 +444,7 @@ export default function CommentSection({ modId, scrollToCommentId }) {
       setReplyState(prev => ({
         ...prev,
         [commentId]: {
+          ...prev[commentId],
           replies: [...(prev[commentId]?.replies || []), ...data.replies],
           page: nextPage,
           hasMore: data.replies.length >= 10,
@@ -449,7 +501,7 @@ export default function CommentSection({ modId, scrollToCommentId }) {
         <>
           {comments.map(c => {
             const rs = replyState[c.id] || { replies: [], hasMore: c.has_more, page: 0, loading: false, expanded: c.reply_count <= 2 }
-            const allReplies = [...(c.replies || []), ...rs.replies]
+            const allReplies = [...(c.replies || []), ...(rs.replies || [])]
             const isReplyingHere = replyTo && (replyTo.parentId === c.id || allReplies.some(r => r.id === replyTo.parentId))
             const isExpanded = rs.expanded
 
@@ -564,7 +616,7 @@ export default function CommentSection({ modId, scrollToCommentId }) {
                     {/* 加载更多回复 */}
                     {rs.hasMore && (
                       <div className={styles.loadMoreRow}>
-                        <Button size="small" appearance="subtle" disabled={rs.loading} onClick={() => handleLoadReplies(c.id)}>
+                        <Button size="small" appearance="subtle" disabled={rs.loading} className={styles.loadMoreBtn} onClick={() => handleLoadReplies(c.id)}>
                           {rs.loading ? t('workshop.loading') : t('workshop.loadMoreReplies', { count: c.reply_count })}
                         </Button>
                       </div>
@@ -572,7 +624,7 @@ export default function CommentSection({ modId, scrollToCommentId }) {
 
                     {/* 折叠回复 */}
                     <div className={styles.loadMoreRow}>
-                      <Button size="small" appearance="subtle" onClick={() =>
+                      <Button size="small" appearance="outline" className={styles.replyActionBtn} onClick={() =>
                         setReplyState(prev => ({ ...prev, [c.id]: { ...prev[c.id], expanded: false } }))
                       }>
                         {t('workshop.foldReplies')}
@@ -582,10 +634,22 @@ export default function CommentSection({ modId, scrollToCommentId }) {
                 )}
                 {!isExpanded && c.reply_count > 0 && (
                   <div className={styles.replyList} style={{ borderLeft: 'none', paddingLeft: 0 }}>
-                    <div className={styles.loadMoreRow}>
-                      <Button size="small" appearance="subtle" disabled={rs.loading} onClick={() => {
+                    {c.replies?.map(r => (
+                      <Card key={r.id} id={`reply-${r.id}`} className={styles.replyItem}>
+                        <div className={styles.commentHeader}>
+                          <Avatar name={r.author_name} size={16} />
+                          <Text weight="semibold" size={200}>{r.author_name}</Text>
+                          <Text className={styles.commentTime}>{r.created_at}</Text>
+                        </div>
+                        <div className={styles.commentContent}>
+                          <MarkdownContent markdown={r.content} />
+                        </div>
+                      </Card>
+                    ))}
+                    <div style={{ textAlign: 'center', marginTop: '8px', marginBottom: '12px' }}>
+                      <Button size="small" appearance="outline" disabled={rs.loading} className={styles.replyActionBtn} onClick={() => {
                         setReplyState(prev => ({ ...prev, [c.id]: { ...prev[c.id], expanded: true } }))
-                        if (allReplies.length === 0) handleLoadReplies(c.id)
+                        if (rs.page === 0) handleLoadReplies(c.id)
                       }}>
                         {rs.loading ? t('workshop.loading') : t('workshop.viewReplies', { count: c.reply_count })}
                       </Button>
@@ -595,7 +659,23 @@ export default function CommentSection({ modId, scrollToCommentId }) {
 
                 {/* ── 楼中楼回复表单 ── */}
                 {isReplyingHere && (
-                  <Card className={styles.replyFormCard}>
+                  <Card className={styles.replyFormCard} id={`reply-form-${c.id}`}>
+                    {(() => {
+                      // 找到被回复的内容
+                      let quotedContent = ''
+                      if (replyTo.parentId === c.id) {
+                        quotedContent = c.content
+                      } else {
+                        const found = allReplies.find(r => r.id === replyTo.parentId)
+                        if (found) quotedContent = found.content
+                      }
+                      return quotedContent ? (
+                        <div className={styles.quoteBlock}>
+                          <Text weight="semibold" size={200}>{replyTo.authorName}</Text>
+                          <div>{quotedContent}</div>
+                        </div>
+                      ) : null
+                    })()}
                     <div className={styles.formRow} style={{ alignItems: 'stretch' }}>
                       <div className={styles.textarea}>
                         <MarkdownEditor
@@ -607,6 +687,7 @@ export default function CommentSection({ modId, scrollToCommentId }) {
                       </div>
                       <Button
                         appearance="primary" size="small" icon={<Send24Regular />}
+                        style={{ width: '200px' }}
                         disabled={!replyText.trim() || submitting}
                         onClick={handleSubmitReply}
                       >
