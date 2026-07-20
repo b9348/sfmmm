@@ -14,14 +14,6 @@ import {
   MenuPopover,
   Divider,
   Text,
-  Input,
-  Dialog,
-  DialogTrigger,
-  DialogSurface,
-  DialogTitle,
-  DialogBody,
-  DialogActions,
-  DialogContent,
 } from '@fluentui/react-components'
 import {
   BoxMultiple24Regular,
@@ -35,9 +27,9 @@ import {
   Folder24Regular,
   DocumentFolder24Regular,
 } from '@fluentui/react-icons'
-import { login, register } from '../../services/workshopApi'
 import { useAuth } from '../../contexts/useAuth'
 import { useNotification } from '../../contexts/NotificationContext'
+import { LoginDialog } from '../../components'
 
 const useStyles = makeStyles({
   sidebar: {
@@ -249,14 +241,9 @@ const useStyles = makeStyles({
 export function TabNavigation({ value, onChange, isCollapsed, onToggleCollapse, updateInfo, onNavigateToSettings }) {
   const styles = useStyles()
   const { t } = useTranslation()
-  const { user, isLoggedIn, loginSuccess, logout } = useAuth()
+  const { user, isLoggedIn, logout } = useAuth()
   const { unreadCount, refreshUnread } = useNotification()
   const [authOpen, setAuthOpen] = useState(false)
-  const [isRegister, setIsRegister] = useState(false)
-  const [username, setUsername] = useState('')
-  const [password, setPassword] = useState('')
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState('')
   // 启动时查询一次未读通知数
   useEffect(() => {
     if (!isLoggedIn) { refreshUnread(null); return }
@@ -273,23 +260,6 @@ export function TabNavigation({ value, onChange, isCollapsed, onToggleCollapse, 
     { value: 'apply', label: t('nav.apply'), icon: PersonAccounts24Regular },
     { value: 'settings', label: t('nav.settings'), icon: Settings24Regular },
   ]
-
-  const handleAuthSubmit = async () => {
-    setError('')
-    setBusy(true)
-    try {
-      const fn = isRegister ? register : login
-      const data = await fn(username, password)
-      loginSuccess(data.data)
-      setAuthOpen(false)
-      setUsername('')
-      setPassword('')
-    } catch (e) {
-      setError(e.message)
-    } finally {
-      setBusy(false)
-    }
-  }
 
   const handleLogout = () => {
     logout()
@@ -365,7 +335,7 @@ export function TabNavigation({ value, onChange, isCollapsed, onToggleCollapse, 
                 <Button
                   appearance="subtle"
                   className={styles.collapseButton}
-                  onClick={() => { setIsRegister(false); setError(''); setAuthOpen(true) }}
+                  onClick={() => { setAuthOpen(true) }}
                   icon={<Person24Regular />}
                 />
               </Tooltip>
@@ -375,7 +345,7 @@ export function TabNavigation({ value, onChange, isCollapsed, onToggleCollapse, 
                   appearance="secondary"
                   size="small"
                   className={styles.authButton}
-                  onClick={() => { setIsRegister(false); setError(''); setAuthOpen(true) }}
+                  onClick={() => { setAuthOpen(true) }}
                 >
                   {t('workshop.login')}
                 </Button>
@@ -443,41 +413,7 @@ export function TabNavigation({ value, onChange, isCollapsed, onToggleCollapse, 
       </div>
 
       {/* Auth Dialog */}
-      <Dialog open={authOpen} onOpenChange={(_, d) => { setAuthOpen(d.open); if (!d.open) setError('') }}>
-        <DialogSurface>
-          <DialogBody>
-            <DialogTitle>{isRegister ? t('workshop.register') : t('workshop.login')}</DialogTitle>
-            <DialogContent>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '4px' }}>
-                <Input
-                  size="small"
-                  placeholder={t('workshop.username')}
-                  value={username}
-                  onChange={(_, d) => setUsername(d.value)}
-                />
-                <Input
-                  size="small"
-                  type="password"
-                  placeholder={t('workshop.password')}
-                  value={password}
-                  onChange={(_, d) => setPassword(d.value)}
-                />
-                {error && (
-                  <Text size="small" style={{ color: tokens.colorPaletteRedForeground1 }}>{error}</Text>
-                )}
-              </div>
-            </DialogContent>
-            <DialogActions>
-              <DialogTrigger disableButtonEnhancement>
-                <Button size="small" appearance="subtle">{t('workshop.cancel')}</Button>
-              </DialogTrigger>
-              <Button size="small" appearance="primary" onClick={handleAuthSubmit} disabled={busy}>
-                {busy ? t('workshop.processing') : isRegister ? t('workshop.registerBtn') : t('workshop.login')}
-              </Button>
-            </DialogActions>
-          </DialogBody>
-        </DialogSurface>
-      </Dialog>
+      <LoginDialog open={authOpen} onClose={() => setAuthOpen(false)} onSuccess={() => setAuthOpen(false)} />
     </div>
   )
 }

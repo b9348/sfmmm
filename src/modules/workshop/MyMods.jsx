@@ -13,7 +13,7 @@ import {
   Heart24Regular, Heart24Filled,
   ArrowLeft24Regular,
 } from '@fluentui/react-icons'
-import { listMyMods, createMod, updateMod, uploadModFile, deleteModFile, deleteImgbedFile, login, register, getModForEdit, getModDetail, deleteMod, checkModKey, setModPermissions, getDeviceId } from '../../services/workshopApi'
+import { listMyMods, createMod, updateMod, uploadModFile, deleteModFile, deleteImgbedFile, getModForEdit, getModDetail, deleteMod, checkModKey, setModPermissions, getDeviceId } from '../../services/workshopApi'
 import { resolveTranslationImages, extractImgbedUrls, deleteImageFromImgbed } from '../../services/imageApi'
 import { useAuth } from '../../contexts/useAuth'
 import { RichTextEditor, MarkdownEditor } from '../../components/common/RichTextEditor'
@@ -24,7 +24,7 @@ import Database from '@tauri-apps/plugin-sql'
 import { collectSelection } from './collectSelection'
 import { runReplaceFlow } from './runReplaceFlow'
 import ModDetailPage from './ModDetailPage'
-import { ConfirmDialog, BackButton, ProgressModal } from '../../components'
+import { ConfirmDialog, BackButton, ProgressModal, AsyncView, LoginForm } from '../../components'
 import PermissionSettings from './PermissionSettings'
 
 const LANGUAGES = [
@@ -146,12 +146,6 @@ const useStyles = makeStyles({
     textAlign: 'center',
     marginBottom: '12px',
   },
-  loginRow: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '4px',
-    marginBottom: '8px',
-  },
   fab: {
     position: 'fixed',
     bottom: '24px',
@@ -180,67 +174,19 @@ const useStyles = makeStyles({
   },
 })
 
-function LoginForm() {
+function LoginPage() {
   const styles = useStyles()
   const { t } = useTranslation()
-  const [isRegister, setIsRegister] = useState(false)
-  const [username, setUsername] = useState('')
-  const [password, setPassword] = useState('')
-  const [error, setError] = useState('')
-  const [busy, setBusy] = useState(false)
-  const { loginSuccess } = useAuth()
-
-  const handleSubmit = async () => {
-    setError('')
-    setBusy(true)
-    try {
-      const fn = isRegister ? register : login
-      const data = await fn(username, password)
-      loginSuccess(data.data)
-    } catch (e) {
-      setError(e.message)
-    } finally {
-      setBusy(false)
-    }
-  }
 
   return (
     <Card className={styles.loginCard}>
       <div className={styles.loginTitle}>
-        <Text weight="semibold">{isRegister ? t('workshop.register') : t('workshop.login')}</Text>
+        <Text weight="semibold">{t('workshop.login')}</Text>
         <Text size="small" className={styles.meta} block>
           {t('workshop.loginHint')}
         </Text>
       </div>
-
-      <div className={styles.loginRow}>
-        <Input
-          size="small"
-          placeholder={t('workshop.username')}
-          value={username}
-          onChange={(_, d) => setUsername(d.value)}
-        />
-      </div>
-      <div className={styles.loginRow}>
-        <Input
-          size="small"
-          type="password"
-          placeholder={t('workshop.password')}
-          value={password}
-          onChange={(_, d) => setPassword(d.value)}
-        />
-      </div>
-
-      {error && <Text size="small" style={{ color: tokens.colorPaletteRedForeground1 }}>{error}</Text>}
-
-      <div style={{ display: 'flex', gap: '6px', marginTop: '8px' }}>
-        <Button size="small" appearance="primary" onClick={handleSubmit} disabled={busy}>
-          {busy ? t('workshop.processing') : isRegister ? t('workshop.registerBtn') : t('workshop.login')}
-        </Button>
-        <Button size="small" appearance="subtle" onClick={() => { setIsRegister(!isRegister); setError('') }}>
-          {isRegister ? t('workshop.hasAccount') : t('workshop.noAccount')}
-        </Button>
-      </div>
+      <LoginForm />
     </Card>
   )
 }
@@ -1431,7 +1377,7 @@ export function MyMods() {
   }
 
   if (!isLoggedIn) {
-    return <LoginForm />
+    return <LoginPage />
   }
 
   if (editingMod) {
@@ -1456,29 +1402,14 @@ export function MyMods() {
         </Button>
       </div>
 
-      {loading && (
-        <div className={styles.emptyState}>
-          <Spinner size="small" label={t('workshop.loading')} />
-        </div>
-      )}
-
-      {error && (
-        <div className={styles.emptyState}>
-          <Text weight="semibold">{t('workshop.loadFailed')}</Text>
-          <Text size="small" className={styles.meta}>{error}</Text>
-          <Button size="small" icon={<ArrowClockwise24Regular />} onClick={fetchMods}>{t('workshop.retry')}</Button>
-        </div>
-      )}
-
-      {!loading && !error && mods.length === 0 && (
-        <div className={styles.emptyState}>
-          <Cloud24Regular style={{ fontSize: '32px' }} />
-          <Text weight="semibold">{t('workshop.noModsYet')}</Text>
-          <Text size="small" className={styles.meta}>{t('workshop.uploadHint')}</Text>
-        </div>
-      )}
-
-      {!loading && !error && mods.length > 0 && (
+      <AsyncView loading={loading} error={error} onRetry={fetchMods} loadingLabel={t('workshop.loading')}>
+        {mods.length === 0 ? (
+          <div className={styles.emptyState}>
+            <Cloud24Regular style={{ fontSize: '32px' }} />
+            <Text weight="semibold">{t('workshop.noModsYet')}</Text>
+            <Text size="small" className={styles.meta}>{t('workshop.uploadHint')}</Text>
+          </div>
+        ) : (
         <div className={styles.list}>
           {mods.map(mod => (
             <Card key={mod.id} className={styles.card} appearance="outline" onClick={() => handleDetail(mod)} style={{ cursor: 'pointer' }}>
@@ -1533,6 +1464,7 @@ export function MyMods() {
           ))}
         </div>
       )}
+      </AsyncView>
 
       <ConfirmDialog
         open={!!confirmDeleteModId}

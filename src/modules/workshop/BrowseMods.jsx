@@ -3,8 +3,6 @@ import {
   Card, CardHeader, Text, Button, SearchBox,
   Spinner, makeStyles, tokens, Badge,
   Select,
-  Dialog, DialogSurface, DialogBody, DialogTitle,
-  DialogContent, DialogActions, DialogTrigger, Input,
 } from '@fluentui/react-components'
 import {
   ArrowClockwise24Regular,
@@ -16,11 +14,12 @@ import {
   Subtract20Regular,
 } from '@fluentui/react-icons'
 import { useTranslation } from 'react-i18next'
-import { listMods, getModDetail, getModForEdit, getDeviceId, login, register } from '../../services/workshopApi'
+import { listMods, getModDetail, getModForEdit, getDeviceId } from '../../services/workshopApi'
 import ModDetailPage from './ModDetailPage'
 import { useAuth } from '../../contexts/useAuth'
 import { EditModPage, CreateModPage } from './MyMods'
 import Database from '@tauri-apps/plugin-sql'
+import { Pagination, AsyncView, LoginDialog } from '../../components'
 
 const CATEGORIES = [
   { value: 'v1', label: 'v1' },
@@ -93,13 +92,6 @@ const useStyles = makeStyles({
     padding: '32px',
     textAlign: 'center',
   },
-  pagination: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: '8px',
-    padding: '12px 0',
-  },
   footerRow: {
     display: 'flex',
     alignItems: 'center',
@@ -143,15 +135,9 @@ const useStyles = makeStyles({
 export function BrowseMods({ initialModId, initialCommentId }) {
   const styles = useStyles()
   const { t } = useTranslation()
-  const { user, isLoggedIn, loginSuccess } = useAuth()
+  const { user, isLoggedIn } = useAuth()
   const deviceIdRef = useRef(getDeviceId())
   const [search, setSearch] = useState('')
-  const [loginOpen, setLoginOpen] = useState(false)
-  const [loginUsername, setLoginUsername] = useState('')
-  const [loginPassword, setLoginPassword] = useState('')
-  const [loginBusy, setLoginBusy] = useState(false)
-  const [loginError, setLoginError] = useState('')
-  const [isRegister, setIsRegister] = useState(false)
   const [sortBy, setSortBy] = useState(() => sessionStorage.getItem('workshop_browse_sort') || 'created_at')
   const [categoryFilter, setCategoryFilter] = useState('')
   const [mods, setMods] = useState([])
@@ -296,32 +282,19 @@ export function BrowseMods({ initialModId, initialCommentId }) {
     }
   }
 
+  const [loginOpen, setLoginOpen] = useState(false)
+
   const handlePublishClick = () => {
     if (isLoggedIn) {
       setShowCreatePage(true)
     } else {
-      setIsRegister(false)
-      setLoginError('')
       setLoginOpen(true)
     }
   }
 
-  const handleLoginSubmit = async () => {
-    setLoginError('')
-    setLoginBusy(true)
-    try {
-      const fn = isRegister ? register : login
-      const data = await fn(loginUsername, loginPassword)
-      loginSuccess(data.data)
-      setLoginOpen(false)
-      setLoginUsername('')
-      setLoginPassword('')
-      setShowCreatePage(true)
-    } catch (e) {
-      setLoginError(e.message)
-    } finally {
-      setLoginBusy(false)
-    }
+  const handleLoginSuccess = () => {
+    setLoginOpen(false)
+    setShowCreatePage(true)
   }
 
   if (showCreatePage) {
@@ -402,100 +375,80 @@ export function BrowseMods({ initialModId, initialCommentId }) {
         </div>
       </Card>
 
-      {loading && (
-        <div className={styles.emptyState}>
-          <Spinner size="small" label={t('workshop.loading')} />
-        </div>
-      )}
-
-      {error && (
-        <div className={styles.emptyState}>
-          <Text weight="semibold">{t('workshop.loadFailed')}</Text>
-          <Text size="small" className={styles.meta}>{error}</Text>
-          <Button size="small" icon={<ArrowClockwise24Regular />} onClick={() => fetchMods(1)}>{t('workshop.retry')}</Button>
-        </div>
-      )}
-
-      {!loading && !error && mods.length === 0 && (
-        <div className={styles.emptyState}>
-          <Text weight="semibold">{t('workshop.noMods')}</Text>
-          <Text size="small" className={styles.meta}>
-            {search ? t('workshop.noMatchHint') : t('workshop.noUploads')}
-          </Text>
-        </div>
-      )}
-
-      {!loading && !error && mods.length > 0 && (
-        <>
-          <div className={styles.grid} style={{ gridTemplateColumns: `repeat(${itemsPerRow}, 1fr)` }}>
-            {mods.map(mod => {
-              const cat = CATEGORIES.find(c => c.value === mod.category)
-              return (
-              <Card key={mod.id} className={styles.card} appearance="outline" onClick={() => {
-                window.location.hash = `#/mod/${mod.id}`
-                setDetailMod(mod)
-                getModDetail(mod.id, 'zh', user?.user_id, deviceIdRef.current)
-                  .then(data => { if (data.data?.mod) setDetailMod(data.data.mod) })
-                  .catch(() => {})
-              }}>
-                <CardHeader
-                  header={
-                    <Text size="small" className={styles.meta} truncate>{mod.mod_key}</Text>
-                  }
-                  description={
-                    <Text size="small" className={styles.meta}>{mod.author_name}</Text>
-                  }
-                  action={
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '3px' }} title={mod.is_liked ? t('workshop.likedHint') : t('workshop.unlikedHint')}>
-                        {mod.is_liked ? (
-                          <Heart24Filled style={{ color: tokens.colorPaletteRedForeground1, fontSize: '16px' }} />
-                        ) : (
-                          <Heart24Regular style={{ fontSize: '16px', color: tokens.colorNeutralForeground3 }} />
-                        )}
-                        <Text size="small">{mod.like_count || 0}</Text>
-                      </div>
-                      <Badge appearance="outline" size="small" style={{ whiteSpace: 'nowrap' }}>
-                        {cat ? t(`workshop.category_${cat.value}`) : (mod.category ? t(`workshop.category_${mod.category}`, mod.category) : t('workshop.uncategorized'))}
-                      </Badge>
-                    </div>
-                  }
-                />
-                <div className={styles.cardBody}>
-                  {mod.description && (
-                    <Text size="small" className={styles.description}>{mod.description}</Text>
-                  )}
-                  {mod.files && mod.files.length > 0 && (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                      {mod.files.map(f => {
-                        const langName = mod.translations?.[f.lang_code]?.name || mod.display_name
-                        return (
-                        <div key={f.lang_code} style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '4px 6px', border: `1px solid ${tokens.colorNeutralStroke2}`, borderRadius: '4px' }}>
-                          <Badge appearance="outline" size="small" style={{ whiteSpace: 'nowrap' }}>
-                            {LANG_LABELS[f.lang_code] || f.lang_code}
-                          </Badge>
-                          <Text size="small" truncate style={{ flex: 1 }}>{langName}</Text>
-                          <Text size="small">v{f.version}</Text>
-                          <Text size="small" className={styles.meta}>{(f.file_size / 1024).toFixed(1)}KB</Text>
-                        </div>
-                      )})}
-                    </div>
-                  )}
-                </div>
-              </Card>
-            )
-          })}
+      <AsyncView loading={loading} error={error} onRetry={() => fetchMods(1)} loadingLabel={t('workshop.loading')}>
+        {mods.length === 0 ? (
+          <div className={styles.emptyState}>
+            <Text weight="semibold">{t('workshop.noMods')}</Text>
+            <Text size="small" className={styles.meta}>
+              {search ? t('workshop.noMatchHint') : t('workshop.noUploads')}
+            </Text>
           </div>
-
-          {totalPages > 1 && (
-            <div className={styles.pagination}>
-              <Button size="small" disabled={page <= 1} onClick={() => fetchMods(page - 1)}>{t('workshop.prevPage')}</Button>
-              <Text size="small">{page} / {totalPages}</Text>
-              <Button size="small" disabled={page >= totalPages} onClick={() => fetchMods(page + 1)}>{t('workshop.nextPage')}</Button>
+        ) : (
+          <>
+            <div className={styles.grid} style={{ gridTemplateColumns: `repeat(${itemsPerRow}, 1fr)` }}>
+              {mods.map(mod => {
+                const cat = CATEGORIES.find(c => c.value === mod.category)
+                return (
+                <Card key={mod.id} className={styles.card} appearance="outline" onClick={() => {
+                  window.location.hash = `#/mod/${mod.id}`
+                  setDetailMod(mod)
+                  getModDetail(mod.id, 'zh', user?.user_id, deviceIdRef.current)
+                    .then(data => { if (data.data?.mod) setDetailMod(data.data.mod) })
+                    .catch(() => {})
+                }}>
+                  <CardHeader
+                    header={
+                      <Text size="small" className={styles.meta} truncate>{mod.mod_key}</Text>
+                    }
+                    description={
+                      <Text size="small" className={styles.meta}>{mod.author_name}</Text>
+                    }
+                    action={
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '3px' }} title={mod.is_liked ? t('workshop.likedHint') : t('workshop.unlikedHint')}>
+                          {mod.is_liked ? (
+                            <Heart24Filled style={{ color: tokens.colorPaletteRedForeground1, fontSize: '16px' }} />
+                          ) : (
+                            <Heart24Regular style={{ fontSize: '16px', color: tokens.colorNeutralForeground3 }} />
+                          )}
+                          <Text size="small">{mod.like_count || 0}</Text>
+                        </div>
+                        <Badge appearance="outline" size="small" style={{ whiteSpace: 'nowrap' }}>
+                          {cat ? t(`workshop.category_${cat.value}`) : (mod.category ? t(`workshop.category_${mod.category}`, mod.category) : t('workshop.uncategorized'))}
+                        </Badge>
+                      </div>
+                    }
+                  />
+                  <div className={styles.cardBody}>
+                    {mod.description && (
+                      <Text size="small" className={styles.description}>{mod.description}</Text>
+                    )}
+                    {mod.files && mod.files.length > 0 && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                        {mod.files.map(f => {
+                          const langName = mod.translations?.[f.lang_code]?.name || mod.display_name
+                          return (
+                          <div key={f.lang_code} style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '4px 6px', border: `1px solid ${tokens.colorNeutralStroke2}`, borderRadius: '4px' }}>
+                            <Badge appearance="outline" size="small" style={{ whiteSpace: 'nowrap' }}>
+                              {LANG_LABELS[f.lang_code] || f.lang_code}
+                            </Badge>
+                            <Text size="small" truncate style={{ flex: 1 }}>{langName}</Text>
+                            <Text size="small">v{f.version}</Text>
+                            <Text size="small" className={styles.meta}>{(f.file_size / 1024).toFixed(1)}KB</Text>
+                          </div>
+                        )})}
+                      </div>
+                    )}
+                  </div>
+                </Card>
+              )
+            })}
             </div>
-          )}
-        </>
-      )}
+
+            <Pagination page={page} totalPages={totalPages} onChange={(p) => fetchMods(p)} />
+          </>
+        )}
+      </AsyncView>
 
       <div className={styles.fabContainer}>
         <div className={styles.fabItem}>
@@ -523,44 +476,7 @@ export function BrowseMods({ initialModId, initialCommentId }) {
         </div>
       </div>
 
-      <Dialog open={loginOpen} onOpenChange={(_, d) => { setLoginOpen(d.open); if (!d.open) setLoginError('') }}>
-        <DialogSurface>
-          <DialogBody>
-            <DialogTitle>{isRegister ? t('workshop.register') : t('workshop.login')}</DialogTitle>
-            <DialogContent>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '4px' }}>
-                <Input
-                  size="small"
-                  placeholder={t('workshop.username')}
-                  value={loginUsername}
-                  onChange={(_, d) => setLoginUsername(d.value)}
-                />
-                <Input
-                  size="small"
-                  type="password"
-                  placeholder={t('workshop.password')}
-                  value={loginPassword}
-                  onChange={(_, d) => setLoginPassword(d.value)}
-                />
-                {loginError && (
-                  <Text size="small" style={{ color: tokens.colorPaletteRedForeground1 }}>{loginError}</Text>
-                )}
-              </div>
-            </DialogContent>
-            <DialogActions>
-              <Button size="small" appearance="subtle" onClick={() => { setIsRegister(!isRegister); setLoginError('') }}>
-                {isRegister ? t('workshop.hasAccount') : t('workshop.noAccount')}
-              </Button>
-              <DialogTrigger disableButtonEnhancement>
-                <Button size="small" appearance="subtle">{t('workshop.cancel')}</Button>
-              </DialogTrigger>
-              <Button size="small" appearance="primary" onClick={handleLoginSubmit} disabled={loginBusy}>
-                {loginBusy ? t('workshop.processing') : isRegister ? t('workshop.registerBtn') : t('workshop.login')}
-              </Button>
-            </DialogActions>
-          </DialogBody>
-        </DialogSurface>
-      </Dialog>
+      <LoginDialog open={loginOpen} onClose={() => setLoginOpen(false)} onSuccess={handleLoginSuccess} />
     </div>
   )
 }

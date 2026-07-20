@@ -10,6 +10,7 @@ import {
 import { useAuth } from '../../contexts/useAuth'
 import { useNotification } from '../../contexts/NotificationContext'
 import { listApplications, handleApplication, getMyNotifications, markRead } from '../../services/workshopApi'
+import { Pagination } from '../../components'
 
 const useStyles = makeStyles({
   root: {
@@ -74,13 +75,6 @@ const useStyles = makeStyles({
     padding: '1px 6px',
     borderRadius: '3px',
     background: tokens.colorNeutralBackground3,
-  },
-  pagination: {
-    display: 'flex',
-    justifyContent: 'center',
-    alignItems: 'center',
-    gap: '6px',
-    padding: '12px',
   },
   truncate: {
     overflow: 'hidden',
@@ -274,19 +268,7 @@ export default function ApplicationsPage({ onNavigate }) {
           </Card>
         ))}
 
-        {totalAppPages > 1 && (
-          <div className={styles.pagination}>
-            <Button size="small" disabled={appPage <= 1} onClick={() => setAppPage((p) => p - 1)}>
-              {t('workshop.prevPage')}
-            </Button>
-            <Text size="small" className={styles.metaText}>
-              {appPage} / {totalAppPages}
-            </Text>
-            <Button size="small" disabled={appPage >= totalAppPages} onClick={() => setAppPage((p) => p + 1)}>
-              {t('workshop.nextPage')}
-            </Button>
-          </div>
-        )}
+        <Pagination page={appPage} totalPages={totalAppPages} onChange={(p) => setAppPage(p)} />
       </div>
 
       {/* Section 2: 评论/回复/点赞通知 */}
@@ -348,19 +330,7 @@ export default function ApplicationsPage({ onNavigate }) {
           </Card>
         ))}
 
-        {totalNotifPages > 1 && (
-          <div className={styles.pagination}>
-            <Button size="small" disabled={notifPage <= 1} onClick={() => setNotifPage((p) => p - 1)}>
-              上一页
-            </Button>
-            <Text size="small" className={styles.metaText}>
-              {notifPage} / {totalNotifPages}
-            </Text>
-            <Button size="small" disabled={notifPage >= totalNotifPages} onClick={() => setNotifPage((p) => p + 1)}>
-              下一页
-            </Button>
-          </div>
-        )}
+        <Pagination page={notifPage} totalPages={totalNotifPages} onChange={(p) => setNotifPage(p)} />
       </div>
     </div>
   )

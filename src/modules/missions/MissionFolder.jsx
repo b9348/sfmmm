@@ -1,10 +1,11 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
-import { makeStyles, tokens, Text, Button, Spinner, Card, CardHeader, Badge, Tooltip } from '@fluentui/react-components'
+import { makeStyles, tokens, Text, Button, Card, CardHeader, Badge, Tooltip } from '@fluentui/react-components'
 import { FolderOpen24Regular, ArrowClockwise24Regular, Document24Regular, Folder24Regular, ChevronRight24Regular, Play24Regular, Pause24Regular, Delete24Regular } from '@fluentui/react-icons'
 import { invoke } from '@tauri-apps/api/core'
 import { readDir } from '@tauri-apps/plugin-fs'
 import { useInstalledMods } from '../../hooks/useInstalledMods'
+import { AsyncView } from '../../components'
 
 const LANG_LABELS = { zh: '中文', en: 'English', ja: '日本語' }
 
@@ -395,13 +396,8 @@ export function MissionFolder({ config, subfolder, onUninstall }) {
         </Text>
       )}
 
-      {loading && (
-        <div className={styles.emptyState}>
-          <Spinner size="small" label={t('app.loading')} />
-        </div>
-      )}
-
-      {!loading && files.length === 0 && (
+      <AsyncView loading={loading} loadingLabel={t('app.loading')}>
+        {files.length === 0 && (
         <div className={styles.emptyState}>
           <Text weight="semibold">{currentDir ? t('mission.folderEmpty') : t('mission.noGameDir')}</Text>
           {currentDir && (
@@ -410,7 +406,7 @@ export function MissionFolder({ config, subfolder, onUninstall }) {
         </div>
       )}
 
-      {!loading && files.length > 0 && (
+      {files.length > 0 && (
         <div className={styles.grid}>
           {files.map((f, i) => {
             const fullPath = `${currentDir}/${f.name}`
@@ -421,6 +417,7 @@ export function MissionFolder({ config, subfolder, onUninstall }) {
           })}
         </div>
       )}
+      </AsyncView>
     </div>
   )
 }

@@ -11,6 +11,7 @@ import { addComment, getComments, getCommentReplies, deleteComment, editComment 
 import { resolvePendingImagesInMarkdown, stripPendingUrls, deleteImageFromImgbed, extractImgbedUrls } from '../../services/imageApi'
 import { useAuth } from '../../contexts/useAuth'
 import { MarkdownContent, MarkdownEditor } from '../../components/common/RichTextEditor'
+import { Pagination } from '../../components'
 
 const MAX_COMMENT_LENGTH = 3000
 const MAX_REPLY_LENGTH = 3000
@@ -58,7 +59,6 @@ const useStyles = makeStyles({
     maxHeight: '80px',
     overflow: 'hidden',
   },
-  pageRow: { display: 'flex', justifyContent: 'center', gap: '6px', marginTop: '12px', flexWrap: 'wrap' },
 })
 
 export default function CommentSection({ modId, scrollToCommentId }) {
@@ -701,19 +701,7 @@ export default function CommentSection({ modId, scrollToCommentId }) {
           })}
 
           {/* ── 页码 ── */}
-          {totalPages > 1 && (
-            <div className={styles.pageRow}>
-              <Button size="small" appearance="subtle" disabled={page <= 1} onClick={() => fetchComments(page - 1)}>
-                {t('workshop.prevPage')}
-              </Button>
-              <Text size="small" style={{ padding: '0 8px', lineHeight: '28px' }}>
-                {page} / {totalPages}
-              </Text>
-              <Button size="small" appearance="subtle" disabled={page >= totalPages} onClick={() => fetchComments(page + 1)}>
-                {t('workshop.nextPage')}
-              </Button>
-            </div>
-          )}
+          <Pagination page={page} totalPages={totalPages} onChange={(p) => fetchComments(p)} />
         </>
       )}
     </div>
