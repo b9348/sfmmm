@@ -20,10 +20,19 @@ export function AuthProvider({ children }) {
   }, [])
 
   const loginSuccess = useCallback(async (userData) => {
-    // userData = { user_id, username, r2_enabled }
-    const user = { user_id: userData.user_id, username: userData.username, r2_enabled: !!userData.r2_enabled }
+    // userData = { user_id, username, r2_enabled, avatar }
+    const user = { user_id: userData.user_id, username: userData.username, r2_enabled: !!userData.r2_enabled, avatar: userData.avatar || null }
     setUser(user)
     await saveUserToDb(user)
+  }, [])
+
+  const updateUser = useCallback(async (partial) => {
+    setUser(prev => {
+      if (!prev) return prev
+      const updated = { ...prev, ...partial }
+      saveUserToDb(updated)
+      return updated
+    })
   }, [])
 
   const logout = useCallback(async () => {
@@ -34,7 +43,7 @@ export function AuthProvider({ children }) {
   const isLoggedIn = !!user
 
   return (
-    <AuthContext.Provider value={{ user, isLoggedIn, loginSuccess, logout, initialized }}>
+    <AuthContext.Provider value={{ user, isLoggedIn, loginSuccess, logout, updateUser, initialized }}>
       {children}
     </AuthContext.Provider>
   )

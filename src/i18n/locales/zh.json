@@ -30,6 +30,16 @@
     "logout": "退出登录"
   },
 
+  "profile": {
+    "title": "个人资料",
+    "avatar": "选择头像",
+    "currentAvatar": "当前头像",
+    "username": "用户名",
+    "save": "保存",
+    "saveSuccess": "保存成功",
+    "saveFailed": "保存失败"
+  },
+
   "welcome": {
     "gameDir": "游戏目录",
     "selectFolder": "选择游戏文件夹",

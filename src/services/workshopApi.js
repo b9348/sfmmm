@@ -56,6 +56,11 @@ export async function getUserProfile() {
   return { success: true, data: {} }
 }
 
+export async function updateProfile({ user_id, avatar, username }) {
+  const res = await dbCall('db_update_profile', { user_id, avatar: avatar || null, username: username || null })
+  return res.data // { user_id, username, avatar, r2_enabled }
+}
+
 // ── 设备标识（一机一赞） ──
 
 const DEVICE_ID_KEY = 'sfmmm_device_id'

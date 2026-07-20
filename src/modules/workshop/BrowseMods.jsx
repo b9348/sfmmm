@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import {
   Card, CardHeader, Text, Button, SearchBox,
   Spinner, makeStyles, tokens, Badge,
-  Select,
+  Select, Avatar,
 } from '@fluentui/react-components'
 import {
   ArrowClockwise24Regular,
@@ -20,6 +20,7 @@ import { useAuth } from '../../contexts/useAuth'
 import { EditModPage, CreateModPage } from './MyMods'
 import { getConfig, setConfig } from '../../services/dbHelper'
 import { Pagination, AsyncView, LoginDialog, FloatingActions, FileRow } from '../../components'
+import { getAvatarUrl } from '../../utils/avatars'
 
 const CATEGORIES = [
   { value: 'v1', label: 'v1' },
@@ -369,7 +370,18 @@ export function BrowseMods({ initialModId, initialCommentId }) {
                       <Text size="small" className={styles.meta} truncate>{mod.mod_key}</Text>
                     }
                     description={
-                      <Text size="small" className={styles.meta}>{mod.author_name}</Text>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        {mod.author_avatar ? (
+                          <img
+                            src={getAvatarUrl(mod.author_avatar)}
+                            alt=""
+                            style={{ width: '16px', height: '16px', borderRadius: '50%', flexShrink: 0 }}
+                          />
+                        ) : (
+                          <Avatar name={mod.author_name} size={16} />
+                        )}
+                        <Text size="small" className={styles.meta}>{mod.author_name}</Text>
+                      </div>
                     }
                     action={
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>

@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "sfmmm",
-  "version": "0.1.45",
+  "version": "0.1.46",
   "identifier": "com.sfmmm.app",
   "build": {
     "frontendDist": "../dist",
@@ -48,9 +48,7 @@
         "installerHooks": null
       }
     },
-    "resources": [
-      ".env"
-    ],
+    "resources": [],
     "android": {
       "debugApplicationIdSuffix": ".debug"
     }

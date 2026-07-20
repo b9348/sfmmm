@@ -11,6 +11,7 @@ import { addComment, getComments, getCommentReplies, deleteComment, editComment 
 import { resolvePendingImagesInMarkdown, stripPendingUrls, deleteImageFromImgbed, extractImgbedUrls } from '../../services/imageApi'
 import { useAuth } from '../../contexts/useAuth'
 import { MarkdownContent, MarkdownEditor } from '../../components/common/RichTextEditor'
+import { getAvatarUrl } from '../../utils/avatars'
 import { Pagination } from '../../components'
 
 const MAX_COMMENT_LENGTH = 3000
@@ -509,7 +510,11 @@ export default function CommentSection({ modId, scrollToCommentId }) {
               <Card key={c.id} id={`comment-${c.id}`} className={styles.commentItem}>
                 {/* ── 一楼头部 ── */}
                 <div className={styles.commentHeader}>
-                  <Avatar name={c.author_name} size={20} />
+                  <Avatar
+                    name={c.author_name}
+                    size={20}
+                    image={c.author_avatar ? { src: getAvatarUrl(c.author_avatar) } : undefined}
+                  />
                   <Text weight="semibold" size={200}>{c.author_name}</Text>
                   <Text className={styles.commentTime}>{c.created_at}</Text>
                 </div>
@@ -565,7 +570,11 @@ export default function CommentSection({ modId, scrollToCommentId }) {
                     {allReplies.map(r => (
                       <Card key={r.id} id={`reply-${r.id}`} className={styles.replyItem}>
                         <div className={styles.commentHeader}>
-                          <Avatar name={r.author_name} size={16} />
+                          <Avatar
+                            name={r.author_name}
+                            size={16}
+                            image={r.author_avatar ? { src: getAvatarUrl(r.author_avatar) } : undefined}
+                          />
                           <Text weight="semibold" size={200}>{r.author_name}</Text>
                           <Text className={styles.commentTime}>{r.created_at}</Text>
                         </div>
@@ -637,7 +646,11 @@ export default function CommentSection({ modId, scrollToCommentId }) {
                     {c.replies?.map(r => (
                       <Card key={r.id} id={`reply-${r.id}`} className={styles.replyItem}>
                         <div className={styles.commentHeader}>
-                          <Avatar name={r.author_name} size={16} />
+                          <Avatar
+                            name={r.author_name}
+                            size={16}
+                            image={r.author_avatar ? { src: getAvatarUrl(r.author_avatar) } : undefined}
+                          />
                           <Text weight="semibold" size={200}>{r.author_name}</Text>
                           <Text className={styles.commentTime}>{r.created_at}</Text>
                         </div>

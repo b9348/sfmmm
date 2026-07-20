@@ -30,6 +30,16 @@
     "logout": "ログアウト"
   },
 
+  "profile": {
+    "title": "プロフィール",
+    "avatar": "アバターを選択",
+    "currentAvatar": "現在のアバター",
+    "username": "ユーザー名",
+    "save": "保存",
+    "saveSuccess": "保存しました",
+    "saveFailed": "保存に失敗しました"
+  },
+
   "welcome": {
     "gameDir": "ゲームディレクトリ",
     "selectFolder": "ゲームフォルダを選択",

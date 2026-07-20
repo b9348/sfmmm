@@ -911,7 +911,7 @@ pub fn run() {
         .plugin(tauri_plugin_http::init())
         .invoke_handler(tauri::generate_handler![
             open_folder, scan_mods, toggle_mod_enabled, batch_toggle_mod_enabled, http_request, test_network, download_and_extract_7z,
-            db::db_login, db::db_register,
+            db::db_login, db::db_register, db::db_update_profile,
             db::db_list_mods, db::db_list_my_mods,
             db::db_get_mod_detail, db::db_get_mod_for_edit,
             db::db_create_mod, db::db_update_mod, db::db_delete_mod,
@@ -942,6 +942,17 @@ pub fn run() {
         )
         .manage(db::DbState::new().expect("failed to init MySQL pool"))
         .setup(|app| {
+            // 清理旧版本残留的 .env 文件（以前被错误地打包进安装目录）
+            if let Ok(exe) = std::env::current_exe() {
+                if let Some(dir) = exe.parent() {
+                    let old_env = dir.join(".env");
+                    if old_env.exists() {
+                        let _ = std::fs::remove_file(&old_env);
+                        log::info!("已清理旧版残留的 .env 文件: {:?}", old_env);
+                    }
+                }
+            }
+
             // 启动 MySQL 连接池空闲检查器：超过 60 秒无请求则释放连接
             app.state::<db::DbState>().pool.start_idle_checker();
 

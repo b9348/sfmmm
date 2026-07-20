@@ -29,7 +29,8 @@ import {
 } from '@fluentui/react-icons'
 import { useAuth } from '../../contexts/useAuth'
 import { useNotification } from '../../contexts/NotificationContext'
-import { LoginDialog } from '../../components'
+import { LoginDialog, ProfileDialog } from '../../components'
+import { getAvatarUrl } from '../../utils/avatars'
 
 const useStyles = makeStyles({
   sidebar: {
@@ -244,6 +245,7 @@ export function TabNavigation({ value, onChange, isCollapsed, onToggleCollapse, 
   const { user, isLoggedIn, logout } = useAuth()
   const { unreadCount, refreshUnread } = useNotification()
   const [authOpen, setAuthOpen] = useState(false)
+  const [profileOpen, setProfileOpen] = useState(false)
   // 启动时查询一次未读通知数
   useEffect(() => {
     if (!isLoggedIn) { refreshUnread(null); return }
@@ -300,11 +302,24 @@ export function TabNavigation({ value, onChange, isCollapsed, onToggleCollapse, 
                   isCollapsed ? styles.userInfoCollapsed : ''
                 }`}
               >
-                <Avatar
-                  name={user?.username || ''}
-                  size={isCollapsed ? 28 : 32}
-                  color="brand"
-                />
+                {user?.avatar ? (
+                  <img
+                    src={getAvatarUrl(user.avatar)}
+                    alt=""
+                    style={{
+                      width: isCollapsed ? '28px' : '32px',
+                      height: isCollapsed ? '28px' : '32px',
+                      borderRadius: '50%',
+                      flexShrink: 0,
+                    }}
+                  />
+                ) : (
+                  <Avatar
+                    name={user?.username || ''}
+                    size={isCollapsed ? 28 : 32}
+                    color="brand"
+                  />
+                )}
                 {!isCollapsed && (
                   <div className={styles.userDetails}>
                     <span className={styles.userName}>{user?.username || ''}</span>
@@ -316,7 +331,7 @@ export function TabNavigation({ value, onChange, isCollapsed, onToggleCollapse, 
             <MenuPopover>
               <MenuList>
                 <MenuItem icon={<PersonAccounts24Regular />}>{t('nav.account')}</MenuItem>
-                <MenuItem icon={<Person24Regular />}>{t('nav.profile')}</MenuItem>
+                <MenuItem icon={<Person24Regular />} onClick={() => setProfileOpen(true)}>{t('nav.profile')}</MenuItem>
                 <Divider />
                 <MenuItem icon={<SignOut24Regular />} onClick={handleLogout}>
                   {t('nav.logout')}
@@ -414,6 +429,8 @@ export function TabNavigation({ value, onChange, isCollapsed, onToggleCollapse, 
 
       {/* Auth Dialog */}
       <LoginDialog open={authOpen} onClose={() => setAuthOpen(false)} onSuccess={() => setAuthOpen(false)} />
+      {/* Profile Dialog */}
+      <ProfileDialog open={profileOpen} onClose={() => setProfileOpen(false)} />
     </div>
   )
 }

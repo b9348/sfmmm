@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
-  Text, Button, Spinner, Card, Badge,
+  Text, Button, Spinner, Card, Badge, Avatar,
   makeStyles, tokens,
 } from '@fluentui/react-components'
 import {
@@ -11,6 +11,7 @@ import { useAuth } from '../../contexts/useAuth'
 import { useNotification } from '../../contexts/NotificationContext'
 import { listApplications, handleApplication, getMyNotifications, markRead } from '../../services/workshopApi'
 import { Pagination } from '../../components'
+import { getAvatarUrl } from '../../utils/avatars'
 
 const useStyles = makeStyles({
   root: {
@@ -237,9 +238,16 @@ export default function ApplicationsPage({ onNavigate }) {
                 {app.target_lang && <Badge appearance="outline" size="small">{app.target_lang}</Badge>}
               </div>
               <Text weight="semibold" size="small">{app.mod_key || app.mod_name}</Text>
-              <Text size="small" className={styles.metaText}>
-                {t('workshop.applicant')}: {app.applicant_name}
-              </Text>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <Avatar
+                  name={app.applicant_name}
+                  size={16}
+                  image={app.applicant_avatar ? { src: getAvatarUrl(app.applicant_avatar) } : undefined}
+                />
+                <Text size="small" className={styles.metaText}>
+                  {t('workshop.applicant')}: {app.applicant_name}
+                </Text>
+              </div>
               {app.reason && (
                 <Text size="small" className={styles.metaText}>
                   {t('workshop.reason')}: {app.reason}
@@ -324,7 +332,20 @@ export default function ApplicationsPage({ onNavigate }) {
                 </Text>
               )}
               <Text size="small" className={styles.metaText}>
-                {n.author_name ? `${n.author_name} · ${n.created_at}` : n.created_at}
+                {n.author_name ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '4px' }}>
+                  <Avatar
+                    name={n.author_name}
+                    size={14}
+                    image={n.author_avatar ? { src: getAvatarUrl(n.author_avatar) } : undefined}
+                  />
+                  <Text size="small" className={styles.metaText}>
+                    {n.author_name} · {n.created_at}
+                  </Text>
+                </div>
+              ) : n.created_at && (
+                <Text size="small" className={styles.metaText}>{n.created_at}</Text>
+              )}
               </Text>
             </div>
           </Card>

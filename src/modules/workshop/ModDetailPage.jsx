@@ -21,6 +21,7 @@ import { submitApplication, likeMod, unlikeMod, getDeviceId } from '../../servic
 import CommentSection from './CommentSection'
 import { getDb, getGamePath } from '../../services/dbHelper'
 import { BackButton, FloatingActions, FileRow } from '../../components'
+import { getAvatarUrl } from '../../utils/avatars'
 import { LANGUAGES, LANG_LABELS } from '../../i18n/languages'
 
 function compareSemver(a, b) {
@@ -326,7 +327,11 @@ export default function ModDetailPage({ mod, onBack, onEdit, scrollToCommentId }
       </div>
       <div className={styles.detailSection}>
         <div className={styles.authorRow}>
-          <Avatar name={mod.author_name} size={24} />
+          <Avatar
+            name={mod.author_name}
+            size={24}
+            image={mod.author_avatar ? { src: getAvatarUrl(mod.author_avatar) } : undefined}
+          />
           <Text size="small">{mod.author_name}</Text>
           {mod.category && (
             <Badge appearance="outline" size="small" style={{ whiteSpace: 'nowrap' }}>

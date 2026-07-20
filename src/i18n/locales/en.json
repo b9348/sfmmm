@@ -30,6 +30,16 @@
     "logout": "Log out"
   },
 
+  "profile": {
+    "title": "Profile",
+    "avatar": "Choose Avatar",
+    "currentAvatar": "Current Avatar",
+    "username": "Username",
+    "save": "Save",
+    "saveSuccess": "Saved successfully",
+    "saveFailed": "Save failed"
+  },
+
   "welcome": {
     "gameDir": "Game Directory",
     "selectFolder": "Select game folder",
