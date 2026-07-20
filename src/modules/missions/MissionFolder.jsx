@@ -6,8 +6,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { readDir } from '@tauri-apps/plugin-fs'
 import { useInstalledMods } from '../../hooks/useInstalledMods'
 import { AsyncView } from '../../components'
-
-const LANG_LABELS = { zh: '中文', en: 'English', ja: '日本語' }
+import { LANG_LABELS } from '../../i18n/languages'
 
 const useStyles = makeStyles({
   root: {

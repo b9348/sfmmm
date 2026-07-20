@@ -1,14 +1,8 @@
 import { writeFile, mkdir, exists, remove } from '@tauri-apps/plugin-fs'
-import Database from '@tauri-apps/plugin-sql'
 import JSZip from 'jszip'
+import { getGamePath, getDb } from './dbHelper'
 
 const IMGBED_URL = 'https://img.b9349.dpdns.org'
-
-async function getGamePath() {
-  const db = await Database.load('sqlite:config.db')
-  const rows = await db.select("SELECT value FROM config WHERE `key` = 'game_path'")
-  return rows[0]?.value || null
-}
 
 /**
  * 安全检查：拒绝 zip slip / 绝对路径 / 跨越游戏根目录的 path。
@@ -139,7 +133,7 @@ export async function installMod({ modKey, category, fileUrl, version, fileHash,
 
   // 保存安装记录到本地 SQLite，用于侧边栏展示"创意工坊"标签
   try {
-    const db = await Database.load('sqlite:config.db')
+    const db = await getDb()
     // 兼容旧表：保留 mod 级记录
     const existing = await db.select('SELECT id FROM installed_workshop_mods WHERE mod_key = $1', [modKey])
     if (existing.length > 0) {
@@ -177,7 +171,7 @@ export async function uninstallMod({ modKey }) {
     throw new Error('未配置游戏路径')
   }
 
-  const db = await Database.load('sqlite:config.db')
+  const db = await getDb()
   const rows = await db.select('SELECT category, manifest FROM installed_workshop_mods WHERE mod_key = $1', [modKey])
   if (rows.length === 0) {
     throw new Error('未找到安装记录')

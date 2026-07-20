@@ -22,8 +22,7 @@ import { invoke, Channel } from '@tauri-apps/api/core'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useInstalledMods } from '../../hooks/useInstalledMods'
-
-const LANG_LABELS = { zh: '中文', en: 'English', ja: '日本語' }
+import { LANG_LABELS } from '../../i18n/languages'
 
 const useStyles = makeStyles({
   root: {

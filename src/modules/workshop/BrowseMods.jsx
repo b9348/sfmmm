@@ -18,8 +18,8 @@ import { listMods, getModDetail, getModForEdit, getDeviceId } from '../../servic
 import ModDetailPage from './ModDetailPage'
 import { useAuth } from '../../contexts/useAuth'
 import { EditModPage, CreateModPage } from './MyMods'
-import Database from '@tauri-apps/plugin-sql'
-import { Pagination, AsyncView, LoginDialog } from '../../components'
+import { getConfig, setConfig } from '../../services/dbHelper'
+import { Pagination, AsyncView, LoginDialog, FloatingActions, FileRow } from '../../components'
 
 const CATEGORIES = [
   { value: 'v1', label: 'v1' },
@@ -27,8 +27,6 @@ const CATEGORIES = [
   { value: 'dll', label: 'dll' },
   { value: 'composite', label: 'composite' },
 ]
-
-const LANG_LABELS = { zh: '中文', en: 'English', ja: '日本語' }
 
 const useStyles = makeStyles({
   root: {
@@ -105,32 +103,7 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground3,
     fontSize: tokens.fontSizeSmall,
   },
-  fabContainer: {
-    position: 'fixed',
-    bottom: '24px',
-    right: '24px',
-    zIndex: 1000,
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '12px',
-    alignItems: 'center',
-  },
-  fabItem: {
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    gap: '4px',
-  },
-  fabLabel: {
-    fontSize: tokens.fontSizeSmall,
-    color: tokens.colorNeutralForeground2,
-    backgroundColor: tokens.colorNeutralBackground1,
-    padding: '2px 6px',
-    borderRadius: '4px',
-    boxShadow: tokens.shadow4,
-    whiteSpace: 'nowrap',
-  },
-})
+  })
 
 export function BrowseMods({ initialModId, initialCommentId }) {
   const styles = useStyles()
@@ -213,12 +186,11 @@ export function BrowseMods({ initialModId, initialCommentId }) {
   useEffect(() => {
     const loadItemsPerRow = async () => {
       try {
-        const db = await Database.load('sqlite:config.db')
-        const rows = await db.select('SELECT value FROM config WHERE `key` = $1', ['workshop_items_per_row'])
-        if (rows.length > 0) {
-          const value = parseInt(rows[0].value, 10)
-          if (!Number.isNaN(value) && value >= 1 && value <= 10) {
-            setItemsPerRow(value)
+        const value = await getConfig('workshop_items_per_row')
+        if (value !== null) {
+          const parsed = parseInt(value, 10)
+          if (!Number.isNaN(parsed) && parsed >= 1 && parsed <= 10) {
+            setItemsPerRow(parsed)
           }
         }
       } catch (e) {
@@ -230,11 +202,7 @@ export function BrowseMods({ initialModId, initialCommentId }) {
 
   const saveItemsPerRow = useCallback(async (value) => {
     try {
-      const db = await Database.load('sqlite:config.db')
-      await db.execute(
-        `INSERT OR REPLACE INTO config (id, \`key\`, value) VALUES ((SELECT id FROM config WHERE \`key\` = $1), $1, $2)`,
-        ['workshop_items_per_row', String(value)]
-      )
+      await setConfig('workshop_items_per_row', String(value))
     } catch (e) {
       console.warn('[BrowseMods] 保存每行展示数量失败:', e)
     }
@@ -428,14 +396,7 @@ export function BrowseMods({ initialModId, initialCommentId }) {
                         {mod.files.map(f => {
                           const langName = mod.translations?.[f.lang_code]?.name || mod.display_name
                           return (
-                          <div key={f.lang_code} style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '4px 6px', border: `1px solid ${tokens.colorNeutralStroke2}`, borderRadius: '4px' }}>
-                            <Badge appearance="outline" size="small" style={{ whiteSpace: 'nowrap' }}>
-                              {LANG_LABELS[f.lang_code] || f.lang_code}
-                            </Badge>
-                            <Text size="small" truncate style={{ flex: 1 }}>{langName}</Text>
-                            <Text size="small">v{f.version}</Text>
-                            <Text size="small" className={styles.meta}>{(f.file_size / 1024).toFixed(1)}KB</Text>
-                          </div>
+                          <FileRow key={f.lang_code} langCode={f.lang_code} name={langName} version={f.version} fileSize={f.file_size} />
                         )})}
                       </div>
                     )}
@@ -450,31 +411,10 @@ export function BrowseMods({ initialModId, initialCommentId }) {
         )}
       </AsyncView>
 
-      <div className={styles.fabContainer}>
-        <div className={styles.fabItem}>
-          <Button
-            size="large"
-            icon={<ArrowClockwise24Regular />}
-            appearance="outline"
-            shape="circular"
-            onClick={() => fetchMods(page)}
-            disabled={loading}
-            title={t('workshop.refresh')}
-          />
-          <Text className={styles.fabLabel}>{t('workshop.refresh')}</Text>
-        </div>
-        <div className={styles.fabItem}>
-          <Button
-            size="large"
-            icon={<Add24Regular />}
-            appearance="primary"
-            shape="circular"
-            onClick={handlePublishClick}
-            title={t('workshop.publishMod')}
-          />
-          <Text className={styles.fabLabel}>{t('workshop.publishMod')}</Text>
-        </div>
-      </div>
+      <FloatingActions items={[
+        { key: 'refresh', icon: <ArrowClockwise24Regular />, onClick: () => fetchMods(page), disabled: loading, label: t('workshop.refresh') },
+        { key: 'publish', icon: <Add24Regular />, appearance: 'primary', onClick: handlePublishClick, label: t('workshop.publishMod') },
+      ]} />
 
       <LoginDialog open={loginOpen} onClose={() => setLoginOpen(false)} onSuccess={handleLoginSuccess} />
     </div>

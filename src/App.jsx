@@ -6,7 +6,7 @@ import { ModList, SaveManagement, ImportExport, GameSettings, Workshop, MissionF
 import { AuthProvider } from './contexts/AuthContext.jsx'
 import { NotificationProvider } from './contexts/NotificationContext'
 import { usePersistUI } from './hooks/usePersistUI'
-import Database from '@tauri-apps/plugin-sql'
+import { getDb, getConfigs, setConfig } from './services/dbHelper'
 import { checkVersion, applyUpdate } from './services/updateApi'
 import { uninstallMod } from './services/installMod'
 import { useTranslation } from 'react-i18next'
@@ -87,12 +87,8 @@ function App() {
   // 启动时检查是否有待更新安装包，有则自动应用（仅已完成首次设置后）
   useEffect(() => {
     (async () => {
-      let db
       try {
-        db = await Database.load('sqlite:config.db')
-        const rows = await db.select(`SELECT \`key\`, value FROM config WHERE \`key\` IN ('pending_update', 'initialized')`)
-        const cfg = {}
-        rows.forEach(r => { cfg[r.key] = r.value })
+        const cfg = await getConfigs(['pending_update', 'initialized'])
 
         // 首次运行时不自动应用更新，避免在欢迎屏/设置流程中退出
         if (cfg.initialized !== 'true') return
@@ -103,10 +99,7 @@ function App() {
         console.warn('[Update] 自动应用待更新失败:', e)
         // 失败后重置标志，避免每次启动都重试失败的更新
         try {
-          if (!db) db = await Database.load('sqlite:config.db')
-          await db.execute(
-            `INSERT OR REPLACE INTO config (id, \`key\`, value) VALUES ((SELECT id FROM config WHERE \`key\` = 'pending_update'), 'pending_update', 'false')`
-          )
+          await setConfig('pending_update', 'false')
         } catch (clearErr) {
           console.warn('[Update] 清除 pending_update 失败:', clearErr)
         }
@@ -119,17 +112,11 @@ function App() {
 
     const initialize = async () => {
       try {
-        const db = await Database.load('sqlite:config.db')
-        const rows = await db.select(`SELECT ` + "`key`" + `, value FROM config`)
+        const configMap = await getConfigs(['language', 'selected_tab', 'initialized', 'game_path', 'exe_path'])
 
         if (!isMounted) {
           return
         }
-
-        const configMap = {}
-        rows.forEach(row => {
-          configMap[row.key] = row.value
-        })
 
         // 应用已保存的语言设置（在 dispatch 之前等待完成，避免 UI 渲染时语言正在切换）
         if (configMap.language) {
@@ -176,11 +163,7 @@ function App() {
   const handleTabChange = async (tab) => {
     setSelectedTab(tab)
     try {
-      const db = await Database.load('sqlite:config.db')
-      await db.execute(
-        `INSERT OR REPLACE INTO config (id, ` + "`key`" + `, value) VALUES ((SELECT id FROM config WHERE ` + "`key`" + ` = $1), $1, $2)`,
-        ['selected_tab', tab]
-      )
+      await setConfig('selected_tab', tab)
     } catch (e) {
       console.error('Failed to persist selected tab:', e)
     }

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
-import Database from '@tauri-apps/plugin-sql'
 import { invoke } from '@tauri-apps/api/core'
+import { getDb } from '../services/dbHelper'
 
 /**
  * 读取本地已安装的创意工坊模组，检测是否有更新
@@ -17,7 +17,7 @@ export function useInstalledMods() {
 
     const load = async () => {
       try {
-        const db = await Database.load('sqlite:config.db')
+        const db = await getDb()
         const rows = await db.select('SELECT mod_key, installed_version, category, lang_code, manifest FROM installed_workshop_mods')
         if (cancelled) return
 

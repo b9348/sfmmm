@@ -1,7 +1,6 @@
 import { useTranslation } from 'react-i18next'
 import { Select, Text, tokens, Checkbox, makeStyles } from '@fluentui/react-components'
-
-const LANGUAGES = ['zh', 'en', 'ja']
+import { LANG_VALUES } from '../../i18n/languages'
 
 const useStyles = makeStyles({
   section: {
@@ -88,7 +87,7 @@ export default function PermissionSettings({ value, onChange, disabled = false }
         <>
           <Text size="small" block className={styles.hint}>{t('workshop.permOpenLangHint')}</Text>
           <div className={styles.langCheckboxGroup}>
-            {LANGUAGES.map(lang => (
+            {LANG_VALUES.map(lang => (
               <Checkbox
                 key={lang}
                 size="small"
@@ -126,7 +125,7 @@ export default function PermissionSettings({ value, onChange, disabled = false }
             <>
               <Text size="small" block className={styles.hint}>{t('workshop.permApplyLangHint')}</Text>
               <div className={styles.langCheckboxGroup}>
-                {LANGUAGES.map(lang => (
+                {LANG_VALUES.map(lang => (
                   <Checkbox
                     key={lang}
                     size="small"

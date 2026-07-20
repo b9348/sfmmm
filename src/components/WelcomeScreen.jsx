@@ -17,7 +17,7 @@ import {
 import { makeStyles, tokens } from '@fluentui/react-components'
 import { open } from '@tauri-apps/plugin-dialog'
 import { exists } from '@tauri-apps/plugin-fs'
-import Database from '@tauri-apps/plugin-sql'
+import { setConfig } from '../services/dbHelper'
 import i18n, { detectSystemLanguage } from '../i18n'
 
 const useStyles = makeStyles({
@@ -85,28 +85,10 @@ export function WelcomeScreen({ onComplete }) {
     }
 
     try {
-      const db = await Database.load('sqlite:config.db')
-
-      await db.execute(
-        `DELETE FROM config WHERE ` + "`key`" + ` IN ('game_path', 'exe_path', 'initialized', 'language')`
-      )
-
-      await db.execute(
-        `INSERT INTO config (` + "`key`" + `, value) VALUES ($1, $2)`,
-        ['game_path', gamePath]
-      )
-      await db.execute(
-        `INSERT INTO config (` + "`key`" + `, value) VALUES ($1, $2)`,
-        ['exe_path', exePath]
-      )
-      await db.execute(
-        `INSERT INTO config (` + "`key`" + `, value) VALUES ($1, $2)`,
-        ['initialized', 'true']
-      )
-      await db.execute(
-        `INSERT INTO config (` + "`key`" + `, value) VALUES ($1, $2)`,
-        ['language', language]
-      )
+      await setConfig('game_path', gamePath)
+      await setConfig('exe_path', exePath)
+      await setConfig('initialized', 'true')
+      await setConfig('language', language)
 
       onComplete({ game_path: gamePath, exe_path: exePath, initialized: 'true', language })
     } catch (e) {

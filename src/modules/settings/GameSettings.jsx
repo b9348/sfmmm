@@ -21,7 +21,7 @@ import { makeStyles, tokens } from '@fluentui/react-components'
 import { invoke } from '@tauri-apps/api/core'
 import { open as openDialog } from '@tauri-apps/plugin-dialog'
 import { open as openUrl } from '@tauri-apps/plugin-shell'
-import Database from '@tauri-apps/plugin-sql'
+import { getConfig, setConfig } from '../../services/dbHelper'
 import i18n from '../../i18n'
 import { checkVersion, prepareUpdate, applyUpdate } from '../../services/updateApi'
 import APP_VERSION from '../../version.js'
@@ -102,15 +102,8 @@ export function GameSettings({ config, onConfigChange }) {
 
   const saveConfig = async (updates) => {
     try {
-      const db = await Database.load('sqlite:config.db')
       for (const [key, value] of Object.entries(updates)) {
-        await db.execute(
-          `INSERT OR REPLACE INTO config (id, ` + "`key`" + `, value) VALUES (
-            (SELECT id FROM config WHERE ` + "`key`" + ` = $1),
-            $1, $2
-          )`,
-          [key, String(value)]
-        )
+        await setConfig(key, value)
       }
       onConfigChange?.(updates)
     } catch (e) {
@@ -122,9 +115,8 @@ export function GameSettings({ config, onConfigChange }) {
   useEffect(() => {
     (async () => {
       try {
-        const db = await Database.load('sqlite:config.db')
-        const rows = await db.select(`SELECT value FROM config WHERE \`key\` = 'pending_update'`)
-        if (rows[0]?.value === 'true') {
+        const value = await getConfig('pending_update')
+        if (value === 'true') {
           setPendingUpdate(true)
         }
       } catch (e) {

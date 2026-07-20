@@ -20,20 +20,14 @@ import { RichTextEditor, MarkdownEditor } from '../../components/common/RichText
 import JSZip from 'jszip'
 import { open } from '@tauri-apps/plugin-dialog'
 import { readFile, readDir } from '@tauri-apps/plugin-fs'
-import Database from '@tauri-apps/plugin-sql'
+import { getGamePath } from '../../services/dbHelper'
 import { collectSelection } from './collectSelection'
 import { runReplaceFlow } from './runReplaceFlow'
 import ModDetailPage from './ModDetailPage'
 import { ConfirmDialog, BackButton, ProgressModal, AsyncView, LoginForm } from '../../components'
 import PermissionSettings from './PermissionSettings'
+import { LANGUAGES, LANG_LABELS } from '../../i18n/languages'
 
-const LANGUAGES = [
-  { value: 'zh', label: '中文' },
-  { value: 'en', label: 'English' },
-  { value: 'ja', label: '日本語' },
-]
-
-const LANG_LABELS = { zh: '中文', en: 'English', ja: '日本語' }
 const MAX_INSTRUCTIONS_LENGTH = 10000
 
 function getRelativePath(filePath, baseDir) {

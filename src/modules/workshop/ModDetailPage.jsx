@@ -19,10 +19,9 @@ import { invoke } from '@tauri-apps/api/core'
 import { useAuth } from '../../contexts/useAuth'
 import { submitApplication, likeMod, unlikeMod, getDeviceId } from '../../services/workshopApi'
 import CommentSection from './CommentSection'
-import Database from '@tauri-apps/plugin-sql'
-import { BackButton } from '../../components'
-
-const LANG_LABELS = { zh: '中文', en: 'English', ja: '日本語' }
+import { getDb, getGamePath } from '../../services/dbHelper'
+import { BackButton, FloatingActions, FileRow } from '../../components'
+import { LANGUAGES, LANG_LABELS } from '../../i18n/languages'
 
 function compareSemver(a, b) {
   const normalize = v => (v || '').replace(/^v/i, '')
@@ -35,12 +34,6 @@ function compareSemver(a, b) {
   }
   return 0
 }
-
-const LANGUAGES = [
-  { value: 'zh', label: '中文' },
-  { value: 'en', label: 'English' },
-  { value: 'ja', label: '日本語' },
-]
 
 const useStyles = makeStyles({
   root: {
@@ -70,42 +63,11 @@ const useStyles = makeStyles({
     alignItems: 'center',
     gap: '4px',
   },
-  fileRow: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '8px',
-    padding: '4px 0',
-  },
   meta: {
     color: tokens.colorNeutralForeground2,
     fontSize: tokens.fontSizeSmall,
   },
-  fabContainer: {
-    position: 'fixed',
-    bottom: '24px',
-    right: '24px',
-    zIndex: 1000,
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '12px',
-    alignItems: 'center',
-  },
-  fabItem: {
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    gap: '4px',
-  },
-  fabLabel: {
-    fontSize: tokens.fontSizeSmall,
-    color: tokens.colorNeutralForeground2,
-    backgroundColor: tokens.colorNeutralBackground1,
-    padding: '2px 6px',
-    borderRadius: '4px',
-    boxShadow: tokens.shadow4,
-    whiteSpace: 'nowrap',
-  },
-})
+  })
 
 export default function ModDetailPage({ mod, onBack, onEdit, scrollToCommentId }) {
   const styles = useStyles()
@@ -160,7 +122,7 @@ export default function ModDetailPage({ mod, onBack, onEdit, scrollToCommentId }
   useEffect(() => {
     const checkInstalled = async () => {
       try {
-        const db = await Database.load('sqlite:config.db')
+        const db = await getDb()
         const rows = await db.select(
           'SELECT category, installed_version, lang_code, manifest FROM installed_workshop_mods WHERE mod_key = $1',
           [mod.mod_key]
@@ -209,8 +171,7 @@ export default function ModDetailPage({ mod, onBack, onEdit, scrollToCommentId }
             console.warn('[ModDetailPage] 解析 manifest 失败:', parseErr)
             setInstalledFiles([])
           }
-          const configRows = await db.select("SELECT value FROM config WHERE `key` = 'game_path'")
-          const gamePath = configRows[0]?.value
+          const gamePath = await getGamePath()
           if (gamePath) {
             const base = gamePath.replace(/\/+$/, '')
             const category = rows[0]?.category || 'v1'
@@ -431,20 +392,12 @@ export default function ModDetailPage({ mod, onBack, onEdit, scrollToCommentId }
             <Text size="small" weight="semibold" block style={{ marginBottom: '8px' }}>{t('workshop.availableVersions')}</Text>
             {mod.files.map(f => {
               return (
-              <div key={f.lang_code} className={styles.fileRow}>
-                <Badge appearance="outline" size="small" style={{ whiteSpace: 'nowrap' }}>{LANG_LABELS[f.lang_code] || f.lang_code}</Badge>
-                {f.file_name && <Text size="small" truncate>{f.file_name}</Text>}
-                <Text size="small">v{f.version}</Text>
+              <FileRow key={f.lang_code} langCode={f.lang_code} name={f.file_name} version={f.version} fileSize={f.file_size}>
                 {installedByLang[f.lang_code] && (
                   <Text size="small" className={styles.meta}>
                     {t('workshop.localVersion', { version: installedByLang[f.lang_code].installed_version })}
                   </Text>
                 )}
-                <Text size="small" className={styles.meta}>
-                  {f.file_size >= 1024 * 1024
-                    ? `${(f.file_size / (1024 * 1024)).toFixed(2)}MB`
-                    : `${(f.file_size / 1024).toFixed(1)}KB`}
-                </Text>
                 <Button
                   size="small"
                   icon={<ArrowDownload24Regular />}
@@ -522,8 +475,7 @@ export default function ModDetailPage({ mod, onBack, onEdit, scrollToCommentId }
                   </>
                 )}
                 <Text size="small" className={styles.meta}>{f.file_hash?.slice(0, 8)}</Text>
-                <div style={{ flex: 1 }} />
-              </div>
+              </FileRow>
             )})}
           </div>
         )}
@@ -600,56 +552,12 @@ export default function ModDetailPage({ mod, onBack, onEdit, scrollToCommentId }
         </DialogSurface>
       </Dialog>
 
-      <div className={styles.fabContainer}>
-        <div className={styles.fabItem}>
-          <Button
-            size="large"
-            icon={<ArrowLeft24Regular />}
-            appearance="outline"
-            shape="circular"
-            onClick={onBack}
-            title={t('workshop.back')}
-          />
-        </div>
-        <div className={styles.fabItem}>
-          <Button
-            size="large"
-            icon={isLiked ? <Heart24Filled /> : <Heart24Regular />}
-            appearance={isLiked ? 'primary' : 'outline'}
-            shape="circular"
-            onClick={handleLikeToggle}
-            disabled={likeBusy}
-            title={t('workshop.likeCount', { count: likeCount })}
-            style={isLiked ? { color: tokens.colorPaletteRedForeground1 } : undefined}
-          />
-          <Text className={styles.fabLabel}>{likeCount}</Text>
-        </div>
-        {user && canEdit && (
-          <div className={styles.fabItem}>
-            <Button
-              size="large"
-              icon={<Edit24Regular />}
-              appearance="primary"
-              shape="circular"
-              onClick={() => onEdit?.(mod)}
-              title={t('workshop.edit')}
-            />
-          </div>
-        )}
-        {user && canApply && (
-          <div className={styles.fabItem}>
-            <Button
-              size="large"
-              icon={<Add24Regular />}
-              appearance="primary"
-              shape="circular"
-              onClick={() => setApplyOpen(true)}
-              title={t('workshop.applyToEdit')}
-            />
-            <Text className={styles.fabLabel}>{t('workshop.applyToEdit')}</Text>
-          </div>
-        )}
-      </div>
+      <FloatingActions items={[
+        { key: 'back', icon: <ArrowLeft24Regular />, onClick: onBack },
+        { key: 'like', icon: isLiked ? <Heart24Filled /> : <Heart24Regular />, appearance: isLiked ? 'primary' : 'outline', onClick: handleLikeToggle, disabled: likeBusy, label: String(likeCount), style: isLiked ? { color: tokens.colorPaletteRedForeground1 } : undefined },
+        ...(user && canEdit ? [{ key: 'edit', icon: <Edit24Regular />, appearance: 'primary', onClick: () => onEdit?.(mod) }] : []),
+        ...(user && canApply ? [{ key: 'apply', icon: <Add24Regular />, appearance: 'primary', onClick: () => setApplyOpen(true), label: t('workshop.applyToEdit') }] : []),
+      ]} />
     </div>
   )
 }
