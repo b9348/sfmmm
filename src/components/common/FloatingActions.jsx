@@ -17,6 +17,11 @@ const useStyles = makeStyles({
     alignItems: 'center',
     gap: '4px',
   },
+  actionButton: {
+    '&:hover': {
+      backgroundColor: tokens.colorNeutralBackground1Hover,
+    },
+  },
   label: {
     fontSize: tokens.fontSizeSmall,
     color: tokens.colorNeutralForeground2,
@@ -43,7 +48,11 @@ export function FloatingActions({ items }) {
             onClick={item.onClick}
             disabled={item.disabled}
             title={item.label}
-            style={item.style}
+            style={{
+              ...item.style,
+              ...((item.appearance || 'outline') !== 'primary' ? { backgroundColor: tokens.colorNeutralBackground1 } : {}),
+            }}
+            className={(item.appearance || 'outline') !== 'primary' ? styles.actionButton : undefined}
           />
           {item.label && <Text className={styles.label}>{item.label}</Text>}
         </div>

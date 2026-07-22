@@ -246,6 +246,7 @@ export function TabNavigation({ value, onChange, isCollapsed, onToggleCollapse, 
   const { unreadCount, refreshUnread } = useNotification()
   const [authOpen, setAuthOpen] = useState(false)
   const [profileOpen, setProfileOpen] = useState(false)
+  const [isRegister, setIsRegister] = useState(false)
   // 启动时查询一次未读通知数
   useEffect(() => {
     if (!isLoggedIn) { refreshUnread(null); return }
@@ -368,7 +369,7 @@ export function TabNavigation({ value, onChange, isCollapsed, onToggleCollapse, 
                   appearance="primary"
                   size="small"
                   className={styles.authButton}
-                  onClick={() => { setIsRegister(true); setError(''); setAuthOpen(true) }}
+                  onClick={() => { setIsRegister(true); setAuthOpen(true) }}
                 >
                   {t('workshop.register')}
                 </Button>
@@ -428,7 +429,7 @@ export function TabNavigation({ value, onChange, isCollapsed, onToggleCollapse, 
       </div>
 
       {/* Auth Dialog */}
-      <LoginDialog open={authOpen} onClose={() => setAuthOpen(false)} onSuccess={() => setAuthOpen(false)} />
+      <LoginDialog open={authOpen} onClose={() => { setAuthOpen(false); setIsRegister(false) }} onSuccess={() => { setAuthOpen(false); setIsRegister(false) }} defaultIsRegister={isRegister} />
       {/* Profile Dialog */}
       <ProfileDialog open={profileOpen} onClose={() => setProfileOpen(false)} />
     </div>

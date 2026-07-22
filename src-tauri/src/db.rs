@@ -365,6 +365,7 @@ pub async fn db_register(
     state: tauri::State<'_, DbState>,
     username: String,
     password: String,
+    avatar: Option<String>,
 ) -> Result<ApiResponse, String> {
     let pool = state.pool.clone();
     tokio::task::spawn_blocking(move || {
@@ -388,13 +389,13 @@ pub async fn db_register(
         }
 
         conn.exec_drop(
-            "INSERT INTO users (username, password_hash) VALUES (?, ?)",
-            (&uname, &pwd_hash),
+            "INSERT INTO users (username, password_hash, avatar) VALUES (?, ?, ?)",
+            (&uname, &pwd_hash, &avatar),
         ).map_err(|e| e.to_string())?;
 
         let new_id: u64 = conn.last_insert_id();
         Ok(ApiResponse::ok_val(serde_json::json!({
-            "user_id": new_id, "username": uname, "r2_enabled": false, "avatar": null
+            "user_id": new_id, "username": uname, "r2_enabled": false, "avatar": avatar
         }), "Registration successful"))
     }).await.map_err(|e| e.to_string())?
 }
@@ -608,6 +609,23 @@ pub async fn db_list_mods(
             }).map_err(|e| e.to_string())?;
         }
 
+        // 收集 mod_id → comment 总数（含楼中楼）
+        let mut comment_counts: std::collections::HashMap<u64, i64> = std::collections::HashMap::new();
+        if !mod_ids.is_empty() {
+            let ph: Vec<String> = mod_ids.iter().map(|_| "?".to_string()).collect();
+            let comment_sql = format!(
+                "SELECT mod_id, COUNT(*) FROM mod_comments WHERE mod_id IN ({}) GROUP BY mod_id",
+                ph.join(",")
+            );
+            let id_params: Vec<Value> = mod_ids.iter().map(|&id| Value::UInt(id)).collect();
+            conn.exec_map(&comment_sql, id_params, |row: Row| {
+                let vals: Vec<Value> = row.unwrap();
+                let mid = val_to_i64(&vals[0]) as u64;
+                let cnt = val_to_i64(&vals[1]);
+                comment_counts.insert(mid, cnt);
+            }).map_err(|e| e.to_string())?;
+        }
+
         let items: Vec<serde_json::Value> = mod_rows.into_iter().map(|r| {
             let mid = val_to_i64(&r[0]) as u64;
             let (like_count, is_liked) = likes_by_mod.get(&mid).copied().unwrap_or((0, false));
@@ -620,11 +638,12 @@ pub async fn db_list_mods(
                 "instructions_format": val_to_string(r[11].clone()),
                 "changelog": val_to_string(r[12].clone()),
                 "category": val_to_string(r[3].clone()),
-                "author_name": val_to_string(r[7].clone()),
+                "author_name": val_to_string(r[8].clone()),
                 "author_avatar": val_to_string(r[15].clone()),
                 "download_count": val_to_i64(&r[4]),
                 "like_count": like_count,
                 "is_liked": is_liked,
+                "comment_count": comment_counts.get(&mid).copied().unwrap_or(0),
                 "language": val_to_string(r[13].clone()),
                 "files": files_by_mod.remove(&mid).unwrap_or_default(),
                 "translations": trans_by_mod.remove(&mid).unwrap_or_default(),
@@ -763,6 +782,23 @@ pub async fn db_list_my_mods(
             }).map_err(|e| e.to_string())?;
         }
 
+        // 收集 mod_id → comment 总数（含楼中楼）
+        let mut comment_counts: std::collections::HashMap<u64, i64> = std::collections::HashMap::new();
+        if !mod_ids.is_empty() {
+            let ph: Vec<String> = mod_ids.iter().map(|_| "?".to_string()).collect();
+            let comment_sql = format!(
+                "SELECT mod_id, COUNT(*) FROM mod_comments WHERE mod_id IN ({}) GROUP BY mod_id",
+                ph.join(",")
+            );
+            let id_params: Vec<Value> = mod_ids.iter().map(|&id| Value::UInt(id)).collect();
+            conn.exec_map(&comment_sql, id_params, |row: Row| {
+                let vals: Vec<Value> = row.unwrap();
+                let mid = val_to_i64(&vals[0]) as u64;
+                let cnt = val_to_i64(&vals[1]);
+                comment_counts.insert(mid, cnt);
+            }).map_err(|e| e.to_string())?;
+        }
+
         let items: Vec<serde_json::Value> = mod_rows.into_iter().map(|r| {
             let mid = val_to_i64(&r[0]) as u64;
             let (like_count, is_liked) = likes_by_mod.get(&mid).copied().unwrap_or((0, false));
@@ -772,11 +808,12 @@ pub async fn db_list_my_mods(
                 "display_name": val_to_string(r[8].clone()),
                 "description": val_to_string(r[9].clone()),
                 "category": val_to_string(r[3].clone()),
-                "author_name": val_to_string(r[7].clone()),
+                "author_name": val_to_string(r[8].clone()),
                 "author_avatar": val_to_string(r[15].clone()),
                 "download_count": val_to_i64(&r[4]),
                 "like_count": like_count,
                 "is_liked": is_liked,
+                "comment_count": comment_counts.get(&mid).copied().unwrap_or(0),
                 "files": files_by_mod.remove(&mid).unwrap_or_default(),
                 "translations": trans_by_mod.remove(&mid).unwrap_or_default(),
                 "created_at": val_to_string(r[5].clone()),

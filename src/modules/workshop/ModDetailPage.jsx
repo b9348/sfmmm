@@ -48,6 +48,11 @@ const useStyles = makeStyles({
     display: 'flex',
     alignItems: 'center',
     gap: '8px',
+    position: 'sticky',
+    top: 0,
+    zIndex: 10,
+    backgroundColor: tokens.colorNeutralBackground1,
+    padding: '4px 0',
   },
   detailSection: {
     display: 'flex',
@@ -94,6 +99,19 @@ export default function ModDetailPage({ mod, onBack, onEdit, scrollToCommentId }
   const [likeCount, setLikeCount] = useState(mod.like_count || 0)
   const [isLiked, setIsLiked] = useState(!!mod.is_liked)
   const [likeBusy, setLikeBusy] = useState(false)
+
+  const onBackRef = useRef(onBack)
+  onBackRef.current = onBack
+  useEffect(() => {
+    const handleMouseUp = (e) => {
+      if (e.button === 3) {
+        e.preventDefault()
+        onBackRef.current()
+      }
+    }
+    window.addEventListener('mouseup', handleMouseUp)
+    return () => window.removeEventListener('mouseup', handleMouseUp)
+  }, [])
 
   const handleLikeToggle = async () => {
     if (likeBusy) return

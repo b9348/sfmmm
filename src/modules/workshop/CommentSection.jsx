@@ -631,14 +631,16 @@ export default function CommentSection({ modId, scrollToCommentId }) {
                       </div>
                     )}
 
-                    {/* 折叠回复 */}
-                    <div className={styles.loadMoreRow}>
-                      <Button size="small" appearance="outline" className={styles.replyActionBtn} onClick={() =>
-                        setReplyState(prev => ({ ...prev, [c.id]: { ...prev[c.id], expanded: false } }))
-                      }>
-                        {t('workshop.foldReplies')}
-                      </Button>
-                    </div>
+                    {/* 折叠回复 - 仅在回复数 > 2 时显示 */}
+                    {(c.reply_count || 0) > 2 && (
+                      <div className={styles.loadMoreRow}>
+                        <Button size="small" appearance="outline" className={styles.replyActionBtn} onClick={() =>
+                          setReplyState(prev => ({ ...prev, [c.id]: { ...prev[c.id], expanded: false } }))
+                        }>
+                          {t('workshop.foldReplies')}
+                        </Button>
+                      </div>
+                    )}
                   </div>
                 )}
                 {!isExpanded && c.reply_count > 0 && (

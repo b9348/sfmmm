@@ -8,10 +8,11 @@ import {
   ArrowClockwise24Regular,
   Search24Regular,
   Add24Regular,
-  Heart24Regular,
-  Heart24Filled,
+  HeartRegular,
+  HeartFilled,
   Add20Regular,
   Subtract20Regular,
+  CommentRegular,
 } from '@fluentui/react-icons'
 import { useTranslation } from 'react-i18next'
 import { listMods, getModDetail, getModForEdit, getDeviceId } from '../../services/workshopApi'
@@ -368,26 +369,35 @@ export function BrowseMods({ initialModId, initialCommentId }) {
                       <Text size="small" className={styles.meta} truncate>{mod.mod_key}</Text>
                     }
                     description={
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                        {mod.author_avatar ? (
-                          <img
-                            src={getAvatarUrl(mod.author_avatar)}
-                            alt=""
-                            style={{ width: '16px', height: '16px', borderRadius: '50%', flexShrink: 0 }}
-                          />
-                        ) : (
-                          <Avatar name={mod.author_name} size={16} />
-                        )}
-                        <Text size="small" className={styles.meta}>{mod.author_name}</Text>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          {mod.author_avatar ? (
+                            <img
+                              src={getAvatarUrl(mod.author_avatar)}
+                              alt=""
+                              style={{ width: '16px', height: '16px', borderRadius: '50%', flexShrink: 0 }}
+                            />
+                          ) : (
+                            <Avatar name={mod.author_name} size={16} />
+                          )}
+                          <Text size="small" className={styles.meta}>{mod.author_name}</Text>
+                        </div>
+                        <Text size="small" className={styles.meta}>
+                          {mod.updated_at && mod.updated_at !== mod.created_at ? mod.updated_at : mod.created_at}
+                        </Text>
                       </div>
                     }
                     action={
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
+                          <CommentRegular style={{ fontSize: '16px', color: tokens.colorNeutralForeground3 }} />
+                          <Text size="small">{mod.comment_count || 0}</Text>
+                        </div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '3px' }} title={mod.is_liked ? t('workshop.likedHint') : t('workshop.unlikedHint')}>
                           {mod.is_liked ? (
-                            <Heart24Filled style={{ color: tokens.colorPaletteRedForeground1, fontSize: '16px' }} />
+                            <HeartFilled style={{ color: tokens.colorPaletteRedForeground1, fontSize: '16px' }} />
                           ) : (
-                            <Heart24Regular style={{ fontSize: '16px', color: tokens.colorNeutralForeground3 }} />
+                            <HeartRegular style={{ fontSize: '16px', color: tokens.colorNeutralForeground3 }} />
                           )}
                           <Text size="small">{mod.like_count || 0}</Text>
                         </div>

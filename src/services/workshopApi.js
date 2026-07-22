@@ -42,12 +42,12 @@ export async function login(username, password) {
   }
 }
 
-export async function register(username, password) {
-  const res = await dbCall('db_register', { username, password })
+export async function register(username, password, avatar) {
+  const res = await dbCall('db_register', { username, password, avatar: avatar || null })
   return {
     success: true,
     message: res.message,
-    data: res.data, // { user_id, username }
+    data: res.data, // { user_id, username, avatar }
   }
 }
 
