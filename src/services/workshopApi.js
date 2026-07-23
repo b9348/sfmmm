@@ -332,6 +332,8 @@ export async function getComments({ mod_id, page = 1, page_size = 10 }) {
     success: true,
     comments: res.data?.comments || [],
     total: res.data?.total || 0,
+    // 评论总数（含楼中楼），列表页 comment_count 同口径，用于详情页标题
+    totalIncludingReplies: res.data?.total_including_replies || 0,
     page: res.data?.page || 1,
     page_size: res.data?.page_size || page_size,
   }

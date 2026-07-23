@@ -70,6 +70,8 @@ export default function CommentSection({ modId, scrollToCommentId }) {
   // 一楼分页
   const [comments, setComments] = useState([])
   const [total, setTotal] = useState(0)
+  // 评论总数（含楼中楼），列表页 comment_count 同口径，用于标题展示
+  const [commentTotal, setCommentTotal] = useState(0)
   const [page, setPage] = useState(1)
   const [loading, setLoading] = useState(false)
 
@@ -96,6 +98,9 @@ export default function CommentSection({ modId, scrollToCommentId }) {
       const data = await getComments({ mod_id: modId, page: p, page_size: 10 })
       setComments(data.comments)
       setTotal(data.total)
+      // 优先使用后端返回的全量计数（含楼中楼）；兜底用 一楼 + 各楼楼中楼之和
+      const fallback = data.total + (data.comments || []).reduce((s, c) => s + (c.reply_count || 0), 0)
+      setCommentTotal(data.totalIncludingReplies || fallback)
       setPage(data.page)
       setReplyState({})
       setReplyTo(null)
@@ -186,6 +191,7 @@ export default function CommentSection({ modId, scrollToCommentId }) {
         has_more: false,
       }, ...prev])
       setTotal(prev => prev + 1)
+      setCommentTotal(prev => prev + 1)
       setNewComment('')
     } catch (e) {
       alert(t('workshop.commentFailed') + e.message)
@@ -253,6 +259,7 @@ export default function CommentSection({ modId, scrollToCommentId }) {
         }
         return c
       }))
+      setCommentTotal(prev => prev + 1)
       setReplyState(prev => ({
         ...prev,
         [topId]: {
@@ -322,6 +329,8 @@ export default function CommentSection({ modId, scrollToCommentId }) {
       if (comments.some(c => c.id === commentId)) {
         setComments(prev => prev.filter(c => c.id !== commentId))
         setTotal(prev => Math.max(0, prev - 1))
+        // 删除一楼需同时减去其下所有楼中楼
+        setCommentTotal(prev => Math.max(0, prev - 1 - (topComment?.reply_count || 0)))
         setReplyState(prev => {
           const next = { ...prev }
           delete next[commentId]
@@ -338,10 +347,11 @@ export default function CommentSection({ modId, scrollToCommentId }) {
               has_more: (c.reply_count || 0) - 1 > 2,
             }
           }
-          return c
-        }))
-        // 同时清理 replyState 中已加载的
-        setReplyState(prev => {
+        return c
+      }))
+      setCommentTotal(prev => Math.max(0, prev - 1))
+      // 同时清理 replyState 中已加载的
+      setReplyState(prev => {
           const next = { ...prev }
           for (const key of Object.keys(next)) {
             if (next[key].replies?.some(r => r.id === commentId)) {
@@ -462,7 +472,7 @@ export default function CommentSection({ modId, scrollToCommentId }) {
   return (
     <div className={styles.root}>
       <Text weight="semibold" size={400} className={styles.title}>
-        {t('workshop.comment', { count: total })}
+        {t('workshop.comment', { count: commentTotal })}
       </Text>
 
       {/* ── 发表评论表单 ── */}

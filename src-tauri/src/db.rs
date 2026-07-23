@@ -1511,9 +1511,14 @@ pub async fn db_get_comments(
         let page_size = page_size.unwrap_or(10).min(100); // 默认 10 楼
         let offset = (page - 1) * page_size;
 
-        // 一楼总数
+        // 一楼总数（仅顶层评论，用于分页）
         let total: i64 = conn.exec_first(
             "SELECT COUNT(*) FROM mod_comments WHERE mod_id = ? AND parent_id IS NULL", (mod_id,)
+        ).map_err(|e| e.to_string())?.unwrap_or(0i64);
+
+        // 评论总数（含楼中楼），与列表页 comment_count 口径一致，用于详情页标题统计
+        let total_including_replies: i64 = conn.exec_first(
+            "SELECT COUNT(*) FROM mod_comments WHERE mod_id = ?", (mod_id,)
         ).map_err(|e| e.to_string())?.unwrap_or(0i64);
 
         // 查一楼（parent IS NULL）
@@ -1581,6 +1586,7 @@ pub async fn db_get_comments(
             data: Some(serde_json::json!({
                 "comments": items,
                 "total": total,
+                "total_including_replies": total_including_replies,
                 "page": page,
                 "page_size": page_size,
             })),
