@@ -6,9 +6,10 @@ import { ModList, SaveManagement, ImportExport, GameSettings, Workshop, MissionF
 import { AuthProvider } from './contexts/AuthContext.jsx'
 import { NotificationProvider } from './contexts/NotificationContext'
 import { usePersistUI } from './hooks/usePersistUI'
-import { getDb, getConfigs, setConfig } from './services/dbHelper'
+import { getConfigs, setConfig } from './services/dbHelper'
 import { checkVersion, applyUpdate } from './services/updateApi'
 import { uninstallMod } from './services/installMod'
+import { installExternalLinkInterceptor } from './utils/externalLinks'
 import { useTranslation } from 'react-i18next'
 import APP_VERSION from './version.js'
 import i18n from './i18n'
@@ -67,6 +68,11 @@ function App() {
   const { sidebarCollapsed, toggleSidebar } = usePersistUI()
   const [state, dispatch] = useReducer(appReducer, initialState)
   const [updateInfo, setUpdateInfo] = useState({ hasUpdate: false })
+
+  // 全局拦截外部链接点击：改用系统默认浏览器打开，避免 WebView 原地导航
+  useEffect(() => {
+    return installExternalLinkInterceptor()
+  }, [])
 
   // 启动时检测更新（仅提示，不自动安装）
   useEffect(() => {
