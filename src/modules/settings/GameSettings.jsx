@@ -22,6 +22,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { open as openDialog } from '@tauri-apps/plugin-dialog'
 import { open as openUrl } from '@tauri-apps/plugin-shell'
 import { getConfig, setConfig } from '../../services/dbHelper'
+import { Acknowledgments } from './Acknowledgments'
 import i18n from '../../i18n'
 import { checkVersion, prepareUpdate, applyUpdate } from '../../services/updateApi'
 import APP_VERSION from '../../version.js'
@@ -315,12 +316,14 @@ export function GameSettings({ config, onConfigChange }) {
             >
               {t('settings.openGitHub')}
             </Button>
-            <Text size="small" style={{ color: tokens.colorNeutralForeground3 }}>
-              https://github.com/b9348/sfmmm
-            </Text>
+          <Text size="small" style={{ color: tokens.colorNeutralForeground3 }}>
+            https://github.com/b9348/sfmmm
+          </Text>
           </div>
         </div>
       </Card>
+
+      <Acknowledgments />
     </div>
   )
 }

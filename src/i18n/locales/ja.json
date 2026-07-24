@@ -13,7 +13,6 @@
     "restore": "元に戻す",
     "close": "閉じる"
   },
-
   "nav": {
     "mods": "Mod",
     "v1": "v1",
@@ -29,7 +28,6 @@
     "expand": "サイドバーを展開",
     "logout": "ログアウト"
   },
-
   "profile": {
     "title": "プロフィール",
     "avatar": "アバターを選択",
@@ -39,7 +37,6 @@
     "saveSuccess": "保存しました",
     "saveFailed": "保存に失敗しました"
   },
-
   "welcome": {
     "gameDir": "ゲームディレクトリ",
     "selectFolder": "ゲームフォルダを選択",
@@ -52,7 +49,6 @@
     "language": "言語",
     "languageLabel": "表示言語"
   },
-
   "mods": {
     "searchPlaceholder": "Mod を検索",
     "scanning": "Mod ディレクトリをスキャン中",
@@ -97,7 +93,6 @@
     "downloadingBepInEx": "BepInEx をダウンロード中",
     "extractingBepInEx": "BepInEx を展開中..."
   },
-
   "saves": {
     "openFolder": "フォルダを開く",
     "createBackup": "バックアップを作成",
@@ -108,7 +103,6 @@
     "slot2": "セーブスロット 2 - 第5章",
     "slot3": "セーブスロット 3 - ボスラッシュ"
   },
-
   "importExport": {
     "export": "エクスポート",
     "exportDesc": "現在の Mod 設定をひとつのファイルにパッケージしてエクスポートします。",
@@ -123,7 +117,6 @@
     "recentExports": "最近のエクスポート",
     "download": "ダウンロード"
   },
-
   "settings": {
     "gamePath": "ゲームパス",
     "gameDir": "ゲームディレクトリ",
@@ -147,9 +140,17 @@
     "languageDesc": "アプリケーションの表示言語を選択します（再起動後に完全に反映されます）",
     "aboutTitle": "について",
     "aboutDesc": "Issue やフィードバックをお送りいただき、このツールの改善にご協力ください。",
-    "openGitHub": "GitHub リポジトリを開く"
+    "openGitHub": "GitHub リポジトリを開く",
+    "acknowledgments": {
+      "title": "謝辞",
+      "desc": "本プロジェクトへのご支援と投げ銭をいただいた皆様に感謝いたします：",
+      "items": [
+        "QQ 送金での 100 人民元の投げ銭をいただいた `Eiener` さんに感謝いたします",
+        "Bilibili ユーザー `捞鱼R` からの 6 プラットフォーム通貨の充電コメントに感謝いたします",
+        "Bilibili ユーザー `歪吐斯瑞儿` からの 6 プラットフォーム通貨の充電コメントに感謝いたします"
+      ]
+    }
   },
-
   "workshop": {
     "cloud": "クラウド",
     "mine": "マイ Mod",
@@ -335,13 +336,10 @@
     "likeCount": "{{count}} いいね",
     "likedHint": "いいね済み",
     "unlikedHint": "まだいいねしていません",
-    "prevPage": "前へ",
-    "nextPage": "次へ",
     "applyToEdit": "編集を申請",
     "applyReasonPlaceholder": "編集を申請する理由を入力してください...",
     "submit": "送信"
   },
-
   "editor": {
     "bold": "太字",
     "italic": "斜体",
@@ -365,7 +363,6 @@
     "inputPlaceholder": "内容を入力...",
     "markdownPlaceholder": "Markdown 内容を入力..."
   },
-
   "mission": {
     "folderEmpty": "フォルダは空です",
     "noGameDir": "ゲームディレクトリが設定されていません",

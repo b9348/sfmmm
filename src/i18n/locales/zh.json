@@ -13,7 +13,6 @@
     "restore": "还原",
     "close": "关闭"
   },
-
   "nav": {
     "mods": "模组",
     "v1": "v1",
@@ -29,7 +28,6 @@
     "expand": "展开侧边栏",
     "logout": "退出登录"
   },
-
   "profile": {
     "title": "个人资料",
     "avatar": "选择头像",
@@ -39,7 +37,6 @@
     "saveSuccess": "保存成功",
     "saveFailed": "保存失败"
   },
-
   "welcome": {
     "gameDir": "游戏目录",
     "selectFolder": "选择游戏文件夹",
@@ -52,7 +49,6 @@
     "language": "程序语言",
     "languageLabel": "界面语言"
   },
-
   "mods": {
     "searchPlaceholder": "搜索模组",
     "scanning": "正在扫描模组目录",
@@ -97,7 +93,6 @@
     "downloadingBepInEx": "正在下载 BepInEx",
     "extractingBepInEx": "正在解压 BepInEx..."
   },
-
   "saves": {
     "openFolder": "打开文件夹",
     "createBackup": "创建备份",
@@ -108,7 +103,6 @@
     "slot2": "存档位 2 - 第5章",
     "slot3": "存档位 3 - Boss rush"
   },
-
   "importExport": {
     "export": "导出",
     "exportDesc": "将当前的模组配置和设置打包导出为单个文件。",
@@ -123,7 +117,6 @@
     "recentExports": "最近导出",
     "download": "下载"
   },
-
   "settings": {
     "gamePath": "游戏路径",
     "gameDir": "游戏目录",
@@ -147,9 +140,17 @@
     "languageDesc": "选择应用程序的显示语言（保存后重启生效）",
     "aboutTitle": "关于",
     "aboutDesc": "欢迎提交 Issue 和反馈，帮助我们改进这个工具。",
-    "openGitHub": "打开 GitHub 仓库"
+    "openGitHub": "打开 GitHub 仓库",
+    "acknowledgments": {
+      "title": "感谢名单",
+      "desc": "感谢以下朋友对本项目的支持与打赏：",
+      "items": [
+        "感谢 `Eiener` 通过 QQ 转账打赏的 100 人民币",
+        "感谢 B站用户 `捞鱼R` 充电评论 6 贝币",
+        "感谢 B站用户 `歪吐斯瑞儿` 充电评论 6 贝币"
+      ]
+    }
   },
-
   "workshop": {
     "cloud": "云",
     "mine": "我的",
@@ -335,13 +336,10 @@
     "likeCount": "{{count}} 赞",
     "likedHint": "你已赞过",
     "unlikedHint": "尚未点赞",
-    "prevPage": "上一页",
-    "nextPage": "下一页",
     "applyToEdit": "申请编辑",
     "applyReasonPlaceholder": "请说明申请编辑的原因...",
     "submit": "提交"
   },
-
   "editor": {
     "bold": "粗体",
     "italic": "斜体",
@@ -365,7 +363,6 @@
     "inputPlaceholder": "输入内容...",
     "markdownPlaceholder": "输入 Markdown 内容..."
   },
-
   "mission": {
     "folderEmpty": "文件夹为空",
     "noGameDir": "尚未配置游戏目录",

@@ -13,7 +13,6 @@
     "restore": "Restore",
     "close": "Close"
   },
-
   "nav": {
     "mods": "Mods",
     "v1": "v1",
@@ -29,7 +28,6 @@
     "expand": "Expand sidebar",
     "logout": "Log out"
   },
-
   "profile": {
     "title": "Profile",
     "avatar": "Choose Avatar",
@@ -39,7 +37,6 @@
     "saveSuccess": "Saved successfully",
     "saveFailed": "Save failed"
   },
-
   "welcome": {
     "gameDir": "Game Directory",
     "selectFolder": "Select game folder",
@@ -52,7 +49,6 @@
     "language": "Language",
     "languageLabel": "Interface Language"
   },
-
   "mods": {
     "searchPlaceholder": "Search mods",
     "scanning": "Scanning mod directory",
@@ -97,7 +93,6 @@
     "downloadingBepInEx": "Downloading BepInEx",
     "extractingBepInEx": "Extracting BepInEx..."
   },
-
   "saves": {
     "openFolder": "Open folder",
     "createBackup": "Create backup",
@@ -108,7 +103,6 @@
     "slot2": "Slot 2 - Chapter 5",
     "slot3": "Slot 3 - Boss Rush"
   },
-
   "importExport": {
     "export": "Export",
     "exportDesc": "Package and export current mod configuration and settings as a single file.",
@@ -123,7 +117,6 @@
     "recentExports": "Recent exports",
     "download": "Download"
   },
-
   "settings": {
     "gamePath": "Game Path",
     "gameDir": "Game Directory",
@@ -147,9 +140,17 @@
     "languageDesc": "Select the display language (restart required to take full effect)",
     "aboutTitle": "About",
     "aboutDesc": "Feel free to submit issues and feedback to help us improve this tool.",
-    "openGitHub": "Open GitHub Repository"
+    "openGitHub": "Open GitHub Repository",
+    "acknowledgments": {
+      "title": "Acknowledgments",
+      "desc": "Thanks to the following friends for supporting and tipping this project:",
+      "items": [
+        "Thanks to `Eiener` for the 100 RMB tip via QQ transfer",
+        "Thanks to Bilibili user `捞鱼R` for the 6 platform currency charged comment",
+        "Thanks to Bilibili user `歪吐斯瑞儿` for the 6 platform currency charged comment"
+      ]
+    }
   },
-
   "workshop": {
     "cloud": "Cloud",
     "mine": "Mine",
@@ -335,13 +336,10 @@
     "likeCount": "{{count}} likes",
     "likedHint": "You liked this",
     "unlikedHint": "Not liked yet",
-    "prevPage": "Previous",
-    "nextPage": "Next",
     "applyToEdit": "Apply to edit",
     "applyReasonPlaceholder": "Please explain why you want to edit...",
     "submit": "Submit"
   },
-
   "editor": {
     "bold": "Bold",
     "italic": "Italic",
@@ -365,7 +363,6 @@
     "inputPlaceholder": "Type content...",
     "markdownPlaceholder": "Type Markdown content..."
   },
-
   "mission": {
     "folderEmpty": "Folder is empty",
     "noGameDir": "No game directory configured",
