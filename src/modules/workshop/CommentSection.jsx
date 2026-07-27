@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   Card, Text, Button, Spinner,
-  makeStyles, tokens, Avatar,
+  makeStyles, tokens,
 } from '@fluentui/react-components'
 import {
   Send24Regular, Delete24Regular, Edit24Regular,
@@ -11,11 +11,17 @@ import { addComment, getComments, getCommentReplies, deleteComment, editComment 
 import { resolvePendingImagesInMarkdown, stripPendingUrls, deleteImageFromImgbed, extractImgbedUrls } from '../../services/imageApi'
 import { useAuth } from '../../contexts/useAuth'
 import { MarkdownContent, MarkdownEditor } from '../../components/common/RichTextEditor'
-import { getAvatarUrl } from '../../utils/avatars'
-import { Pagination } from '../../components'
+import { Pagination, UserLink } from '../../components'
 
 const MAX_COMMENT_LENGTH = 3000
 const MAX_REPLY_LENGTH = 3000
+
+// 判断评论/回复是否属于当前登录用户：优先用稳定的 author_id，缺失时回退用户名比对
+function isOwnItem(item, user) {
+  if (!user?.user_id) return false
+  if (item?.author_id != null) return Number(item.author_id) === Number(user.user_id)
+  return item?.author_name === user.username
+}
 
 // 解析评论内容中的 pending 图片并上传
 async function resolveCommentImages(content, modId, commentId) {
@@ -185,6 +191,8 @@ export default function CommentSection({ modId, scrollToCommentId }) {
         id: commentId,
         content: resolvedContent,
         author_name: user.username,
+        author_avatar: user.avatar,
+        author_id: user.user_id,
         created_at: t('workshop.justNow'),
         replies: [],
         reply_count: 0,
@@ -246,6 +254,8 @@ export default function CommentSection({ modId, scrollToCommentId }) {
         id: replyId,
         content: resolvedContent,
         author_name: user.username,
+        author_avatar: user.avatar,
+        author_id: user.user_id,
         created_at: t('workshop.justNow'),
       }
       // 找到所属一楼，更新计数并把新回复追加到 rs.replies 末尾（保持正确顺序）
@@ -520,12 +530,14 @@ export default function CommentSection({ modId, scrollToCommentId }) {
               <Card key={c.id} id={`comment-${c.id}`} className={styles.commentItem}>
                 {/* ── 一楼头部 ── */}
                 <div className={styles.commentHeader}>
-                  <Avatar
-                    name={c.author_name}
+                  <UserLink
+                    userId={c.author_id}
+                    username={c.author_name}
+                    avatar={c.author_avatar}
                     size={20}
-                    image={c.author_avatar ? { src: getAvatarUrl(c.author_avatar) } : undefined}
+                    nameSize={200}
+                    nameBold
                   />
-                  <Text weight="semibold" size={200}>{c.author_name}</Text>
                   <Text className={styles.commentTime}>{c.created_at}</Text>
                 </div>
 
@@ -553,13 +565,13 @@ export default function CommentSection({ modId, scrollToCommentId }) {
                       {replyTo?.parentId === c.id ? t('workshop.cancelReply') : t('workshop.reply')}
                     </Button>
                   )}
-                  {user?.user_id && c.author_name === user.username && editingId !== c.id && (
+                  {isOwnItem(c, user) && editingId !== c.id && (
                     <Button size="small" appearance="subtle" icon={<Edit24Regular />} onClick={() => {
                       setEditingId(c.id)
                       setEditText(c.content)
                     }} />
                   )}
-                  {user?.user_id && c.author_name === user.username && (
+                  {isOwnItem(c, user) && (
                     <Button size="small" appearance="subtle" icon={<Delete24Regular />} onClick={() => handleDelete(c.id)} />
                   )}
                   {editingId === c.id && (
@@ -580,12 +592,14 @@ export default function CommentSection({ modId, scrollToCommentId }) {
                     {allReplies.map(r => (
                       <Card key={r.id} id={`reply-${r.id}`} className={styles.replyItem}>
                         <div className={styles.commentHeader}>
-                          <Avatar
-                            name={r.author_name}
+                          <UserLink
+                            userId={r.author_id}
+                            username={r.author_name}
+                            avatar={r.author_avatar}
                             size={16}
-                            image={r.author_avatar ? { src: getAvatarUrl(r.author_avatar) } : undefined}
+                            nameSize={200}
+                            nameBold
                           />
-                          <Text weight="semibold" size={200}>{r.author_name}</Text>
                           <Text className={styles.commentTime}>{r.created_at}</Text>
                         </div>
                         <div className={styles.commentContent}>
@@ -609,13 +623,13 @@ export default function CommentSection({ modId, scrollToCommentId }) {
                               {t('workshop.replyToUser', { name: r.author_name })}
                             </Button>
                           )}
-                          {user?.user_id && r.author_name === user.username && editingId !== r.id && (
+                          {isOwnItem(r, user) && editingId !== r.id && (
                             <Button size="small" appearance="subtle" icon={<Edit24Regular />} onClick={() => {
                               setEditingId(r.id)
                               setEditText(r.content)
                             }} />
                           )}
-                          {user?.user_id && r.author_name === user.username && (
+                          {isOwnItem(r, user) && (
                             <Button size="small" appearance="subtle" icon={<Delete24Regular />} onClick={() => handleDelete(r.id)} />
                           )}
                           {editingId === r.id && (
@@ -658,12 +672,14 @@ export default function CommentSection({ modId, scrollToCommentId }) {
                     {c.replies?.map(r => (
                       <Card key={r.id} id={`reply-${r.id}`} className={styles.replyItem}>
                         <div className={styles.commentHeader}>
-                          <Avatar
-                            name={r.author_name}
+                          <UserLink
+                            userId={r.author_id}
+                            username={r.author_name}
+                            avatar={r.author_avatar}
                             size={16}
-                            image={r.author_avatar ? { src: getAvatarUrl(r.author_avatar) } : undefined}
+                            nameSize={200}
+                            nameBold
                           />
-                          <Text weight="semibold" size={200}>{r.author_name}</Text>
                           <Text className={styles.commentTime}>{r.created_at}</Text>
                         </div>
                         <div className={styles.commentContent}>

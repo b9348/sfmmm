@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import {
   Card, CardHeader, Text, Button, SearchBox,
   Spinner, makeStyles, tokens, Badge,
-  Select, Avatar,
+  Select,
 } from '@fluentui/react-components'
 import {
   ArrowClockwise24Regular,
@@ -20,8 +20,7 @@ import ModDetailPage from './ModDetailPage'
 import { useAuth } from '../../contexts/useAuth'
 import { EditModPage, CreateModPage } from './MyMods'
 import { getConfig, setConfig } from '../../services/dbHelper'
-import { Pagination, AsyncView, LoginDialog, FloatingActions, FileRow, EmptyState } from '../../components'
-import { getAvatarUrl } from '../../utils/avatars'
+import { Pagination, AsyncView, LoginDialog, FloatingActions, FileRow, EmptyState, UserLink } from '../../components'
 
 const CATEGORIES = [
   { value: 'v1', label: 'v1' },
@@ -370,18 +369,13 @@ export function BrowseMods({ initialModId, initialCommentId }) {
                     }
                     description={
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                          {mod.author_avatar ? (
-                            <img
-                              src={getAvatarUrl(mod.author_avatar)}
-                              alt=""
-                              style={{ width: '16px', height: '16px', borderRadius: '50%', flexShrink: 0 }}
-                            />
-                          ) : (
-                            <Avatar name={mod.author_name} size={16} />
-                          )}
-                          <Text size="small" className={styles.meta}>{mod.author_name}</Text>
-                        </div>
+                        <UserLink
+                          userId={mod.author_id}
+                          username={mod.author_name}
+                          avatar={mod.author_avatar}
+                          size={16}
+                          nameSize={100}
+                        />
                         <Text size="small" className={styles.meta}>
                           {mod.updated_at && mod.updated_at !== mod.created_at ? mod.updated_at : mod.created_at}
                         </Text>

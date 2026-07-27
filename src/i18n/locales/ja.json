@@ -37,6 +37,19 @@
     "saveSuccess": "保存しました",
     "saveFailed": "保存に失敗しました"
   },
+  "userProfile": {
+    "title": "ユーザーページ",
+    "viewProfile": "プロフィールを見る",
+    "itsYou": "あなたです",
+    "editProfile": "プロフィール編集",
+    "modCount": "公開 MOD",
+    "totalDownloads": "総ダウンロード",
+    "totalLikes": "総いいね",
+    "myMods": "自分の MOD",
+    "userMods": "この人の MOD",
+    "noMods": "まだ MOD を公開していません",
+    "close": "閉じる"
+  },
   "welcome": {
     "gameDir": "ゲームディレクトリ",
     "selectFolder": "ゲームフォルダを選択",

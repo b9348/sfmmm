@@ -4,6 +4,7 @@ import { makeStyles, tokens } from '@fluentui/react-components'
 import { TabNavigation, WelcomeScreen, TitleBar } from './components'
 import { ModList, SaveManagement, ImportExport, GameSettings, Workshop, MissionFolder, ApplicationsPage } from './modules'
 import { AuthProvider } from './contexts/AuthContext.jsx'
+import { UserNavProvider } from './contexts/UserNavProvider.jsx'
 import { NotificationProvider } from './contexts/NotificationContext'
 import { usePersistUI } from './hooks/usePersistUI'
 import { getConfigs, setConfig } from './services/dbHelper'
@@ -218,6 +219,10 @@ function App() {
   return (
     <FluentProvider theme={webLightTheme}>
       <AuthProvider>
+        <UserNavProvider onOpenMod={(modId) => {
+          setNavTarget({ modId, commentId: null })
+          handleTabChange('workshop')
+        }}>
         <NotificationProvider>
           <div className={styles.root}>
           <TitleBar />
@@ -246,6 +251,7 @@ function App() {
           </div>
         </div>
         </NotificationProvider>
+        </UserNavProvider>
 
         <Dialog open={!!uninstallTarget} onOpenChange={(_, { open }) => !open && setUninstallTarget(null)}>
           <DialogSurface>

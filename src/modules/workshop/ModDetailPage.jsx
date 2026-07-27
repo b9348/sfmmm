@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
-  Text, Button, Badge, Avatar,
+  Text, Button, Badge,
   makeStyles, tokens,
   Dialog, DialogSurface, DialogBody, DialogTitle,
   DialogContent, DialogTrigger, DialogActions, Textarea, Select, Checkbox,
@@ -20,8 +20,7 @@ import { useAuth } from '../../contexts/useAuth'
 import { submitApplication, likeMod, unlikeMod, getDeviceId } from '../../services/workshopApi'
 import CommentSection from './CommentSection'
 import { getDb, getGamePath } from '../../services/dbHelper'
-import { BackButton, FloatingActions, FileRow } from '../../components'
-import { getAvatarUrl } from '../../utils/avatars'
+import { BackButton, FloatingActions, FileRow, UserLink } from '../../components'
 import { LANGUAGES, LANG_LABELS } from '../../i18n/languages'
 
 function compareSemver(a, b) {
@@ -345,12 +344,13 @@ export default function ModDetailPage({ mod, onBack, onEdit, scrollToCommentId }
       </div>
       <div className={styles.detailSection}>
         <div className={styles.authorRow}>
-          <Avatar
-            name={mod.author_name}
+          <UserLink
+            userId={mod.author_id}
+            username={mod.author_name}
+            avatar={mod.author_avatar}
             size={24}
-            image={mod.author_avatar ? { src: getAvatarUrl(mod.author_avatar) } : undefined}
+            nameSize={200}
           />
-          <Text size="small">{mod.author_name}</Text>
           {mod.category && (
             <Badge appearance="outline" size="small" style={{ whiteSpace: 'nowrap' }}>
               {t(`workshop.category_${mod.category}`)}

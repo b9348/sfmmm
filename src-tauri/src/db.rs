@@ -513,7 +513,7 @@ pub async fn db_list_mods(
                     COALESCE(mt_t.instructions_format, mt_en.instructions_format, 'markdown'),
                     COALESCE(mt_t.changelog, mt_en.changelog, ''),
                     CASE WHEN mt_t.name IS NOT NULL THEN ? WHEN mt_en.name IS NOT NULL THEN 'en' ELSE 'default' END,
-                    u.avatar
+                    u.avatar, u.id
              FROM mods m
              JOIN users u ON m.author_id = u.id
              LEFT JOIN mod_translations mt_t ON m.id = mt_t.mod_id AND mt_t.lang_code = ?
@@ -640,6 +640,7 @@ pub async fn db_list_mods(
                 "category": val_to_string(r[3].clone()),
                 "author_name": val_to_string(r[8].clone()),
                 "author_avatar": val_to_string(r[15].clone()),
+                "author_id": val_to_i64(&r[16]),
                 "download_count": val_to_i64(&r[4]),
                 "like_count": like_count,
                 "is_liked": is_liked,
@@ -687,7 +688,7 @@ pub async fn db_list_my_mods(
                     COALESCE(mt_t.instructions_format, mt_en.instructions_format, 'markdown'),
                     COALESCE(mt_t.changelog, mt_en.changelog, ''),
                     CASE WHEN mt_t.name IS NOT NULL THEN ? WHEN mt_en.name IS NOT NULL THEN 'en' ELSE 'default' END,
-                    u.avatar
+                    u.avatar, u.id
              FROM mods m
              JOIN users u ON m.author_id = u.id
              LEFT JOIN mod_translations mt_t ON m.id = mt_t.mod_id AND mt_t.lang_code = ?
@@ -810,6 +811,7 @@ pub async fn db_list_my_mods(
                 "category": val_to_string(r[3].clone()),
                 "author_name": val_to_string(r[8].clone()),
                 "author_avatar": val_to_string(r[15].clone()),
+                "author_id": val_to_i64(&r[16]),
                 "download_count": val_to_i64(&r[4]),
                 "like_count": like_count,
                 "is_liked": is_liked,
@@ -846,7 +848,7 @@ pub async fn db_get_mod_detail(
                     COALESCE(mt_t.instructions_format, mt_en.instructions_format, 'markdown'),
                     COALESCE(mt_t.changelog, mt_en.changelog, ''),
                     CASE WHEN mt_t.name IS NOT NULL THEN ? WHEN mt_en.name IS NOT NULL THEN 'en' ELSE 'default' END,
-                    u.avatar
+                    u.avatar, u.id
              FROM mods m
              JOIN users u ON m.author_id = u.id
              LEFT JOIN mod_translations mt_t ON m.id = mt_t.mod_id AND mt_t.lang_code = ?
@@ -932,6 +934,7 @@ pub async fn db_get_mod_detail(
                         "category": val_to_string(vals[3].clone()),
                         "author_name": val_to_string(vals[8].clone()),
                         "author_avatar": val_to_string(vals[15].clone()),
+                        "author_id": val_to_i64(&vals[16]),
                         "download_count": val_to_i64(&vals[4]),
                         "like_count": like_count,
                         "is_liked": is_liked,
@@ -1524,7 +1527,7 @@ pub async fn db_get_comments(
         // 查一楼（parent IS NULL）
         let mut top_rows: Vec<Vec<Value>> = Vec::new();
         conn.exec_map(
-            "SELECT c.id, c.content, c.created_at, u.username, u.avatar
+            "SELECT c.id, c.content, c.created_at, u.username, u.avatar, c.author_id
              FROM mod_comments c
              JOIN users u ON c.author_id = u.id
              WHERE c.mod_id = ? AND c.parent_id IS NULL
@@ -1546,7 +1549,7 @@ pub async fn db_get_comments(
             // 前 2 条回复
             let mut reply_rows: Vec<Vec<Value>> = Vec::new();
             conn.exec_map(
-                "SELECT c.id, c.content, c.created_at, u.username, u.avatar
+                "SELECT c.id, c.content, c.created_at, u.username, u.avatar, c.author_id
                  FROM mod_comments c
                  JOIN users u ON c.author_id = u.id
                  WHERE c.parent_id = ?
@@ -1563,6 +1566,7 @@ pub async fn db_get_comments(
                     "created_at": val_to_string(rr[2].clone()),
                     "author_name": val_to_string(rr[3].clone()),
                     "author_avatar": val_to_string(rr[4].clone()),
+                    "author_id": val_to_i64(&rr[5]),
                 })
             }).collect();
 
@@ -1572,6 +1576,7 @@ pub async fn db_get_comments(
                 "created_at": val_to_string(r[2].clone()),
                 "author_name": val_to_string(r[3].clone()),
                 "author_avatar": val_to_string(r[4].clone()),
+                "author_id": val_to_i64(&r[5]),
                 "replies": replies,
                 "reply_count": reply_count,
                 "has_more": reply_count > 2,
@@ -1623,7 +1628,7 @@ pub async fn db_get_replies(
 
         let mut rows: Vec<Vec<Value>> = Vec::new();
         conn.exec_map(
-            "SELECT c.id, c.content, c.created_at, u.username, u.avatar
+            "SELECT c.id, c.content, c.created_at, u.username, u.avatar, c.author_id
              FROM mod_comments c
              JOIN users u ON c.author_id = u.id
              WHERE c.parent_id = ?
@@ -1640,6 +1645,7 @@ pub async fn db_get_replies(
                 "created_at": val_to_string(r[2].clone()),
                 "author_name": val_to_string(r[3].clone()),
                 "author_avatar": val_to_string(r[4].clone()),
+                "author_id": val_to_i64(&r[5]),
             })
         }).collect();
 
@@ -2275,7 +2281,7 @@ pub async fn db_get_my_notifications(
         let mut rows: Vec<Vec<Value>> = Vec::new();
         conn.exec_map(
             "SELECT n.id, n.mod_id, m.mod_id as mod_key, n.type, n.comment_id, n.is_read, n.created_at,
-                    c.content as comment_content, u.username as comment_author, u.avatar as comment_author_avatar
+                    c.content as comment_content, u.username as comment_author, u.avatar as comment_author_avatar, c.author_id
              FROM mod_notifications n
              JOIN mods m ON n.mod_id = m.id
              LEFT JOIN mod_comments c ON n.comment_id = c.id
@@ -2299,6 +2305,7 @@ pub async fn db_get_my_notifications(
                 "content": val_to_string(r[7].clone()),
                 "author_name": val_to_string(r[8].clone()),
                 "author_avatar": val_to_string(r[9].clone()),
+                "author_id": val_to_i64(&r[10]),
             })
         }).collect();
 
@@ -2364,5 +2371,57 @@ pub async fn db_mark_read(
         }
 
         Ok(ApiResponse::ok_msg("Marked as read"))
+    }).await.map_err(|e| e.to_string())?
+}
+
+/// 查询任意用户的公开资料（用户名/头像 + MOD 数/总下载/总获赞）
+#[tauri::command(rename_all = "snake_case")]
+pub async fn db_get_user_public_profile(
+    state: tauri::State<'_, DbState>,
+    user_id: u64,
+) -> Result<ApiResponse, String> {
+    let pool = state.pool.clone();
+    tokio::task::spawn_blocking(move || {
+        let mut conn = pool.get_conn().map_err(|e| e.to_string())?;
+
+        let row: Option<Row> = conn.exec_first(
+            "SELECT id, username, avatar FROM users WHERE id = ?",
+            (user_id,),
+        ).map_err(|e| e.to_string())?;
+
+        match row {
+            Some(row_data) => {
+                let vals: Vec<Value> = row_data.unwrap();
+
+                // 聚合统计：MOD 数、总下载量
+                let stat_row: Option<(i64, Option<i64>)> = conn.exec_first(
+                    "SELECT COUNT(*), SUM(download_count) FROM mods WHERE author_id = ?",
+                    (user_id,),
+                ).map_err(|e| e.to_string())?;
+                let (mod_count, total_downloads) = match stat_row {
+                    Some((cnt, Some(dl))) => (cnt, dl),
+                    Some((cnt, None)) => (cnt, 0),
+                    None => (0, 0),
+                };
+
+                // 总获赞：以 mod_likes 实表口径统计
+                let total_likes: i64 = conn.exec_first(
+                    "SELECT COUNT(*) FROM mod_likes WHERE mod_id IN (SELECT id FROM mods WHERE author_id = ?)",
+                    (user_id,),
+                ).map_err(|e| e.to_string())?.unwrap_or(0i64);
+
+                Ok(ApiResponse::ok_val(serde_json::json!({
+                    "user": {
+                        "user_id": val_to_i64(&vals[0]),
+                        "username": val_to_string(vals[1].clone()),
+                        "avatar": val_to_string(vals[2].clone()),
+                        "mod_count": mod_count,
+                        "total_downloads": total_downloads,
+                        "total_likes": total_likes,
+                    }
+                }), "OK"))
+            }
+            None => Ok(ApiResponse::err("User not found")),
+        }
     }).await.map_err(|e| e.to_string())?
 }

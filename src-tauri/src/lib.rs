@@ -934,6 +934,7 @@ pub fn run() {
             db::db_get_unread_count,
             db::db_get_my_notifications,
             db::db_mark_read,
+            db::db_get_user_public_profile,
         ])
         .plugin(
             Builder::default()

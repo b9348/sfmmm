@@ -5,7 +5,6 @@ import {
   makeStyles,
   tokens,
   Button,
-  Avatar,
   Tooltip,
   Menu,
   MenuTrigger,
@@ -13,7 +12,6 @@ import {
   MenuItem,
   MenuPopover,
   Divider,
-  Text,
 } from '@fluentui/react-components'
 import {
   BoxMultiple24Regular,
@@ -26,11 +24,11 @@ import {
   PersonAccounts24Regular,
   Folder24Regular,
   DocumentFolder24Regular,
+  MoreHorizontal20Regular,
 } from '@fluentui/react-icons'
 import { useAuth } from '../../contexts/useAuth'
 import { useNotification } from '../../contexts/NotificationContext'
-import { LoginDialog, ProfileDialog } from '../../components'
-import { getAvatarUrl } from '../../utils/avatars'
+import { LoginDialog, ProfileDialog, UserLink } from '../../components'
 
 const useStyles = makeStyles({
   sidebar: {
@@ -80,42 +78,25 @@ const useStyles = makeStyles({
     padding: '12px 8px',
     alignItems: 'flex-start',
   },
-  userInfo: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '10px',
-    padding: '6px 8px',
-    borderRadius: '6px',
-    cursor: 'pointer',
-    transition: 'background-color 0.2s ease',
-    '&:hover': {
-      backgroundColor: tokens.colorNeutralBackgroundHover,
-    },
-  },
   userInfoCollapsed: {
     padding: '6px 8px',
     justifyContent: 'flex-start',
   },
-  userDetails: {
+  userRow: {
     display: 'flex',
+    alignItems: 'center',
+    gap: '4px',
+    minWidth: 0,
+  },
+  userRowCollapsed: {
     flexDirection: 'column',
-    overflow: 'hidden',
+    alignItems: 'flex-start',
+    gap: '6px',
+  },
+  userLinkWrap: {
     flex: 1,
-  },
-  userName: {
-    fontSize: '13px',
-    fontWeight: '600',
-    color: tokens.colorNeutralForeground1,
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-  },
-  userEmail: {
-    fontSize: '11px',
-    color: tokens.colorNeutralForeground2,
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
+    minWidth: 0,
+    display: 'flex',
   },
   authButtons: {
     display: 'flex',
@@ -296,50 +277,43 @@ export function TabNavigation({ value, onChange, isCollapsed, onToggleCollapse, 
         }`}
       >
         {isLoggedIn ? (
-          <Menu>
-            <MenuTrigger disableButtonEnhancement>
-              <div
-                className={`${styles.userInfo} ${
-                  isCollapsed ? styles.userInfoCollapsed : ''
-                }`}
-              >
-                {user?.avatar ? (
-                  <img
-                    src={getAvatarUrl(user.avatar)}
-                    alt=""
-                    style={{
-                      width: isCollapsed ? '28px' : '32px',
-                      height: isCollapsed ? '28px' : '32px',
-                      borderRadius: '50%',
-                      flexShrink: 0,
-                    }}
-                  />
-                ) : (
-                  <Avatar
-                    name={user?.username || ''}
-                    size={isCollapsed ? 28 : 32}
-                    color="brand"
-                  />
-                )}
-                {!isCollapsed && (
-                  <div className={styles.userDetails}>
-                    <span className={styles.userName}>{user?.username || ''}</span>
-                    {user?.email && <span className={styles.userEmail}>{user.email}</span>}
-                  </div>
-                )}
+          <div className={`${styles.userRow} ${isCollapsed ? styles.userRowCollapsed : ''}`}>
+            {/* 头像/用户名 → 打开本人个人页面 */}
+            <Tooltip content={t('userProfile.viewProfile')} relationship="label">
+              <div className={styles.userLinkWrap}>
+                <UserLink
+                  userId={user?.user_id}
+                  username={user?.username || ''}
+                  avatar={user?.avatar}
+                  size={isCollapsed ? 28 : 32}
+                  showName={!isCollapsed}
+                  secondary={!isCollapsed ? user?.email : null}
+                  nameSize={200}
+                  nameBold
+                />
               </div>
-            </MenuTrigger>
-            <MenuPopover>
-              <MenuList>
-                <MenuItem icon={<PersonAccounts24Regular />}>{t('nav.account')}</MenuItem>
-                <MenuItem icon={<Person24Regular />} onClick={() => setProfileOpen(true)}>{t('nav.profile')}</MenuItem>
-                <Divider />
-                <MenuItem icon={<SignOut24Regular />} onClick={handleLogout}>
-                  {t('nav.logout')}
-                </MenuItem>
-              </MenuList>
-            </MenuPopover>
-          </Menu>
+            </Tooltip>
+            {/* 账号操作 → 独立「更多」菜单（折叠态同样可用） */}
+            <Menu>
+              <MenuTrigger disableButtonEnhancement>
+                <Button
+                  appearance="subtle"
+                  size="small"
+                  icon={<MoreHorizontal20Regular />}
+                  aria-label={t('nav.account')}
+                />
+              </MenuTrigger>
+              <MenuPopover>
+                <MenuList>
+                  <MenuItem icon={<Person24Regular />} onClick={() => setProfileOpen(true)}>{t('nav.profile')}</MenuItem>
+                  <Divider />
+                  <MenuItem icon={<SignOut24Regular />} onClick={handleLogout}>
+                    {t('nav.logout')}
+                  </MenuItem>
+                </MenuList>
+              </MenuPopover>
+            </Menu>
+          </div>
         ) : (
           <div
             className={`${styles.authButtons} ${

@@ -37,6 +37,19 @@
     "saveSuccess": "Saved successfully",
     "saveFailed": "Save failed"
   },
+  "userProfile": {
+    "title": "User Profile",
+    "viewProfile": "View profile",
+    "itsYou": "It's you",
+    "editProfile": "Edit Profile",
+    "modCount": "MODs",
+    "totalDownloads": "Downloads",
+    "totalLikes": "Likes",
+    "myMods": "My MODs",
+    "userMods": "Their MODs",
+    "noMods": "No MODs published yet",
+    "close": "Close"
+  },
   "welcome": {
     "gameDir": "Game Directory",
     "selectFolder": "Select game folder",

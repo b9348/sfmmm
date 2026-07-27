@@ -51,9 +51,13 @@ export async function register(username, password, avatar) {
   }
 }
 
-export async function getUserProfile() {
-  // 桌面端不需要额外的 profile 查询，从本地 auth 上下文即可
-  return { success: true, data: {} }
+/**
+ * 查询任意用户的公开资料
+ * @returns {Promise<{user_id, username, avatar, mod_count, total_downloads, total_likes}>}
+ */
+export async function getUserPublicProfile(userId) {
+  const res = await dbCall('db_get_user_public_profile', { user_id: Number(userId) })
+  return res.data?.user || null
 }
 
 export async function updateProfile({ user_id, avatar, username }) {

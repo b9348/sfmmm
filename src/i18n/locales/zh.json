@@ -37,6 +37,19 @@
     "saveSuccess": "保存成功",
     "saveFailed": "保存失败"
   },
+  "userProfile": {
+    "title": "用户主页",
+    "viewProfile": "查看个人主页",
+    "itsYou": "这是你",
+    "editProfile": "编辑资料",
+    "modCount": "发布的 MOD",
+    "totalDownloads": "总下载",
+    "totalLikes": "总获赞",
+    "myMods": "我发布的 MOD",
+    "userMods": "TA 发布的 MOD",
+    "noMods": "还没有发布过 MOD",
+    "close": "关闭"
+  },
   "welcome": {
     "gameDir": "游戏目录",
     "selectFolder": "选择游戏文件夹",
