@@ -82,9 +82,10 @@ const useStyles = makeStyles({
   },
   modItem: {
     display: 'flex',
-    alignItems: 'center',
-    gap: '8px',
-    padding: '8px 10px',
+    flexDirection: 'column',
+    alignItems: 'stretch',
+    gap: '4px',
+    padding: '10px 12px',
     border: 'none',
     width: '100%',
     textAlign: 'left',
@@ -97,13 +98,45 @@ const useStyles = makeStyles({
       backgroundColor: tokens.colorNeutralBackground2Hover,
     },
   },
+  modItemTop: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: '8px',
+  },
   modName: {
-    flex: 1,
     minWidth: 0,
     whiteSpace: 'nowrap',
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     color: tokens.colorNeutralForeground1,
+  },
+  modKey: {
+    fontFamily: 'monospace',
+    fontSize: '11px',
+    color: tokens.colorNeutralForeground3,
+    whiteSpace: 'nowrap',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+  },
+  modDesc: {
+    display: '-webkit-box',
+    WebkitLineClamp: 2,
+    WebkitBoxOrient: 'vertical',
+    overflow: 'hidden',
+    fontSize: '12px',
+    lineHeight: '18px',
+    color: tokens.colorNeutralForeground2,
+  },
+  modTag: {
+    flexShrink: 0,
+    whiteSpace: 'nowrap',
+  },
+  modItemStats: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '14px',
+    marginTop: '2px',
   },
   modStat: {
     display: 'inline-flex',
@@ -196,7 +229,7 @@ export function UserProfileDialog({ open, target, onClose, onOpenMod }) {
   return (
     <>
       <Dialog open={open} onOpenChange={(_, d) => { if (!d.open) onClose?.() }}>
-        <DialogSurface style={{ maxWidth: '440px' }}>
+        <DialogSurface style={{ maxWidth: '600px' }}>
           <DialogBody>
             <DialogTitle>{t('userProfile.title')}</DialogTitle>
             <DialogContent>
@@ -253,20 +286,28 @@ export function UserProfileDialog({ open, target, onClose, onOpenMod }) {
                       type="button"
                       className={styles.modItem}
                       onClick={() => handleModClick(mod.id)}
-                      title={mod.display_name}
+                      title={`${mod.display_name} (${mod.mod_key})`}
                     >
-                      <Text size={200} className={styles.modName}>{mod.display_name}</Text>
-                      <Badge appearance="outline" size="small">
-                        {mod.category
-                          ? t(`workshop.category_${mod.category}`, mod.category)
-                          : t('workshop.uncategorized')}
-                      </Badge>
-                      <span className={styles.modStat}>
-                        <ArrowDownload16Regular /> {mod.download_count ?? 0}
-                      </span>
-                      <span className={styles.modStat}>
-                        <Heart16Regular /> {mod.like_count ?? 0}
-                      </span>
+                      <div className={styles.modItemTop}>
+                        <Text size={300} weight="semibold" className={styles.modName}>{mod.display_name}</Text>
+                        <Badge appearance="outline" size="small" className={styles.modTag}>
+                          {mod.category
+                            ? t(`workshop.category_${mod.category}`, mod.category)
+                            : t('workshop.uncategorized')}
+                        </Badge>
+                      </div>
+                      <Text size={100} className={styles.modKey}>{mod.mod_key}</Text>
+                      {mod.description && (
+                        <Text size={200} className={styles.modDesc}>{mod.description}</Text>
+                      )}
+                      <div className={styles.modItemStats}>
+                        <span className={styles.modStat}>
+                          <ArrowDownload16Regular /> {mod.download_count ?? 0}
+                        </span>
+                        <span className={styles.modStat}>
+                          <Heart16Regular /> {mod.like_count ?? 0}
+                        </span>
+                      </div>
                     </button>
                   ))}
                 </div>
