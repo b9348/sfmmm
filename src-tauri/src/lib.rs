@@ -331,13 +331,39 @@ fn missing_bepinex_core_files(game_path: &PathBuf) -> Vec<String> {
         .collect()
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 fn open_folder(path: String, selected_items: Option<Vec<String>>) -> Result<(), String> {
-    let path = PathBuf::from(path);
+    let input_path = PathBuf::from(path);
+    let mut items = selected_items.unwrap_or_default();
 
-    if !path.is_dir() {
-        return Err("游戏目录不存在".into());
-    }
+    // selected_items 为空 => 前端要“打开该路径本身”：
+    //   - 路径是目录 → 直接打开该目录（钻入），不高亮子项；
+    //   - 路径是文件 → 在其父目录中高亮该文件（is_dir 误判时回退父目录，单文件场景安全）。
+    // selected_items 非空 => 前端已保证 input_path 就是要打开的目录（currentDir / 已安装 mod
+    //   目录），直接打开该目录并高亮 items 列出的全部条目，绝不回退到父目录——
+    //   否则 junction 目录（如 v1 的 CustomMissions）会被 std::fs::is_dir() 误判为假，导致
+    //   “打开游戏根目录 + 高亮该目录”的错位。SHParseDisplayName 会跟随符号链接/目录交接点解析。
+    // 前端无需自行判定目录/文件，“打开哪个目录”由 input_path + items 是否为空唯一决定。
+    let open_path = if items.is_empty() {
+        if input_path.is_dir() {
+            input_path.clone()
+        } else {
+            // 单文件：在其父目录中高亮该文件
+            if let Some(name) = input_path.file_name().and_then(|n| n.to_str()) {
+                items.push(name.to_string());
+            }
+            input_path.parent().map(|p| p.to_path_buf()).unwrap_or_else(|| input_path.clone())
+        }
+    } else {
+        // items 非空：前端已保证 input_path 就是要打开的目录（如 currentDir / 已安装 mod 目录）。
+        // 直接打开该目录并高亮全部 items，绝不回退到父目录——否则 junction 目录（如 v1 的
+        // CustomMissions）会被 std::fs::is_dir() 误判为假，导致“打开游戏根目录 + 高亮该目录”的错位。
+        // 依赖 SHParseDisplayName 跟随符号链接/目录交接点解析（与单文件夹钻入走同一可靠路径）。
+        input_path.clone()
+    };
+
+    // 不再用 is_dir() 提前 return：符号链接 / 交接点下 is_dir() 可能误判为假，直接交给
+    // SHParseDisplayName 解析，解析成功即打开（见下方 Windows 分支的 HRESULT 判定）。
 
     #[cfg(target_os = "windows")]
     {
@@ -382,7 +408,7 @@ fn open_folder(path: String, selected_items: Option<Vec<String>>) -> Result<(), 
             let _ = CoInitializeEx(std::ptr::null_mut(), COINIT_APARTMENTTHREADED);
         }
 
-        let path_str = path.to_string_lossy().to_string();
+        let path_str = open_path.to_string_lossy().to_string();
         let folder_wide = to_wide(&path_str);
         let mut folder_pidl: LPITEMIDLIST = std::ptr::null_mut();
         let hr = unsafe {
@@ -392,18 +418,20 @@ fn open_folder(path: String, selected_items: Option<Vec<String>>) -> Result<(), 
             return Err(format!("解析目录失败: 0x{:08X}", hr));
         }
 
+        // apidl 传入每个条目的绝对 PIDL（SHParseDisplayName 解析其完整路径）。官方示例
+        // （ILCreateFromPath 生成绝对 PIDL 多选）与 Windows 资源管理器实际行为一致：会打开
+        // pidlFolder 并高亮这些条目；对符号链接/目录交接点(junction) 子项也稳定，故不转换为
+        // 相对 PIDL（ILFindChild 对 junction 子项会返回 null，反而导致高亮丢失）。
         let mut item_pidls: Vec<LPITEMIDLIST> = Vec::new();
-        if let Some(items) = selected_items {
-            for item in items {
-                let item_path = path.join(&item);
-                let item_wide = to_wide(&item_path.to_string_lossy());
-                let mut item_pidl: LPITEMIDLIST = std::ptr::null_mut();
-                let hr = unsafe {
-                    SHParseDisplayName(item_wide.as_ptr(), std::ptr::null_mut(), &mut item_pidl, 0, std::ptr::null_mut())
-                };
-                if hr >= 0 && !item_pidl.is_null() {
-                    item_pidls.push(item_pidl);
-                }
+        for item in &items {
+            let item_path = open_path.join(item);
+            let item_wide = to_wide(&item_path.to_string_lossy());
+            let mut item_pidl: LPITEMIDLIST = std::ptr::null_mut();
+            let hr = unsafe {
+                SHParseDisplayName(item_wide.as_ptr(), std::ptr::null_mut(), &mut item_pidl, 0, std::ptr::null_mut())
+            };
+            if hr >= 0 && !item_pidl.is_null() {
+                item_pidls.push(item_pidl);
             }
         }
 
@@ -430,13 +458,13 @@ fn open_folder(path: String, selected_items: Option<Vec<String>>) -> Result<(), 
 
     #[cfg(target_os = "macos")]
     std::process::Command::new("open")
-        .arg(path)
+        .arg(open_path)
         .spawn()
         .map_err(|e| e.to_string())?;
 
     #[cfg(target_os = "linux")]
     std::process::Command::new("xdg-open")
-        .arg(path)
+        .arg(open_path)
         .spawn()
         .map_err(|e| e.to_string())?;
 
@@ -902,6 +930,12 @@ pub fn run() {
             );",
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 7,
+            description: "add_file_hashes_to_installed_workshop_mods",
+            sql: "ALTER TABLE installed_workshop_mods ADD COLUMN file_hashes TEXT DEFAULT '';",
+            kind: MigrationKind::Up,
+        },
     ];
 
     tauri::Builder::default()
@@ -924,6 +958,8 @@ pub fn run() {
             db::db_add_comment, db::db_get_comments, db::db_get_replies, db::db_edit_comment, db::db_delete_comment,
             db::db_like_mod, db::db_unlike_mod,
             db::db_check_updates,
+            db::db_preflight_mod,
+            db::db_set_mod_file_hashes,
             db::db_prepare_update,
             db::db_apply_update,
             // 权限系统

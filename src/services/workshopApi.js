@@ -4,6 +4,7 @@
  */
 
 import { invoke } from '@tauri-apps/api/core'
+import JSZip from 'jszip'
 
 // ── 错误辅助 ──
 
@@ -107,9 +108,10 @@ export async function listMods({ lang = 'zh', search, page = 1, limit = 20, sort
   }
 }
 
-export async function getModDetail(id, lang = 'zh', user_id, device_id) {
+export async function getModDetail(id, lang = 'zh', user_id, device_id, modKey = null) {
   const res = await dbCall('db_get_mod_detail', {
-    id: Number(id),
+    id: Number(id) || 0,
+    mod_key: modKey || null,
     lang,
     user_id: user_id || null,
     device_id: device_id || null,
@@ -199,7 +201,7 @@ export async function checkModKey(mod_key) {
 // ── 文件上传（直传 ImgBed，然后存 URL 到 MySQL） ──
 
 export async function getImgbedConfig() {
-  return await invoke('db_get_imgbed_config')
+  return (await invoke('db_get_imgbed_config')).data
 }
 
 const TELEGRAM_MAX_SIZE = 20 * 1024 * 1024 // 20MB
@@ -272,6 +274,8 @@ export async function uploadModFile({ author_id, mod_id, lang_code, version, fil
 
   // 3. 计算文件哈希（浏览器端）
   const fileHash = await computeFileHash(file)
+  // 3.1 计算逐文件指纹（用于预检/补全；失败则留空由后端惰性补全）
+  const fileHashes = await computeZipFileHashes(file)
 
   // 4. 保存 URL 到 MySQL
   await dbCall('db_save_mod_file', {
@@ -284,6 +288,7 @@ export async function uploadModFile({ author_id, mod_id, lang_code, version, fil
     file_hash: fileHash,
     version: version || '1.0.0',
     manifest: manifest || null,
+    file_hashes: fileHashes,
   })
 
   return {
@@ -294,6 +299,7 @@ export async function uploadModFile({ author_id, mod_id, lang_code, version, fil
       file_name: file.name,
       file_size: file.size,
       file_hash: fileHash,
+      file_hashes: fileHashes,
       version: version || '1.0.0',
       manifest: manifest || null,
       reused: false,
@@ -408,4 +414,51 @@ async function computeFileHash(file) {
   } catch {
     return ''
   }
+}
+
+// 计算 zip 内每个文件的 SHA-256，返回 { basename(小写): hash } 的 JSON 字符串。
+// 与后端 db_preflight_mod 的比对键一致（按文件名归一并小写），从而保证
+// 上传/回填时写入云端的逐文件指纹，与安装后本地文件系统（含递归展开的嵌套 zip）比对口径相同。
+// 关键：嵌套 zip 递归展开其内文件（与 installMod 的解压行为一致），而非跳过，
+// 否则含嵌套包的 mod（如多包一层的 v1）在预检时会误报差异。
+export async function computeZipFileHashes(file) {
+  try {
+    const zip = await JSZip.loadAsync(file)
+    const map = {}
+    await hashZipEntries(zip, map, 0)
+    return JSON.stringify(map)
+  } catch {
+    return null
+  }
+}
+
+// 递归遍历 zip 条目：普通文件算哈希（按 basename 小写归一键）；
+// 嵌套 .zip 继续展开其內容（深度上限防止畸形包无限递归）。
+// 注意：嵌套 zip 自身不入 map（与 installMod 解压一致——嵌套包不落盘为文件）。
+async function hashZipEntries(zip, map, depth) {
+  if (depth > 6) return
+  const entries = Object.keys(zip.files)
+  for (const path of entries) {
+    const entry = zip.files[path]
+    if (entry.dir) continue
+    if (path.toLowerCase().endsWith('.zip')) {
+      try {
+        const data = await entry.async('uint8array')
+        const inner = await JSZip.loadAsync(data)
+        await hashZipEntries(inner, map, depth + 1)
+      } catch {
+        // 嵌套 zip 无法解析时跳过，不阻断整体哈希
+      }
+      continue
+    }
+    const content = await entry.async('uint8array')
+    const hash = await sha256Bytes(content)
+    const key = path.split('/').pop().toLowerCase()
+    map[key] = hash
+  }
+}
+
+async function sha256Bytes(bytes) {
+  const buf = await crypto.subtle.digest('SHA-256', bytes)
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('')
 }

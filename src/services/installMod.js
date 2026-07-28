@@ -1,6 +1,8 @@
 import { writeFile, mkdir, exists, remove } from '@tauri-apps/plugin-fs'
+import { invoke } from '@tauri-apps/api/core'
 import JSZip from 'jszip'
 import { getGamePath, getDb } from './dbHelper'
+import { computeZipFileHashes } from './workshopApi'
 
 const IMGBED_URL = 'https://img.b9349.dpdns.org'
 
@@ -68,68 +70,104 @@ export async function installMod({ modKey, category, fileUrl, version, fileHash,
     await mkdir(targetDir, { recursive: true })
   }
 
-  const entries = []
   const extractedFiles = []
-  const dirEntries = []
-  zip.forEach((path, entry) => {
-    if (entry.dir) {
-      dirEntries.push({ path, entry })
-    } else {
-      entries.push({ path, entry })
-    }
-  })
 
-  // 先处理目录条目：mkdir 空文件夹（含选择时本身就是空文件夹的情况）
-  for (const { path } of dirEntries) {
-    if (category === 'dll') {
-      // DLL 不保留目录结构，跳过
-      continue
-    }
-    const safeRel = safeZipPath(path.replace(/\/+$/, ''))
-    const normalizedPath = safeRel.replace(/\//g, '\\')
-    const dirPath = `${targetDir}\\${normalizedPath}`
-    try {
-      if (!await exists(dirPath)) {
-        await mkdir(dirPath, { recursive: true })
+  /**
+   * 递归解压：zip 内若嵌套了 .zip（常见于作者上传时多包了一层），
+   * 继续展开其內容到同一目标目录（dll 类平铺到 plugins 根），
+   * 不保留该 zip 自身文件名这一层，从而把真正的 mod 文件部署到位。
+   */
+  const extractAll = async (z) => {
+    const dirEntries = []
+    const fileEntries = []
+    z.forEach((path, entry) => {
+      if (entry.dir) {
+        dirEntries.push({ path, entry })
+      } else {
+        fileEntries.push({ path, entry })
       }
-    } catch (e) {
-      console.warn(`[installMod] 创建目录失败: ${dirPath}`, e)
-    }
-  }
+    })
 
-  let fileCount = 0
-  for (const { path, entry } of entries) {
-    let targetPath
-
-    if (category === 'dll') {
-      // DLL 模组：文件直接放在 plugins 根目录
-      // 取文件名（去掉 zip 内目录层级）
-      const fileName = path.split('/').pop() || path
-      targetPath = `${pluginsDir}\\${fileName}`
-      extractedFiles.push(fileName)
-    } else {
-      // 安全检查（拒绝 zip slip）
-      const safeRel = safeZipPath(path)
-      const normalizedPath = safeRel.replace(/\//g, '\\')
-      targetPath = `${targetDir}\\${normalizedPath}`
-      extractedFiles.push(safeRel)
-      const lastSlash = targetPath.lastIndexOf('\\')
-      if (lastSlash > 0) {
-        const dirPath = targetPath.substring(0, lastSlash)
-        const subDirExists = await exists(dirPath)
-        if (!subDirExists) {
+    // 先创建目录条目（含空文件夹）
+    for (const { path } of dirEntries) {
+      if (category === 'dll') continue // DLL 不保留目录结构
+      const safeRel = safeZipPath(path.replace(/\/+$/, ''))
+      const dirPath = `${targetDir}\\${safeRel.replace(/\//g, '\\')}`
+      try {
+        if (!await exists(dirPath)) {
           await mkdir(dirPath, { recursive: true })
         }
+      } catch (e) {
+        console.warn(`[installMod] 创建目录失败: ${dirPath}`, e)
       }
     }
 
-    const data = await entry.async('uint8array')
-    await writeFile(targetPath, data)
-    fileCount++
+    for (const { path, entry } of fileEntries) {
+      const data = await entry.async('uint8array')
+
+      // 嵌套 zip：递归展开，不写出该 zip 文件本身
+      if (path.toLowerCase().endsWith('.zip')) {
+        try {
+          const innerZip = await JSZip.loadAsync(data)
+          await extractAll(innerZip)
+          continue
+        } catch (e) {
+          console.warn(`[installMod] 嵌套 zip 解析失败，按普通文件写出: ${path}`, e)
+        }
+      }
+
+      let targetPath
+      if (category === 'dll') {
+        // DLL 模组：取文件名平铺到 plugins 根目录
+        const fileName = path.split('/').pop() || path
+        targetPath = `${pluginsDir}\\${fileName}`
+        extractedFiles.push(fileName)
+      } else {
+        // 安全检查（拒绝 zip slip）
+        const safeRel = safeZipPath(path)
+        const normalizedPath = safeRel.replace(/\//g, '\\')
+        targetPath = `${targetDir}\\${normalizedPath}`
+        extractedFiles.push(safeRel)
+        const lastSlash = targetPath.lastIndexOf('\\')
+        if (lastSlash > 0) {
+          const dirPath = targetPath.substring(0, lastSlash)
+          const subDirExists = await exists(dirPath)
+          if (!subDirExists) {
+            await mkdir(dirPath, { recursive: true })
+          }
+        }
+      }
+
+      await writeFile(targetPath, data)
+    }
   }
 
-  // 如果没有传入 manifest，从 zip 提取的文件列表生成
-  const finalManifest = manifest || JSON.stringify(extractedFiles)
+  await extractAll(zip)
+
+  // 后端回填：把本 mod 的逐文件指纹（与上传者 computeZipFileHashes、预检 compute_local_hashes 同一 basename 口径，
+  // 含嵌套 zip 递归展开）写回云端 mod_files.file_hashes。始终以官方 zip 算出的规范指纹覆盖（幂等），
+  // 使旧的非递归（缺内包文件）指纹也能在安装时被升级为精确指纹。失败仅告警，绝不阻断安装流程。
+  let fileHashes = null
+  try {
+    fileHashes = await computeZipFileHashes(arrayBuffer)
+    if (fileHashes) {
+      await invoke('db_set_mod_file_hashes', {
+        mod_key: modKey,
+        lang_code: langCode || '',
+        file_hashes: fileHashes,
+      })
+    }
+  } catch (e) {
+    console.warn('[installMod] 回填云端逐文件指纹失败（可忽略）:', e)
+  }
+
+  const fileCount = extractedFiles.length
+
+  // 安装清单以“实际解出的文件”为准（含嵌套 zip 展开后的文件），
+  // 这样卸载时能精确删掉真正部署的文件。
+  const finalManifest = extractedFiles.length > 0
+    ? JSON.stringify(extractedFiles)
+    : (manifest || '[]')
 
   // 保存安装记录到本地 SQLite，用于侧边栏展示"创意工坊"标签
   try {
@@ -138,13 +176,13 @@ export async function installMod({ modKey, category, fileUrl, version, fileHash,
     const existing = await db.select('SELECT id FROM installed_workshop_mods WHERE mod_key = $1', [modKey])
     if (existing.length > 0) {
       await db.execute(
-        'UPDATE installed_workshop_mods SET category = $1, installed_version = $2, file_hash = $3, lang_code = $4, manifest = $5 WHERE mod_key = $6',
-        [category, version || '1.0.0', fileHash || '', langCode || '', finalManifest, modKey]
+        'UPDATE installed_workshop_mods SET category = $1, installed_version = $2, file_hash = $3, lang_code = $4, manifest = $5, file_hashes = $6 WHERE mod_key = $7',
+        [category, version || '1.0.0', fileHash || '', langCode || '', finalManifest, fileHashes || '', modKey]
       )
     } else {
       await db.execute(
-        'INSERT INTO installed_workshop_mods (mod_key, category, installed_version, file_hash, lang_code, manifest) VALUES ($1, $2, $3, $4, $5, $6)',
-        [modKey, category, version || '1.0.0', fileHash || '', langCode || '', finalManifest]
+        'INSERT INTO installed_workshop_mods (mod_key, category, installed_version, file_hash, lang_code, manifest, file_hashes) VALUES ($1, $2, $3, $4, $5, $6, $7)',
+        [modKey, category, version || '1.0.0', fileHash || '', langCode || '', finalManifest, fileHashes || '']
       )
     }
     // 按语言保存安装记录，用于判断是否需要更新
@@ -162,7 +200,7 @@ export async function installMod({ modKey, category, fileUrl, version, fileHash,
     console.warn('[installMod] 保存安装记录失败:', e)
   }
 
-  return { targetDir, fileCount }
+  return { targetDir, fileCount, files: extractedFiles }
 }
 
 export async function uninstallMod({ modKey }) {

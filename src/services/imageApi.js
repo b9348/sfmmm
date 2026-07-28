@@ -154,7 +154,7 @@ export async function resolvePendingUrlForPreview(url) {
 
 // 上传单个图片到图床
 export async function uploadImageToImgbed({ file, folder, description = '' }) {
-  const imgbed = await invoke('db_get_imgbed_config')
+  const imgbed = (await invoke('db_get_imgbed_config')).data
   const formData = new FormData()
 
   // 重命名文件：保留原文件名，前面加唯一 ID 避免冲突
@@ -204,7 +204,7 @@ export async function uploadImageToImgbed({ file, folder, description = '' }) {
 // 删除图床图片
 export async function deleteImageFromImgbed(fileUrl) {
   if (!fileUrl) return { success: false }
-  const imgbed = await invoke('db_get_imgbed_config')
+  const imgbed = (await invoke('db_get_imgbed_config')).data
   const deleteUrl = `${imgbed.url}/delete?fileUrl=${encodeURIComponent(fileUrl)}`
   const res = await fetch(deleteUrl, {
     method: 'DELETE',

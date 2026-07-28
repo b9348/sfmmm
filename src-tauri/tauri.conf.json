@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "sfmmm",
-  "version": "0.1.54",
+  "version": "0.1.55",
   "identifier": "com.sfmmm.app",
   "build": {
     "frontendDist": "../dist",

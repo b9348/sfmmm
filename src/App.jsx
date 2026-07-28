@@ -2,7 +2,7 @@ import { useState, useEffect, useReducer } from 'react'
 import { FluentProvider, webLightTheme, Dialog, DialogSurface, DialogBody, DialogTitle, DialogContent, DialogActions, DialogTrigger, Button, Text } from '@fluentui/react-components'
 import { makeStyles, tokens } from '@fluentui/react-components'
 import { TabNavigation, WelcomeScreen, TitleBar } from './components'
-import { ModList, SaveManagement, ImportExport, GameSettings, Workshop, MissionFolder, ApplicationsPage } from './modules'
+import { SaveManagement, ImportExport, GameSettings, Workshop, MissionFolder, ApplicationsPage } from './modules'
 import { AuthProvider } from './contexts/AuthContext.jsx'
 import { UserNavProvider } from './contexts/UserNavProvider.jsx'
 import { NotificationProvider } from './contexts/NotificationContext'
@@ -236,12 +236,12 @@ function App() {
              onNavigateToSettings={() => handleTabChange('settings')}
            />
             <main className={styles.tabContent}>
-              {selectedTab === 'mods' && <ModList key={modListKey} config={state.config} onUninstall={handleUninstallMod} />}
+              {selectedTab === 'mods' && <MissionFolder key={`mods-${state.config?.game_path || ''}-${modListKey}`} config={state.config} subfolder="BepInEx/plugins" onUninstall={handleUninstallMod} />}
               {selectedTab === 'v1' && <MissionFolder key={`v1-${state.config?.game_path || ''}`} config={state.config} subfolder="CustomMissions" onUninstall={handleUninstallMod} />}
               {selectedTab === 'v2' && <MissionFolder key={`v2-${state.config?.game_path || ''}`} config={state.config} subfolder="CustomMissions2" onUninstall={handleUninstallMod} />}
               {selectedTab === 'saves' && <SaveManagement config={state.config} />}
               {selectedTab === 'import-export' && <ImportExport config={state.config} />}
-              {selectedTab === 'workshop' && <Workshop initialModId={navTarget?.modId} initialCommentId={navTarget?.commentId} />}
+              {selectedTab === 'workshop' && <Workshop initialModId={navTarget?.modId} initialCommentId={navTarget?.commentId} onConsumeNavTarget={() => setNavTarget(null)} />}
               {selectedTab === 'apply' && <ApplicationsPage onNavigate={(modId, commentId) => {
                 setNavTarget({ modId, commentId })
                 handleTabChange('workshop')

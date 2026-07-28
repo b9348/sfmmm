@@ -2,7 +2,10 @@ use mysql::prelude::*;
 use mysql::*;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
+use std::collections::{BTreeSet, HashMap};
+use std::io::Read;
 use std::io::Write;
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -830,6 +833,7 @@ pub async fn db_list_my_mods(
 pub async fn db_get_mod_detail(
     state: tauri::State<'_, DbState>,
     id: u64,
+    mod_key: Option<String>,
     lang: Option<String>,
     user_id: Option<u64>,
     device_id: Option<String>,
@@ -853,17 +857,18 @@ pub async fn db_get_mod_detail(
              JOIN users u ON m.author_id = u.id
              LEFT JOIN mod_translations mt_t ON m.id = mt_t.mod_id AND mt_t.lang_code = ?
              LEFT JOIN mod_translations mt_en ON m.id = mt_en.mod_id AND mt_en.lang_code = 'en'
-             WHERE m.id = ?",
-            (lang.clone(), lang.clone(), id),
+             WHERE (m.id = ? OR m.mod_id = ?)",
+            (lang.clone(), lang.clone(), id, mod_key.clone().unwrap_or_default()),
         ).map_err(|e| e.to_string())?;
 
         match row {
             Some(row_data) => {
                 let vals: Vec<Value> = row_data.unwrap();
+                let mid = val_to_i64(&vals[0]) as u64;
                 // 查文件
                 let mut files: Vec<serde_json::Value> = Vec::new();
                 conn.exec_map(
-                    "SELECT lang_code, file_url, file_name, file_size, file_hash, version, created_at, manifest FROM mod_files WHERE mod_id = ?", (id,),
+                    "SELECT lang_code, file_url, file_name, file_size, file_hash, version, created_at, manifest FROM mod_files WHERE mod_id = ?", (mid,),
                     |row: Row| {
                         let r: Vec<Value> = row.unwrap();
                         files.push(serde_json::json!({
@@ -879,7 +884,6 @@ pub async fn db_get_mod_detail(
                     }
                 ).map_err(|e| e.to_string())?;
 
-                let mid = val_to_i64(&vals[0]) as u64;
                 // SELECT 列索引：0 id, 1 mod_id, 2 version, 3 category, 4 download_count, 5 like_count,
                 // 6 created_at, 7 updated_at, 8 username, 9 display_name, 10 description,
                 // 11 instructions, 12 instructions_format, 13 changelog, 14 language
@@ -1274,6 +1278,7 @@ pub async fn db_save_mod_file(
     file_hash: String,
     version: Option<String>,
     manifest: Option<String>,
+    file_hashes: Option<String>,
 ) -> Result<ApiResponse, String> {
     let pool = state.pool.clone();
     tokio::task::spawn_blocking(move || {
@@ -1293,6 +1298,9 @@ pub async fn db_save_mod_file(
             return Ok(ApiResponse::err("You don't have permission to upload files for this language"));
         }
 
+        // 确保 file_hashes 列存在（旧库兼容）
+        ensure_mod_files_file_hashes_column(&mut conn)?;
+
         // UPSERT
         let existing: Option<(u64,)> = conn.exec_first(
             "SELECT id FROM mod_files WHERE mod_id = ? AND lang_code = ?",
@@ -1301,13 +1309,13 @@ pub async fn db_save_mod_file(
 
         if existing.is_some() {
             conn.exec_drop(
-                "UPDATE mod_files SET file_url = ?, file_name = ?, file_size = ?, file_hash = ?, version = ?, manifest = ? WHERE mod_id = ? AND lang_code = ?",
-                (&file_url, &file_name, file_size, &file_hash, &ver, &manifest, mod_id, &lang_code),
+                "UPDATE mod_files SET file_url = ?, file_name = ?, file_size = ?, file_hash = ?, version = ?, manifest = ?, file_hashes = ? WHERE mod_id = ? AND lang_code = ?",
+                (&file_url, &file_name, file_size, &file_hash, &ver, &manifest, &file_hashes, mod_id, &lang_code),
             ).map_err(|e| e.to_string())?;
         } else {
             conn.exec_drop(
-                "INSERT INTO mod_files (mod_id, lang_code, file_url, file_name, file_size, file_hash, version, manifest) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                (mod_id, &lang_code, &file_url, &file_name, file_size, &file_hash, &ver, &manifest),
+                "INSERT INTO mod_files (mod_id, lang_code, file_url, file_name, file_size, file_hash, version, manifest, file_hashes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (mod_id, &lang_code, &file_url, &file_name, file_size, &file_hash, &ver, &manifest, &file_hashes),
             ).map_err(|e| e.to_string())?;
         }
 
@@ -1319,6 +1327,7 @@ pub async fn db_save_mod_file(
             "file_hash": file_hash,
             "version": ver,
             "manifest": manifest,
+            "file_hashes": file_hashes,
         }), "File saved"))
     }).await.map_err(|e| e.to_string())?
 }
@@ -1751,22 +1760,38 @@ pub async fn db_check_updates(
 
             if mod_key.is_empty() { continue; }
 
-            // 从 mod_translations 表获取对应语言的最新版本
-            let latest: Option<(String,)> = conn.exec_first(
-                "SELECT t.version FROM mod_translations t JOIN mods m ON t.mod_id = m.id WHERE m.mod_id = ? AND t.lang_code = ? ORDER BY t.id DESC LIMIT 1",
-                (mod_key, lang_code),
+            // 取云端的版本、mod 名称（对应语言翻译）、文件哈希，用于前端对比
+            let row: Option<Row> = conn.exec_first(
+                "SELECT t.version, t.name, f.file_hash
+                 FROM mods m
+                 LEFT JOIN mod_translations t ON t.mod_id = m.id AND t.lang_code = ?
+                 LEFT JOIN mod_files f ON f.mod_id = m.id AND f.lang_code = ?
+                 WHERE m.mod_id = ?
+                 ORDER BY t.id DESC LIMIT 1",
+                (lang_code, lang_code, mod_key),
             ).map_err(|e| e.to_string())?;
 
-            let latest_ver = latest.map(|v| v.0).unwrap_or_default();
+            let (latest_ver, display_name, latest_file_hash) = match row {
+                Some(r) => {
+                    let vals: Vec<Value> = r.unwrap();
+                    (
+                        val_to_string(vals[0].clone()),
+                        val_to_string(vals[1].clone()),
+                        val_to_string(vals[2].clone()),
+                    )
+                }
+                None => (String::new(), String::new(), String::new()),
+            };
             let has_update = !latest_ver.is_empty() && semver_cmp(&latest_ver, &installed_ver) > 0;
 
-            if has_update {
-                results.push(serde_json::json!({
-                    "mod_key": mod_key,
-                    "installed_version": installed_ver,
-                    "latest_version": latest_ver,
-                }));
-            }
+            results.push(serde_json::json!({
+                "mod_key": mod_key,
+                "installed_version": installed_ver,
+                "latest_version": latest_ver,
+                "display_name": display_name,
+                "latest_file_hash": latest_file_hash,
+                "has_update": has_update,
+            }));
         }
 
         Ok(ApiResponse::ok_val(serde_json::json!({
@@ -1775,17 +1800,281 @@ pub async fn db_check_updates(
     }).await.map_err(|e| e.to_string())?
 }
 
+// ── 预检 / 惰性补全辅助 ──────────────────────────────────────
+
+/// 幂等确保 mod_files 含 file_hashes 列（兼容旧库）。
+/// 已存在时忽略 "Duplicate column" 错误；其余错误向上传播。
+fn ensure_mod_files_file_hashes_column<C: Queryable>(conn: &mut C) -> Result<(), String> {
+    match conn.exec_drop("ALTER TABLE mod_files ADD COLUMN file_hashes TEXT NULL", ()) {
+        Ok(_) => Ok(()),
+        Err(e) => {
+            let msg = e.to_string();
+            if msg.to_lowercase().contains("duplicate column") {
+                Ok(())
+            } else {
+                Err(format!("无法确保 mod_files.file_hashes 列: {}", msg))
+            }
+        }
+    }
+}
+
+/// 字节流 SHA-256 十六进制串
+fn sha256_hex(data: &[u8]) -> String {
+    hex::encode(Sha256::digest(data))
+}
+
+/// 规范化比对键：取 basename、转小写（去除目录与大小写差异）。
+/// 对 dll 等平铺部署尤为重要；对 v1/v2/composite 亦能跨打包风格稳定比对。
+fn basename_key(path: &str) -> String {
+    let p = path.replace('\\', "/");
+    let name = p.rsplit('/').next().unwrap_or(&p);
+    name.to_lowercase()
+}
+
+/// 递归遍历 local_dir，对每个文件计算 SHA-256，返回 basename(小写)->hash。
+/// 若 local_dir 自身为文件，则只哈希该文件（用于 dll 等单文件场景）。
+fn compute_local_hashes(local_dir: &str) -> HashMap<String, String> {
+    let mut map: HashMap<String, String> = HashMap::new();
+    let path = Path::new(local_dir);
+    if path.is_file() {
+        if let Ok(mut f) = std::fs::File::open(path) {
+            let mut buf = Vec::new();
+            if f.read_to_end(&mut buf).is_ok() {
+                map.insert(basename_key(local_dir), sha256_hex(&buf));
+            }
+        }
+        return map;
+    }
+    if !path.is_dir() {
+        return map;
+    }
+    let mut stack = vec![path.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let entries = match std::fs::read_dir(&dir) {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+        for entry in entries.flatten() {
+            let p = entry.path();
+            if p.is_dir() {
+                stack.push(p);
+            } else if p.is_file() {
+                if let Ok(mut f) = std::fs::File::open(&p) {
+                    let mut buf = Vec::new();
+                    if f.read_to_end(&mut buf).is_ok() {
+                        map.insert(basename_key(&p.to_string_lossy()), sha256_hex(&buf));
+                    }
+                }
+            }
+        }
+    }
+    map
+}
+
+/// 解析云端 file_hashes JSON（可能为 NULL / 空串），非法时回落空 map。
+fn parse_file_hashes_opt(raw: Option<String>) -> HashMap<String, String> {
+    match raw {
+        Some(s) if !s.trim().is_empty() => serde_json::from_str::<HashMap<String, String>>(&s).unwrap_or_default(),
+        _ => HashMap::new(),
+    }
+}
+
+/// 查询云端某 mod 语言版本的逐文件指纹（file_hashes 列）。
+/// 自动确保 file_hashes 列存在（兼容旧库）。返回 JSON 字符串或 None。
+async fn fetch_cloud_file_hashes(
+    pool: ManagedPool,
+    mod_key: &str,
+    lang_code: &str,
+) -> Result<Option<String>, String> {
+    let mk = mod_key.to_string();
+    let lc = lang_code.to_string();
+    tokio::task::spawn_blocking(move || -> Result<Option<String>, String> {
+        let mut conn = pool.get_conn()?;
+        ensure_mod_files_file_hashes_column(&mut conn)?;
+        let row: Option<(Option<String>,)> = conn.exec_first(
+            "SELECT f.file_hashes
+             FROM mod_files f
+             JOIN mods m ON m.id = f.mod_id
+             WHERE m.mod_id = ? AND f.lang_code = ?
+             ORDER BY f.id DESC LIMIT 1",
+            (&mk, &lc),
+        ).map_err(|e| e.to_string())?;
+        Ok(row.and_then(|(h,)| h))
+    }).await.map_err(|e| e.to_string())?
+}
+
+/// 预检某已安装 mod 的本地文件指纹是否与云端一致。
+/// 返回 match / diffs / collision / needs_backfill / used_local_cache 等供前端展示。
+/// 短路优化：当 has_update=false（版本未变）且调用方已带入本地缓存的
+/// 逐文件指纹 local_file_hashes 时，直接用本地缓存比对，跳过云端查询。
 #[tauri::command(rename_all = "snake_case")]
-pub async fn db_get_imgbed_config() -> Result<serde_json::Value, String> {
-    Ok(serde_json::json!({
+pub async fn db_preflight_mod(
+    state: tauri::State<'_, DbState>,
+    mod_key: String,
+    lang_code: String,
+    local_dir: String,
+    category: String,
+    local_file_hashes: Option<String>,
+    has_update: bool,
+) -> Result<ApiResponse, String> {
+    let pool = state.pool.clone();
+
+    // 1) 本地指纹（始终需要，遍历安装目录）
+    let local_map = compute_local_hashes(&local_dir);
+
+    // 2) 确定比对基准（云端逐文件指纹）：
+    //    - 版本未变(has_update=false) 且 本地已缓存逐文件指纹 -> 直接用本地缓存，跳过云端查询
+    //    - 否则（版本已变 / 本地无缓存）-> 查询云端 mod_files.file_hashes
+    let (cloud_map, used_local_cache) = if !has_update {
+        match &local_file_hashes {
+            Some(s) if !s.trim().is_empty() => {
+                (serde_json::from_str::<HashMap<String, String>>(s).unwrap_or_default(), true)
+            }
+            _ => {
+                let raw = fetch_cloud_file_hashes(pool.clone(), &mod_key, &lang_code).await?;
+                (parse_file_hashes_opt(raw), false)
+            }
+        }
+    } else {
+        let raw = fetch_cloud_file_hashes(pool.clone(), &mod_key, &lang_code).await?;
+        (parse_file_hashes_opt(raw), false)
+    };
+
+    let needs_backfill = cloud_map.is_empty();
+    if needs_backfill {
+        return Ok(ApiResponse::ok_val(serde_json::json!({
+            "match": false,
+            "local_count": local_map.len(),
+            "cloud_count": 0,
+            "diffs": [],
+            "collision": false,
+            "needs_backfill": true,
+            "used_local_cache": used_local_cache,
+            "category": category,
+            "extra_file": false,
+            "missing_file": false,
+        }), "preflight_needs_backfill"));
+    }
+
+    // 4) 逐文件比对
+    let mut diffs: Vec<serde_json::Value> = Vec::new();
+    let mut extra_file = false;   // 本地多出（云端无）→ 可能是其它 mod 撞车
+    let mut missing_file = false; // 云端有、本地缺 → 安装不全
+    let mut mismatch = false;     // 同名不同哈希 → 被覆盖/篡改
+    let mut keys: BTreeSet<String> = BTreeSet::new();
+    keys.extend(local_map.keys().cloned());
+    keys.extend(cloud_map.keys().cloned());
+    for k in keys {
+        let lh = local_map.get(&k).cloned();
+        let ch = cloud_map.get(&k).cloned();
+        match (lh, ch) {
+            (Some(l), Some(c)) => {
+                if l != c {
+                    mismatch = true;
+                    diffs.push(serde_json::json!({
+                        "path": k,
+                        "kind": "mismatch",
+                        "local_hash": l,
+                        "cloud_hash": c,
+                    }));
+                }
+            }
+            (Some(l), None) => {
+                extra_file = true;
+                diffs.push(serde_json::json!({
+                    "path": k,
+                    "kind": "missing_cloud",
+                    "local_hash": l,
+                    "cloud_hash": null,
+                }));
+            }
+            (None, Some(c)) => {
+                missing_file = true;
+                diffs.push(serde_json::json!({
+                    "path": k,
+                    "kind": "missing_local",
+                    "local_hash": null,
+                    "cloud_hash": c,
+                }));
+            }
+            (None, None) => {}
+        }
+    }
+
+    let is_match = diffs.is_empty();
+    // 撞车：本地多出文件（被其它 mod 覆盖）或哈希不一致
+    let collision = extra_file || mismatch;
+
+    Ok(ApiResponse::ok_val(serde_json::json!({
+        "match": is_match,
+        "local_count": local_map.len(),
+        "cloud_count": cloud_map.len(),
+        "diffs": diffs,
+        "collision": collision,
+        "needs_backfill": false,
+        "used_local_cache": used_local_cache,
+        "category": category,
+        "extra_file": extra_file,
+        "missing_file": missing_file,
+    }), "OK"))
+}
+
+/// 订阅者安装后，将本地算出的逐文件指纹回填到云端 mod_files.file_hashes。
+/// 始终以官方 zip 算出的规范（递归后）指纹覆盖对应语言行（幂等）：
+/// 移除 IS NULL 限制，使已上传过、但用旧非递归口径（缺内包文件）的 mod
+/// 也能在安装时被升级为包含内包文件的精确指纹，嵌套 zip mod 预检不再误报。
+/// file_hashes 须为 { basename(小写): hash } 的 JSON 字符串，
+/// 与 db_preflight_mod 的 compute_local_hashes / 上传时的 computeZipFileHashes 口径一致。
+#[tauri::command(rename_all = "snake_case")]
+pub async fn db_set_mod_file_hashes(
+    state: tauri::State<'_, DbState>,
+    mod_key: String,
+    lang_code: String,
+    file_hashes: String,
+) -> Result<ApiResponse, String> {
+    // 校验为合法的 basename->hash 映射，避免写入垃圾
+    let parsed: HashMap<String, String> = match serde_json::from_str::<HashMap<String, String>>(&file_hashes) {
+        Ok(m) if !m.is_empty() => m,
+        _ => return Ok(ApiResponse::err("file_hashes 格式无效或为空")),
+    };
+    let json = match serde_json::to_string(&parsed) {
+        Ok(s) => s,
+        Err(e) => return Err(format!("序列化失败: {e}")),
+    };
+
+    let pool = state.pool.clone();
+    let mk = mod_key.clone();
+    let lc = lang_code.clone();
+    let (updated,) = tokio::task::spawn_blocking(move || -> Result<(u64,), String> {
+        let mut conn = pool.get_conn()?;
+        ensure_mod_files_file_hashes_column(&mut conn)?;
+        // 始终以官方 zip 算出的规范（递归后）指纹覆盖对应语言行：
+        // 移除 IS NULL 限制，使已上传过、但用旧非递归口径（缺内包文件）的 mod
+        // 也能在安装时被升级为包含内包文件的精确指纹，嵌套 zip mod 预检不再误报。
+        conn.exec_drop(
+            "UPDATE mod_files f JOIN mods m ON m.id = f.mod_id
+             SET f.file_hashes = ?
+             WHERE m.mod_id = ? AND f.lang_code = ?",
+            (&json, &mk, &lc),
+        ).map_err(|e| e.to_string())?;
+        Ok((conn.affected_rows(),))
+    }).await.map_err(|e| e.to_string())??;
+
+    Ok(ApiResponse::ok_val(serde_json::json!({ "updated": updated > 0 }), "OK"))
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn db_get_imgbed_config() -> Result<ApiResponse, String> {
+    Ok(ApiResponse::ok_val(serde_json::json!({
         "url": "https://img.b9349.dpdns.org",
         "token": "imgbed_07c42496787100e0d269df984f727561fdeb01064a469ad78580c1b651cd571c"
-    }))
+    }), "OK"))
 }
 
 #[tauri::command(rename_all = "snake_case")]
 pub async fn db_delete_imgbed_file(file_url: String) -> Result<ApiResponse, String> {
-    let config = db_get_imgbed_config().await?;
+    let config = db_get_imgbed_config().await?.data
+        .ok_or("imgbed config missing")?;
     let url = config["url"].as_str().ok_or("imgbed url missing")?;
     let token = config["token"].as_str().ok_or("imgbed token missing")?;
 

@@ -3,13 +3,20 @@ import { invoke } from '@tauri-apps/api/core'
 import { getDb } from '../services/dbHelper'
 
 /**
- * 读取本地已安装的创意工坊模组，检测是否有更新
- * @returns {{ installed: Set<string>, updates: Map<string, string>, modDetails: Map<string, object>, loading: boolean }}
+ * 读取本地已安装的创意工坊模组，检测是否有更新 / 来源冲突
+ * @returns {{
+ *   installed: Set<string>,
+ *   updates: Map<string, string>,
+ *   modDetails: Map<string, object>,
+ *   cloudInfo: Map<string, { displayName?: string, latestVersion: string, latestFileHash?: string, hasUpdate: boolean }>,
+ *   loading: boolean
+ * }}
  */
 export function useInstalledMods() {
   const [installed, setInstalled] = useState(new Set())
   const [updates, setUpdates] = useState(new Map())
   const [modDetails, setModDetails] = useState(new Map())
+  const [cloudInfo, setCloudInfo] = useState(new Map())
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -18,7 +25,7 @@ export function useInstalledMods() {
     const load = async () => {
       try {
         const db = await getDb()
-        const rows = await db.select('SELECT mod_key, installed_version, category, lang_code, manifest FROM installed_workshop_mods')
+        const rows = await db.select('SELECT mod_key, installed_version, category, lang_code, manifest, file_hash, file_hashes FROM installed_workshop_mods')
         if (cancelled) return
 
         const installedSet = new Set(rows.map(r => r.mod_key))
@@ -31,12 +38,14 @@ export function useInstalledMods() {
             category: r.category,
             langCode: r.lang_code,
             manifest: r.manifest,
+            fileHash: r.file_hash || '',
+            fileHashes: r.file_hashes || '',
           })
         }
         setModDetails(detailsMap)
 
         if (rows.length > 0) {
-          // 检测更新
+          // 检测更新 + 云端当前版本/hash（用于与本地对比、撞车识别）
           const res = await invoke('db_check_updates', {
             installed: rows.map(r => ({
               mod_key: r.mod_key,
@@ -46,10 +55,18 @@ export function useInstalledMods() {
           })
           if (!cancelled && res?.data?.updates) {
             const updateMap = new Map()
+            const cloudMap = new Map()
             for (const u of res.data.updates) {
-              updateMap.set(u.mod_key, u.latest_version)
+              if (u.has_update) updateMap.set(u.mod_key, u.latest_version)
+              cloudMap.set(u.mod_key, {
+                displayName: u.display_name || undefined,
+                latestVersion: u.latest_version || '',
+                latestFileHash: u.latest_file_hash || undefined,
+                hasUpdate: !!u.has_update,
+              })
             }
             setUpdates(updateMap)
+            setCloudInfo(cloudMap)
           }
         }
       } catch (e) {
@@ -63,5 +80,5 @@ export function useInstalledMods() {
     return () => { cancelled = true }
   }, [])
 
-  return { installed, updates, modDetails, loading }
+  return { installed, updates, modDetails, cloudInfo, loading }
 }

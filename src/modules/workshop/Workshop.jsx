@@ -30,7 +30,7 @@ const useStyles = makeStyles({
   },
 })
 
-export function Workshop({ initialModId, initialCommentId }) {
+export function Workshop({ initialModId, initialCommentId, onConsumeNavTarget }) {
   const { t } = useTranslation()
   const styles = useStyles()
 
@@ -67,7 +67,7 @@ export function Workshop({ initialModId, initialCommentId }) {
 
       <div className={styles.content}>
         <div className={`${styles.tabContent}${subTab !== 'browse' ? ` ${styles.tabHidden}` : ''}`}>
-          <BrowseMods initialModId={initialModId} initialCommentId={initialCommentId} />
+          <BrowseMods initialModId={initialModId} initialCommentId={initialCommentId} onConsumeNavTarget={onConsumeNavTarget} />
         </div>
         <div className={`${styles.tabContent}${subTab !== 'my' ? ` ${styles.tabHidden}` : ''}`}>
           <MyMods />

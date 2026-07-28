@@ -106,7 +106,9 @@ const useStyles = makeStyles({
   },
   })
 
-export function BrowseMods({ initialModId, initialCommentId }) {
+export function BrowseMods({ initialModId, initialCommentId, onConsumeNavTarget }) {
+  const onConsumeRef = useRef(onConsumeNavTarget)
+  useEffect(() => { onConsumeRef.current = onConsumeNavTarget }, [onConsumeNavTarget])
   const styles = useStyles()
   const { t } = useTranslation()
   const { user, isLoggedIn } = useAuth()
@@ -141,7 +143,11 @@ export function BrowseMods({ initialModId, initialCommentId }) {
       return match ? parseInt(match[1]) : null
     })()
     if (!modId) return
-    getModDetail(modId, 'zh', user?.user_id, deviceIdRef.current)
+    // modId 可能是数字 id（来自用户资料卡）或 mod_key 字符串（来自本地预览页菜单），
+    // 非数字时作为 mod_key 传入，后端按 mod_key 解析详情。
+    const fromNav = !!initialModId
+    const modKey = Number.isFinite(Number(modId)) ? null : modId
+    getModDetail(modId, 'zh', user?.user_id, deviceIdRef.current, modKey)
       .then(data => {
         if (data.data?.mod) {
           setDetailMod(data.data.mod)
@@ -149,7 +155,11 @@ export function BrowseMods({ initialModId, initialCommentId }) {
         }
       })
       .catch(() => {})
-      .finally(() => setDetailLoading(false))
+      .finally(() => {
+        setDetailLoading(false)
+        // 导航意图已消费，清除 navTarget，避免下次进入创意工坊标签时重放上次详情
+        if (fromNav) onConsumeRef.current?.()
+      })
   }, [initialModId, initialCommentId, user])
 
   const fetchMods = useCallback(async (p, keyword = search, cat = categoryFilter, sort = sortBy) => {

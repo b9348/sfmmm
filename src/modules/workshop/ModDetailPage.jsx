@@ -253,14 +253,14 @@ export default function ModDetailPage({ mod, onBack, onEdit, scrollToCommentId }
         manifest: file.manifest,
       })
       setInstalledDir(result.targetDir)
-      setInstalledFiles(file.manifest ? JSON.parse(file.manifest) : [])
+      setInstalledFiles(result.files || (file.manifest ? JSON.parse(file.manifest) : []))
       setInstalledByLang(prev => ({
         ...prev,
         [file.lang_code]: {
           lang_code: file.lang_code,
           installed_version: file.version,
           file_hash: file.file_hash,
-          manifest: file.manifest,
+          manifest: result.files ? JSON.stringify(result.files) : file.manifest,
         },
       }))
       setIsInstalled(true)
