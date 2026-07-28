@@ -2,16 +2,11 @@ use mysql::prelude::*;
 use mysql::*;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
-use std::collections::{BTreeSet, HashMap};
-use std::io::Read;
-use std::io::Write;
-use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use tauri::ipc::Channel;
-use tauri::Manager;
-use futures_util::StreamExt;
+pub mod hash;
+pub mod installer;
 
 // 单个应用实例最多占用 1 个 MySQL 连接，闲置时不保留连接
 const DB_POOL_MIN: usize = 0;
@@ -151,6 +146,39 @@ impl DbState {
         // 注意：空闲检查器在 lib.rs 的 setup 中启动，因为此处 Tokio runtime 尚未就绪。
         Ok(Self { pool })
     }
+}
+
+// ── 连接执行 helper ─────────────────────────────────────────
+// 消除每个命令重复的 `spawn_blocking` + `get_conn` 样板：
+// 在阻塞线程取连接、执行 `f`，并把 JoinError 归一为 String。
+// 命令改写为 `with_conn(state.inner(), move |conn| { ... }).await`。
+pub(crate) async fn with_conn<F, R>(state: &DbState, f: F) -> Result<R, String>
+where
+    F: FnOnce(&mut PooledConn) -> Result<R, String> + Send + 'static,
+    R: Send + 'static,
+{
+    let pool = state.pool.clone();
+    tokio::task::spawn_blocking(move || {
+        let mut conn = pool.get_conn()?;
+        f(&mut conn)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+// 给仅持有 `ManagedPool`（而非 `DbState`）的 helper 复用同一模式。
+pub(crate) async fn with_conn_pool<F, R>(pool: &ManagedPool, f: F) -> Result<R, String>
+where
+    F: FnOnce(&mut PooledConn) -> Result<R, String> + Send + 'static,
+    R: Send + 'static,
+{
+    let pool = pool.clone();
+    tokio::task::spawn_blocking(move || {
+        let mut conn = pool.get_conn()?;
+        f(&mut conn)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 // ── 响应结构体 ──────────────────────────────────────────────
@@ -344,9 +372,7 @@ pub async fn db_login(
     username: String,
     password: String,
 ) -> Result<ApiResponse, String> {
-    let pool = state.pool.clone();
-    tokio::task::spawn_blocking(move || {
-        let mut conn = pool.get_conn().map_err(|e| e.to_string())?;
+    with_conn(state.inner(), move |conn: &mut PooledConn| {
         let pwd_hash = hash_password(&password);
 
         let row: Option<(u64, String, bool, Option<String>)> = conn.exec_first(
@@ -360,7 +386,7 @@ pub async fn db_login(
             }), "Login successful")),
             None => Ok(ApiResponse::err("Invalid username or password")),
         }
-    }).await.map_err(|e| e.to_string())?
+    }).await
 }
 
 #[tauri::command(rename_all = "snake_case")]
@@ -370,8 +396,7 @@ pub async fn db_register(
     password: String,
     avatar: Option<String>,
 ) -> Result<ApiResponse, String> {
-    let pool = state.pool.clone();
-    tokio::task::spawn_blocking(move || {
+    with_conn(state.inner(), move |conn: &mut PooledConn| {
         let uname = username.trim().to_string();
         if uname.len() < 2 || uname.len() > 32 {
             return Ok(ApiResponse::err("Username must be between 2 and 32 characters"));
@@ -380,7 +405,6 @@ pub async fn db_register(
             return Ok(ApiResponse::err("Password must be at least 4 characters"));
         }
 
-        let mut conn = pool.get_conn().map_err(|e| e.to_string())?;
         let pwd_hash = hash_password(&password);
 
         let exists: Option<(u64,)> = conn.exec_first(
@@ -400,7 +424,7 @@ pub async fn db_register(
         Ok(ApiResponse::ok_val(serde_json::json!({
             "user_id": new_id, "username": uname, "r2_enabled": false, "avatar": avatar
         }), "Registration successful"))
-    }).await.map_err(|e| e.to_string())?
+    }).await
 }
 
 #[tauri::command(rename_all = "snake_case")]
@@ -410,9 +434,7 @@ pub async fn db_update_profile(
     username: Option<String>,
     avatar: Option<String>,
 ) -> Result<ApiResponse, String> {
-    let pool = state.pool.clone();
-    tokio::task::spawn_blocking(move || {
-        let mut conn = pool.get_conn().map_err(|e| e.to_string())?;
+    with_conn(state.inner(), move |conn: &mut PooledConn| {
 
         // 如果有新用户名，校验并检查唯一性
         if let Some(ref new_name) = username {
@@ -456,7 +478,7 @@ pub async fn db_update_profile(
             }), "Profile updated")),
             None => Ok(ApiResponse::err("User not found")),
         }
-    }).await.map_err(|e| e.to_string())?
+    }).await
 }
 
 #[tauri::command(rename_all = "snake_case")]
@@ -470,9 +492,7 @@ pub async fn db_list_mods(
     device_id: Option<String>,
     category: Option<String>,
 ) -> Result<ApiResponse, String> {
-    let pool = state.pool.clone();
-    tokio::task::spawn_blocking(move || {
-        let mut conn = pool.get_conn().map_err(|e| e.to_string())?;
+    with_conn(state.inner(), move |conn: &mut PooledConn| {
         let lang = lang.filter(|s| !s.is_empty()).unwrap_or_else(|| "en".into());
         let page = page.unwrap_or(1).max(1);
         let limit = limit.unwrap_or(20).min(100);
@@ -657,7 +677,7 @@ pub async fn db_list_mods(
         }).collect();
 
         Ok(ApiResponse::ok_list(items, total, page, limit))
-    }).await.map_err(|e| e.to_string())?
+    }).await
 }
 
 #[tauri::command(rename_all = "snake_case")]
@@ -670,9 +690,7 @@ pub async fn db_list_my_mods(
     device_id: Option<String>,
 ) -> Result<ApiResponse, String> {
     // 复用 list 逻辑，追加 author_id 过滤
-    let pool = state.pool.clone();
-    tokio::task::spawn_blocking(move || {
-        let mut conn = pool.get_conn().map_err(|e| e.to_string())?;
+    with_conn(state.inner(), move |conn: &mut PooledConn| {
         let lang = lang.filter(|s| !s.is_empty()).unwrap_or_else(|| "en".into());
         let page = page.unwrap_or(1).max(1);
         let page_size = page_size.unwrap_or(20).min(100);
@@ -826,7 +844,7 @@ pub async fn db_list_my_mods(
         }).collect();
 
         Ok(ApiResponse::ok_list(items, total, page, page_size))
-    }).await.map_err(|e| e.to_string())?
+    }).await
 }
 
 #[tauri::command(rename_all = "snake_case")]
@@ -838,9 +856,7 @@ pub async fn db_get_mod_detail(
     user_id: Option<u64>,
     device_id: Option<String>,
 ) -> Result<ApiResponse, String> {
-    let pool = state.pool.clone();
-    tokio::task::spawn_blocking(move || {
-        let mut conn = pool.get_conn().map_err(|e| e.to_string())?;
+    with_conn(state.inner(), move |conn: &mut PooledConn| {
         let lang = lang.filter(|s| !s.is_empty()).unwrap_or_else(|| "en".into());
 
         let row: Option<Row> = conn.exec_first(
@@ -921,7 +937,7 @@ pub async fn db_get_mod_detail(
                 };
 
                 let user_permissions = if let Some(uid) = user_id {
-                    get_user_permissions(&mut conn, mid, uid)?
+                    get_user_permissions(conn, mid, uid)?
                 } else {
                     serde_json::json!({ "is_author": false, "can_edit_mod_info": false, "can_edit_all_langs": false, "editable_langs": null, "can_apply_mod_info": false, "can_apply_lang": false, "applyable_langs": null, "mode": "author_only" })
                 };
@@ -953,7 +969,7 @@ pub async fn db_get_mod_detail(
             }
             None => Ok(ApiResponse::err("Mod not found")),
         }
-    }).await.map_err(|e| e.to_string())?
+    }).await
 }
 
 #[tauri::command(rename_all = "snake_case")]
@@ -962,9 +978,7 @@ pub async fn db_get_mod_for_edit(
     id: u64,
     user_id: u64,
 ) -> Result<ApiResponse, String> {
-    let pool = state.pool.clone();
-    tokio::task::spawn_blocking(move || {
-        let mut conn = pool.get_conn().map_err(|e| e.to_string())?;
+    with_conn(state.inner(), move |conn: &mut PooledConn| {
 
         // 检查 mod 存在
         let mod_row: Option<(u64, String, String)> = conn.exec_first(
@@ -977,7 +991,7 @@ pub async fn db_get_mod_for_edit(
         };
 
         // 查权限
-        let user_permissions = get_user_permissions(&mut conn, id, user_id)?;
+        let user_permissions = get_user_permissions(conn, id, user_id)?;
         let can_edit = user_permissions["can_edit_mod_info"].as_bool().unwrap_or(false)
             || user_permissions["can_edit_all_langs"].as_bool().unwrap_or(false)
             || user_permissions["editable_langs"].as_array().map(|a| !a.is_empty()).unwrap_or(false);
@@ -1055,7 +1069,7 @@ pub async fn db_get_mod_for_edit(
             "user_permissions": user_permissions,
             "perm_config": perm_config,
         }), "OK"))
-    }).await.map_err(|e| e.to_string())?
+    }).await
 }
 
 #[tauri::command(rename_all = "snake_case")]
@@ -1066,9 +1080,7 @@ pub async fn db_create_mod(
     translations: Vec<serde_json::Value>,
     category: Option<String>,
 ) -> Result<ApiResponse, String> {
-    let pool = state.pool.clone();
-    tokio::task::spawn_blocking(move || {
-        let mut conn = pool.get_conn().map_err(|e| e.to_string())?;
+    with_conn(state.inner(), move |conn: &mut PooledConn| {
         let cat = category.unwrap_or_else(|| "v1".into());
 
         // 检查 mod_key 是否已存在
@@ -1102,7 +1114,7 @@ pub async fn db_create_mod(
         }
 
         Ok(ApiResponse::ok_val(serde_json::json!({"mod_id": new_id}), "Mod created"))
-    }).await.map_err(|e| e.to_string())?
+    }).await
 }
 
 #[tauri::command(rename_all = "snake_case")]
@@ -1113,12 +1125,10 @@ pub async fn db_update_mod(
     category: Option<String>,
     translations: Vec<serde_json::Value>,
 ) -> Result<ApiResponse, String> {
-    let pool = state.pool.clone();
-    tokio::task::spawn_blocking(move || {
-        let mut conn = pool.get_conn().map_err(|e| e.to_string())?;
+    with_conn(state.inner(), move |conn: &mut PooledConn| {
 
         // 权限校验
-        let perm = get_user_permissions(&mut conn, mod_id, author_id)?;
+        let perm = get_user_permissions(conn, mod_id, author_id)?;
         let can_edit_mod_info = perm["can_edit_mod_info"].as_bool().unwrap_or(false);
         let can_edit_all_langs = perm["can_edit_all_langs"].as_bool().unwrap_or(false);
 
@@ -1183,7 +1193,7 @@ pub async fn db_update_mod(
         }
 
         Ok(ApiResponse::ok_msg("Mod updated"))
-    }).await.map_err(|e| e.to_string())?
+    }).await
 }
 
 #[tauri::command(rename_all = "snake_case")]
@@ -1191,9 +1201,7 @@ pub async fn db_check_mod_key(
     state: tauri::State<'_, DbState>,
     mod_key: String,
 ) -> Result<ApiResponse, String> {
-    let pool = state.pool.clone();
-    tokio::task::spawn_blocking(move || {
-        let mut conn = pool.get_conn().map_err(|e| e.to_string())?;
+    with_conn(state.inner(), move |conn: &mut PooledConn| {
         let exists: Option<(u64,)> = conn.exec_first(
             "SELECT id FROM mods WHERE mod_id = ?",
             (&mod_key,),
@@ -1201,7 +1209,7 @@ pub async fn db_check_mod_key(
         Ok(ApiResponse::ok_val(serde_json::json!({
             "exists": exists.is_some()
         }), "OK"))
-    }).await.map_err(|e| e.to_string())?
+    }).await
 }
 
 #[tauri::command(rename_all = "snake_case")]
@@ -1210,9 +1218,7 @@ pub async fn db_delete_mod(
     mod_id: u64,
     author_id: u64,
 ) -> Result<ApiResponse, String> {
-    let pool = state.pool.clone();
-    tokio::task::spawn_blocking(move || {
-        let mut conn = pool.get_conn().map_err(|e| e.to_string())?;
+    with_conn(state.inner(), move |conn: &mut PooledConn| {
 
         let owner: Option<(u64,)> = conn.exec_first(
             "SELECT author_id FROM mods WHERE id = ?", (mod_id,)
@@ -1263,7 +1269,7 @@ pub async fn db_delete_mod(
             Some(_) => Ok(ApiResponse::err("You can only delete your own mods")),
             None => Ok(ApiResponse::err("Mod not found")),
         }
-    }).await.map_err(|e| e.to_string())?
+    }).await
 }
 
 #[tauri::command(rename_all = "snake_case")]
@@ -1280,13 +1286,11 @@ pub async fn db_save_mod_file(
     manifest: Option<String>,
     file_hashes: Option<String>,
 ) -> Result<ApiResponse, String> {
-    let pool = state.pool.clone();
-    tokio::task::spawn_blocking(move || {
-        let mut conn = pool.get_conn().map_err(|e| e.to_string())?;
+    with_conn(state.inner(), move |conn: &mut PooledConn| {
         let ver = version.unwrap_or_else(|| "1.0.0".into());
 
         // 权限校验（作者或可编辑该语言的协作者）
-        let perm = get_user_permissions(&mut conn, mod_id, author_id)?;
+        let perm = get_user_permissions(conn, mod_id, author_id)?;
         let is_author = perm["is_author"].as_bool().unwrap_or(false);
         let can_edit_all_langs = perm["can_edit_all_langs"].as_bool().unwrap_or(false);
         let editable_langs = perm["editable_langs"].as_array()
@@ -1299,7 +1303,7 @@ pub async fn db_save_mod_file(
         }
 
         // 确保 file_hashes 列存在（旧库兼容）
-        ensure_mod_files_file_hashes_column(&mut conn)?;
+        hash::ensure_mod_files_file_hashes_column(conn)?;
 
         // UPSERT
         let existing: Option<(u64,)> = conn.exec_first(
@@ -1329,7 +1333,7 @@ pub async fn db_save_mod_file(
             "manifest": manifest,
             "file_hashes": file_hashes,
         }), "File saved"))
-    }).await.map_err(|e| e.to_string())?
+    }).await
 }
 
 #[tauri::command(rename_all = "snake_case")]
@@ -1339,12 +1343,10 @@ pub async fn db_delete_mod_file(
     author_id: u64,
     lang_code: String,
 ) -> Result<ApiResponse, String> {
-    let pool = state.pool.clone();
-    tokio::task::spawn_blocking(move || {
-        let mut conn = pool.get_conn().map_err(|e| e.to_string())?;
+    with_conn(state.inner(), move |conn: &mut PooledConn| {
 
         // 权限校验
-        let perm = get_user_permissions(&mut conn, mod_id, author_id)?;
+        let perm = get_user_permissions(conn, mod_id, author_id)?;
         let is_author = perm["is_author"].as_bool().unwrap_or(false);
         let can_edit_all_langs = perm["can_edit_all_langs"].as_bool().unwrap_or(false);
         let editable_langs = perm["editable_langs"].as_array()
@@ -1362,7 +1364,7 @@ pub async fn db_delete_mod_file(
         ).map_err(|e| e.to_string())?;
 
         Ok(ApiResponse::ok_msg("File deleted"))
-    }).await.map_err(|e| e.to_string())?
+    }).await
 }
 
 // ── 点赞系统 ──────────────────────────────────────────────
@@ -1373,9 +1375,7 @@ pub async fn db_like_mod(
     mod_id: u64,
     device_id: String,
 ) -> Result<ApiResponse, String> {
-    let pool = state.pool.clone();
-    tokio::task::spawn_blocking(move || {
-        let mut conn = pool.get_conn().map_err(|e| e.to_string())?;
+    with_conn(state.inner(), move |conn: &mut PooledConn| {
         if device_id.is_empty() {
             return Ok(ApiResponse::err("Device ID is required"));
         }
@@ -1408,7 +1408,7 @@ pub async fn db_like_mod(
             "SELECT like_count FROM mods WHERE id = ?", (mod_id,)
         ).map_err(|e| e.to_string())?.unwrap_or(0);
         Ok(ApiResponse::ok_val(serde_json::json!({ "like_count": new_count, "is_liked": true }), "Liked"))
-    }).await.map_err(|e| e.to_string())?
+    }).await
 }
 
 #[tauri::command(rename_all = "snake_case")]
@@ -1417,9 +1417,7 @@ pub async fn db_unlike_mod(
     mod_id: u64,
     device_id: String,
 ) -> Result<ApiResponse, String> {
-    let pool = state.pool.clone();
-    tokio::task::spawn_blocking(move || {
-        let mut conn = pool.get_conn().map_err(|e| e.to_string())?;
+    with_conn(state.inner(), move |conn: &mut PooledConn| {
         if device_id.is_empty() {
             return Ok(ApiResponse::err("Device ID is required"));
         }
@@ -1442,7 +1440,7 @@ pub async fn db_unlike_mod(
             "SELECT like_count FROM mods WHERE id = ?", (mod_id,)
         ).map_err(|e| e.to_string())?.unwrap_or(0);
         Ok(ApiResponse::ok_val(serde_json::json!({ "like_count": new_count, "is_liked": false }), "Unliked"))
-    }).await.map_err(|e| e.to_string())?
+    }).await
 }
 
 // ── 评论系统 ──────────────────────────────────────────────
@@ -1455,9 +1453,7 @@ pub async fn db_add_comment(
     content: String,
     parent_id: Option<u64>,
 ) -> Result<ApiResponse, String> {
-    let pool = state.pool.clone();
-    tokio::task::spawn_blocking(move || {
-        let mut conn = pool.get_conn().map_err(|e| e.to_string())?;
+    with_conn(state.inner(), move |conn: &mut PooledConn| {
         let content = content.trim().to_string();
 
         if content.is_empty() || content.len() > 2000 {
@@ -1506,7 +1502,7 @@ pub async fn db_add_comment(
             "author_id": author_id,
             "content": content,
         }), "Comment added"))
-    }).await.map_err(|e| e.to_string())?
+    }).await
 }
 
 #[tauri::command(rename_all = "snake_case")]
@@ -1516,9 +1512,7 @@ pub async fn db_get_comments(
     page: Option<u64>,
     page_size: Option<u64>,
 ) -> Result<ApiResponse, String> {
-    let pool = state.pool.clone();
-    tokio::task::spawn_blocking(move || {
-        let mut conn = pool.get_conn().map_err(|e| e.to_string())?;
+    with_conn(state.inner(), move |conn: &mut PooledConn| {
         let page = page.unwrap_or(1).max(1);
         let page_size = page_size.unwrap_or(10).min(100); // 默认 10 楼
         let offset = (page - 1) * page_size;
@@ -1609,7 +1603,7 @@ pub async fn db_get_comments(
             page: None,
             page_size: None,
         })
-    }).await.map_err(|e| e.to_string())?
+    }).await
 }
 
 /// 加载更多楼中楼回复（分页，默认每页 10 条）
@@ -1620,9 +1614,7 @@ pub async fn db_get_replies(
     page: Option<u64>,
     page_size: Option<u64>,
 ) -> Result<ApiResponse, String> {
-    let pool = state.pool.clone();
-    tokio::task::spawn_blocking(move || {
-        let mut conn = pool.get_conn().map_err(|e| e.to_string())?;
+    with_conn(state.inner(), move |conn: &mut PooledConn| {
         let page = page.unwrap_or(1).max(1);
         let page_size = page_size.unwrap_or(10).min(50);
         let offset = (page - 1) * page_size;
@@ -1672,7 +1664,7 @@ pub async fn db_get_replies(
             page: None,
             page_size: None,
         })
-    }).await.map_err(|e| e.to_string())?
+    }).await
 }
 
 #[tauri::command(rename_all = "snake_case")]
@@ -1682,9 +1674,7 @@ pub async fn db_edit_comment(
     author_id: u64,
     content: String,
 ) -> Result<ApiResponse, String> {
-    let pool = state.pool.clone();
-    tokio::task::spawn_blocking(move || {
-        let mut conn = pool.get_conn().map_err(|e| e.to_string())?;
+    with_conn(state.inner(), move |conn: &mut PooledConn| {
         let content = content.trim().to_string();
 
         if content.is_empty() || content.len() > 2000 {
@@ -1709,7 +1699,7 @@ pub async fn db_edit_comment(
             Some(_) => Ok(ApiResponse::err("You can only edit your own comments")),
             None => Ok(ApiResponse::err("Comment not found")),
         }
-    }).await.map_err(|e| e.to_string())?
+    }).await
 }
 
 #[tauri::command(rename_all = "snake_case")]
@@ -1718,9 +1708,7 @@ pub async fn db_delete_comment(
     comment_id: u64,
     author_id: u64,
 ) -> Result<ApiResponse, String> {
-    let pool = state.pool.clone();
-    tokio::task::spawn_blocking(move || {
-        let mut conn = pool.get_conn().map_err(|e| e.to_string())?;
+    with_conn(state.inner(), move |conn: &mut PooledConn| {
 
         let owner: Option<(u64,)> = conn.exec_first(
             "SELECT author_id FROM mod_comments WHERE id = ?", (comment_id,)
@@ -1738,7 +1726,7 @@ pub async fn db_delete_comment(
             Some(_) => Ok(ApiResponse::err("You can only delete your own comments")),
             None => Ok(ApiResponse::err("Comment not found")),
         }
-    }).await.map_err(|e| e.to_string())?
+    }).await
 }
 
 /// 检查已安装的工坊模组是否有更新
@@ -1748,9 +1736,7 @@ pub async fn db_check_updates(
     state: tauri::State<'_, DbState>,
     installed: Vec<serde_json::Value>,
 ) -> Result<ApiResponse, String> {
-    let pool = state.pool.clone();
-    tokio::task::spawn_blocking(move || {
-        let mut conn = pool.get_conn().map_err(|e| e.to_string())?;
+    with_conn(state.inner(), move |conn: &mut PooledConn| {
         let mut results: Vec<serde_json::Value> = Vec::new();
 
         for item in &installed {
@@ -1797,270 +1783,7 @@ pub async fn db_check_updates(
         Ok(ApiResponse::ok_val(serde_json::json!({
             "updates": results,
         }), "OK"))
-    }).await.map_err(|e| e.to_string())?
-}
-
-// ── 预检 / 惰性补全辅助 ──────────────────────────────────────
-
-/// 幂等确保 mod_files 含 file_hashes 列（兼容旧库）。
-/// 已存在时忽略 "Duplicate column" 错误；其余错误向上传播。
-fn ensure_mod_files_file_hashes_column<C: Queryable>(conn: &mut C) -> Result<(), String> {
-    match conn.exec_drop("ALTER TABLE mod_files ADD COLUMN file_hashes TEXT NULL", ()) {
-        Ok(_) => Ok(()),
-        Err(e) => {
-            let msg = e.to_string();
-            if msg.to_lowercase().contains("duplicate column") {
-                Ok(())
-            } else {
-                Err(format!("无法确保 mod_files.file_hashes 列: {}", msg))
-            }
-        }
-    }
-}
-
-/// 字节流 SHA-256 十六进制串
-fn sha256_hex(data: &[u8]) -> String {
-    hex::encode(Sha256::digest(data))
-}
-
-/// 规范化比对键：取 basename、转小写（去除目录与大小写差异）。
-/// 对 dll 等平铺部署尤为重要；对 v1/v2/composite 亦能跨打包风格稳定比对。
-fn basename_key(path: &str) -> String {
-    let p = path.replace('\\', "/");
-    let name = p.rsplit('/').next().unwrap_or(&p);
-    name.to_lowercase()
-}
-
-/// 递归遍历 local_dir，对每个文件计算 SHA-256，返回 basename(小写)->hash。
-/// 若 local_dir 自身为文件，则只哈希该文件（用于 dll 等单文件场景）。
-fn compute_local_hashes(local_dir: &str) -> HashMap<String, String> {
-    let mut map: HashMap<String, String> = HashMap::new();
-    let path = Path::new(local_dir);
-    if path.is_file() {
-        if let Ok(mut f) = std::fs::File::open(path) {
-            let mut buf = Vec::new();
-            if f.read_to_end(&mut buf).is_ok() {
-                map.insert(basename_key(local_dir), sha256_hex(&buf));
-            }
-        }
-        return map;
-    }
-    if !path.is_dir() {
-        return map;
-    }
-    let mut stack = vec![path.to_path_buf()];
-    while let Some(dir) = stack.pop() {
-        let entries = match std::fs::read_dir(&dir) {
-            Ok(e) => e,
-            Err(_) => continue,
-        };
-        for entry in entries.flatten() {
-            let p = entry.path();
-            if p.is_dir() {
-                stack.push(p);
-            } else if p.is_file() {
-                if let Ok(mut f) = std::fs::File::open(&p) {
-                    let mut buf = Vec::new();
-                    if f.read_to_end(&mut buf).is_ok() {
-                        map.insert(basename_key(&p.to_string_lossy()), sha256_hex(&buf));
-                    }
-                }
-            }
-        }
-    }
-    map
-}
-
-/// 解析云端 file_hashes JSON（可能为 NULL / 空串），非法时回落空 map。
-fn parse_file_hashes_opt(raw: Option<String>) -> HashMap<String, String> {
-    match raw {
-        Some(s) if !s.trim().is_empty() => serde_json::from_str::<HashMap<String, String>>(&s).unwrap_or_default(),
-        _ => HashMap::new(),
-    }
-}
-
-/// 查询云端某 mod 语言版本的逐文件指纹（file_hashes 列）。
-/// 自动确保 file_hashes 列存在（兼容旧库）。返回 JSON 字符串或 None。
-async fn fetch_cloud_file_hashes(
-    pool: ManagedPool,
-    mod_key: &str,
-    lang_code: &str,
-) -> Result<Option<String>, String> {
-    let mk = mod_key.to_string();
-    let lc = lang_code.to_string();
-    tokio::task::spawn_blocking(move || -> Result<Option<String>, String> {
-        let mut conn = pool.get_conn()?;
-        ensure_mod_files_file_hashes_column(&mut conn)?;
-        let row: Option<(Option<String>,)> = conn.exec_first(
-            "SELECT f.file_hashes
-             FROM mod_files f
-             JOIN mods m ON m.id = f.mod_id
-             WHERE m.mod_id = ? AND f.lang_code = ?
-             ORDER BY f.id DESC LIMIT 1",
-            (&mk, &lc),
-        ).map_err(|e| e.to_string())?;
-        Ok(row.and_then(|(h,)| h))
-    }).await.map_err(|e| e.to_string())?
-}
-
-/// 预检某已安装 mod 的本地文件指纹是否与云端一致。
-/// 返回 match / diffs / collision / needs_backfill / used_local_cache 等供前端展示。
-/// 短路优化：当 has_update=false（版本未变）且调用方已带入本地缓存的
-/// 逐文件指纹 local_file_hashes 时，直接用本地缓存比对，跳过云端查询。
-#[tauri::command(rename_all = "snake_case")]
-pub async fn db_preflight_mod(
-    state: tauri::State<'_, DbState>,
-    mod_key: String,
-    lang_code: String,
-    local_dir: String,
-    category: String,
-    local_file_hashes: Option<String>,
-    has_update: bool,
-) -> Result<ApiResponse, String> {
-    let pool = state.pool.clone();
-
-    // 1) 本地指纹（始终需要，遍历安装目录）
-    let local_map = compute_local_hashes(&local_dir);
-
-    // 2) 确定比对基准（云端逐文件指纹）：
-    //    - 版本未变(has_update=false) 且 本地已缓存逐文件指纹 -> 直接用本地缓存，跳过云端查询
-    //    - 否则（版本已变 / 本地无缓存）-> 查询云端 mod_files.file_hashes
-    let (cloud_map, used_local_cache) = if !has_update {
-        match &local_file_hashes {
-            Some(s) if !s.trim().is_empty() => {
-                (serde_json::from_str::<HashMap<String, String>>(s).unwrap_or_default(), true)
-            }
-            _ => {
-                let raw = fetch_cloud_file_hashes(pool.clone(), &mod_key, &lang_code).await?;
-                (parse_file_hashes_opt(raw), false)
-            }
-        }
-    } else {
-        let raw = fetch_cloud_file_hashes(pool.clone(), &mod_key, &lang_code).await?;
-        (parse_file_hashes_opt(raw), false)
-    };
-
-    let needs_backfill = cloud_map.is_empty();
-    if needs_backfill {
-        return Ok(ApiResponse::ok_val(serde_json::json!({
-            "match": false,
-            "local_count": local_map.len(),
-            "cloud_count": 0,
-            "diffs": [],
-            "collision": false,
-            "needs_backfill": true,
-            "used_local_cache": used_local_cache,
-            "category": category,
-            "extra_file": false,
-            "missing_file": false,
-        }), "preflight_needs_backfill"));
-    }
-
-    // 4) 逐文件比对
-    let mut diffs: Vec<serde_json::Value> = Vec::new();
-    let mut extra_file = false;   // 本地多出（云端无）→ 可能是其它 mod 撞车
-    let mut missing_file = false; // 云端有、本地缺 → 安装不全
-    let mut mismatch = false;     // 同名不同哈希 → 被覆盖/篡改
-    let mut keys: BTreeSet<String> = BTreeSet::new();
-    keys.extend(local_map.keys().cloned());
-    keys.extend(cloud_map.keys().cloned());
-    for k in keys {
-        let lh = local_map.get(&k).cloned();
-        let ch = cloud_map.get(&k).cloned();
-        match (lh, ch) {
-            (Some(l), Some(c)) => {
-                if l != c {
-                    mismatch = true;
-                    diffs.push(serde_json::json!({
-                        "path": k,
-                        "kind": "mismatch",
-                        "local_hash": l,
-                        "cloud_hash": c,
-                    }));
-                }
-            }
-            (Some(l), None) => {
-                extra_file = true;
-                diffs.push(serde_json::json!({
-                    "path": k,
-                    "kind": "missing_cloud",
-                    "local_hash": l,
-                    "cloud_hash": null,
-                }));
-            }
-            (None, Some(c)) => {
-                missing_file = true;
-                diffs.push(serde_json::json!({
-                    "path": k,
-                    "kind": "missing_local",
-                    "local_hash": null,
-                    "cloud_hash": c,
-                }));
-            }
-            (None, None) => {}
-        }
-    }
-
-    let is_match = diffs.is_empty();
-    // 撞车：本地多出文件（被其它 mod 覆盖）或哈希不一致
-    let collision = extra_file || mismatch;
-
-    Ok(ApiResponse::ok_val(serde_json::json!({
-        "match": is_match,
-        "local_count": local_map.len(),
-        "cloud_count": cloud_map.len(),
-        "diffs": diffs,
-        "collision": collision,
-        "needs_backfill": false,
-        "used_local_cache": used_local_cache,
-        "category": category,
-        "extra_file": extra_file,
-        "missing_file": missing_file,
-    }), "OK"))
-}
-
-/// 订阅者安装后，将本地算出的逐文件指纹回填到云端 mod_files.file_hashes。
-/// 始终以官方 zip 算出的规范（递归后）指纹覆盖对应语言行（幂等）：
-/// 移除 IS NULL 限制，使已上传过、但用旧非递归口径（缺内包文件）的 mod
-/// 也能在安装时被升级为包含内包文件的精确指纹，嵌套 zip mod 预检不再误报。
-/// file_hashes 须为 { basename(小写): hash } 的 JSON 字符串，
-/// 与 db_preflight_mod 的 compute_local_hashes / 上传时的 computeZipFileHashes 口径一致。
-#[tauri::command(rename_all = "snake_case")]
-pub async fn db_set_mod_file_hashes(
-    state: tauri::State<'_, DbState>,
-    mod_key: String,
-    lang_code: String,
-    file_hashes: String,
-) -> Result<ApiResponse, String> {
-    // 校验为合法的 basename->hash 映射，避免写入垃圾
-    let parsed: HashMap<String, String> = match serde_json::from_str::<HashMap<String, String>>(&file_hashes) {
-        Ok(m) if !m.is_empty() => m,
-        _ => return Ok(ApiResponse::err("file_hashes 格式无效或为空")),
-    };
-    let json = match serde_json::to_string(&parsed) {
-        Ok(s) => s,
-        Err(e) => return Err(format!("序列化失败: {e}")),
-    };
-
-    let pool = state.pool.clone();
-    let mk = mod_key.clone();
-    let lc = lang_code.clone();
-    let (updated,) = tokio::task::spawn_blocking(move || -> Result<(u64,), String> {
-        let mut conn = pool.get_conn()?;
-        ensure_mod_files_file_hashes_column(&mut conn)?;
-        // 始终以官方 zip 算出的规范（递归后）指纹覆盖对应语言行：
-        // 移除 IS NULL 限制，使已上传过、但用旧非递归口径（缺内包文件）的 mod
-        // 也能在安装时被升级为包含内包文件的精确指纹，嵌套 zip mod 预检不再误报。
-        conn.exec_drop(
-            "UPDATE mod_files f JOIN mods m ON m.id = f.mod_id
-             SET f.file_hashes = ?
-             WHERE m.mod_id = ? AND f.lang_code = ?",
-            (&json, &mk, &lc),
-        ).map_err(|e| e.to_string())?;
-        Ok((conn.affected_rows(),))
-    }).await.map_err(|e| e.to_string())??;
-
-    Ok(ApiResponse::ok_val(serde_json::json!({ "updated": updated > 0 }), "OK"))
+    }).await
 }
 
 #[tauri::command(rename_all = "snake_case")]
@@ -2150,9 +1873,7 @@ pub async fn db_delete_imgbed_file(file_url: String) -> Result<ApiResponse, Stri
 pub async fn db_get_version(
     state: tauri::State<'_, DbState>,
 ) -> Result<ApiResponse, String> {
-    let pool = state.pool.clone();
-    tokio::task::spawn_blocking(move || {
-        let mut conn = pool.get_conn().map_err(|e| e.to_string())?;
+    with_conn(state.inner(), move |conn: &mut PooledConn| {
         let config: Option<(String, String)> = conn.exec_first(
             "SELECT version, update_url FROM version_config ORDER BY id DESC LIMIT 1",
             (),
@@ -2168,109 +1889,9 @@ pub async fn db_get_version(
                 "update_url": "",
             }), "OK")),
         }
-    }).await.map_err(|e| e.to_string())?
+    }).await
 }
 
-fn installer_path(app_handle: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
-    let data_dir = app_handle.path().app_data_dir().map_err(|e| format!("无法获取应用数据目录: {}", e))?;
-    std::fs::create_dir_all(&data_dir).map_err(|e| format!("创建应用数据目录失败: {}", e))?;
-    Ok(data_dir.join("sfmmm_update.exe"))
-}
-
-/// 下载更新安装包到应用数据目录，返回保存路径（带进度通知）
-#[tauri::command]
-pub async fn db_prepare_update(
-    app_handle: tauri::AppHandle,
-    url: String,
-    on_progress: Channel<crate::DownloadProgress>,
-) -> Result<String, String> {
-    let _ = on_progress.send(crate::DownloadProgress {
-        percent: 0,
-        stage: "downloading".into(),
-    });
-
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(300))
-        .build()
-        .map_err(|e| e.to_string())?;
-
-    let response = client
-        .get(&url)
-        .send()
-        .await
-        .and_then(|r| r.error_for_status())
-        .map_err(|e| format!("下载失败: {}", e))?;
-
-    let total = response.content_length().unwrap_or(0);
-    let path = installer_path(&app_handle)?;
-    let mut file = std::fs::File::create(&path)
-        .map_err(|e| format!("创建文件失败: {}", e))?;
-    let mut stream = response.bytes_stream();
-    let mut downloaded = 0u64;
-
-    while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(|e| format!("下载失败: {}", e))?;
-        file.write_all(&chunk).map_err(|e| format!("写入文件失败: {}", e))?;
-        downloaded += chunk.len() as u64;
-        if total > 0 {
-            let percent = (downloaded * 100 / total) as u32;
-            let _ = on_progress.send(crate::DownloadProgress {
-                percent,
-                stage: "downloading".into(),
-            });
-        }
-    }
-
-    let _ = on_progress.send(crate::DownloadProgress {
-        percent: 100,
-        stage: "done".into(),
-    });
-
-    Ok(path.to_string_lossy().into_owned())
-}
-
-/// 启动已下载的安装包并退出当前应用，安装完成后自动重启
-#[tauri::command]
-pub async fn db_apply_update(app_handle: tauri::AppHandle) -> Result<String, String> {
-    let path = installer_path(&app_handle)?;
-    if !path.exists() {
-        return Err("未找到更新安装包，请重新检查更新".into());
-    }
-
-    // 获取当前 exe 路径（安装后的新版本会覆盖此路径）
-    let current_exe = std::env::current_exe()
-        .map_err(|e| format!("无法获取当前可执行路径: {}", e))?;
-
-    // 创建临时 bat 脚本：等待当前进程退出 → 静默安装 → 启动新版本
-    let bat_path = std::env::temp_dir().join("sfmmm_restart_update.bat");
-    let bat_content = format!(
-        "@echo off\r\n\
-         rem 等待当前应用完全退出\r\n\
-         ping 127.0.0.1 -n 5 > nul\r\n\r\n\
-         rem 静默安装更新\r\n\
-         \"{}\" /S\r\n\r\n\
-         rem 启动更新后的应用\r\n\
-         start \"\" \"{}\"\r\n\r\n\
-         rem 删除自身\r\n\
-         del \"{}\" > nul 2>&1\r\n",
-        path.display(),
-        current_exe.display(),
-        bat_path.display(),
-    );
-    std::fs::write(&bat_path, &bat_content)
-        .map_err(|e| format!("创建更新脚本失败: {}", e))?;
-
-    // 启动 bat 脚本（独立进程，不受当前进程退出影响）
-    std::process::Command::new(&bat_path)
-        .spawn()
-        .map_err(|e| format!("启动更新脚本失败: {}", e))?;
-
-    // 退出当前应用，避免安装程序无法覆盖运行中的 exe
-    app_handle.exit(0);
-
-    // 注意：exit 会终止进程，因此 Ok 返回值不会到达前端
-    Ok("更新程序已启动，应用将自动更新并重启".into())
-}
 
 // ── 权限设置 ──────────────────────────────────────────────
 
@@ -2285,9 +1906,7 @@ pub async fn db_set_mod_permissions(
     allow_lang: Option<bool>,
     apply_langs: Option<Vec<String>>,
 ) -> Result<ApiResponse, String> {
-    let pool = state.pool.clone();
-    tokio::task::spawn_blocking(move || {
-        let mut conn = pool.get_conn().map_err(|e| e.to_string())?;
+    with_conn(state.inner(), move |conn: &mut PooledConn| {
 
         let owner: Option<(u64,)> = conn.exec_first(
             "SELECT author_id FROM mods WHERE id = ?", (mod_id,)
@@ -2321,7 +1940,7 @@ pub async fn db_set_mod_permissions(
         }
 
         Ok(ApiResponse::ok_msg("Permissions updated"))
-    }).await.map_err(|e| e.to_string())?
+    }).await
 }
 
 #[tauri::command(rename_all = "snake_case")]
@@ -2333,9 +1952,7 @@ pub async fn db_submit_application(
     target_lang: Option<String>,
     reason: Option<String>,
 ) -> Result<ApiResponse, String> {
-    let pool = state.pool.clone();
-    tokio::task::spawn_blocking(move || {
-        let mut conn = pool.get_conn().map_err(|e| e.to_string())?;
+    with_conn(state.inner(), move |conn: &mut PooledConn| {
 
         // 检查 mod 是否存在
         let mod_exists: Option<(u64,)> = conn.exec_first(
@@ -2361,7 +1978,7 @@ pub async fn db_submit_application(
         ).map_err(|e| e.to_string())?;
 
         Ok(ApiResponse::ok_msg("Application submitted"))
-    }).await.map_err(|e| e.to_string())?
+    }).await
 }
 
 #[tauri::command(rename_all = "snake_case")]
@@ -2374,9 +1991,7 @@ pub async fn db_list_applications(
     page: Option<u64>,
     page_size: Option<u64>,
 ) -> Result<ApiResponse, String> {
-    let pool = state.pool.clone();
-    tokio::task::spawn_blocking(move || {
-        let mut conn = pool.get_conn().map_err(|e| e.to_string())?;
+    with_conn(state.inner(), move |conn: &mut PooledConn| {
         let page = page.unwrap_or(1).max(1);
         let page_size = page_size.unwrap_or(20).min(100);
         let offset = (page - 1) * page_size;
@@ -2454,7 +2069,7 @@ pub async fn db_list_applications(
         }).collect();
 
         Ok(ApiResponse::ok_list(items, total, page, page_size))
-    }).await.map_err(|e| e.to_string())?
+    }).await
 }
 
 #[tauri::command(rename_all = "snake_case")]
@@ -2464,9 +2079,7 @@ pub async fn db_handle_application(
     app_id: u64,
     action: String, // "approve" | "deny"
 ) -> Result<ApiResponse, String> {
-    let pool = state.pool.clone();
-    tokio::task::spawn_blocking(move || {
-        let mut conn = pool.get_conn().map_err(|e| e.to_string())?;
+    with_conn(state.inner(), move |conn: &mut PooledConn| {
 
         // 获取申请信息
         let app: Option<(u64, u64, String, Option<String>)> = conn.exec_first(
@@ -2516,7 +2129,7 @@ pub async fn db_handle_application(
         }
 
         Ok(ApiResponse::ok_msg(if action == "approve" { "Application approved" } else { "Application denied" }))
-    }).await.map_err(|e| e.to_string())?
+    }).await
 }
 
 #[tauri::command(rename_all = "snake_case")]
@@ -2524,9 +2137,7 @@ pub async fn db_get_unread_count(
     state: tauri::State<'_, DbState>,
     user_id: u64,
 ) -> Result<ApiResponse, String> {
-    let pool = state.pool.clone();
-    tokio::task::spawn_blocking(move || {
-        let mut conn = pool.get_conn().map_err(|e| e.to_string())?;
+    with_conn(state.inner(), move |conn: &mut PooledConn| {
 
         // 待处理的申请数（用户是作者）
         let pending_apps: i64 = conn.exec_first(
@@ -2545,7 +2156,7 @@ pub async fn db_get_unread_count(
             "notifications": unread_notifs,
             "total": pending_apps + unread_notifs,
         }), "OK"))
-    }).await.map_err(|e| e.to_string())?
+    }).await
 }
 
 #[tauri::command(rename_all = "snake_case")]
@@ -2555,9 +2166,7 @@ pub async fn db_get_my_notifications(
     page: Option<u64>,
     page_size: Option<u64>,
 ) -> Result<ApiResponse, String> {
-    let pool = state.pool.clone();
-    tokio::task::spawn_blocking(move || {
-        let mut conn = pool.get_conn().map_err(|e| e.to_string())?;
+    with_conn(state.inner(), move |conn: &mut PooledConn| {
         let page = page.unwrap_or(1).max(1);
         let page_size = page_size.unwrap_or(20).min(100);
         let offset = (page - 1) * page_size;
@@ -2599,7 +2208,7 @@ pub async fn db_get_my_notifications(
         }).collect();
 
         Ok(ApiResponse::ok_list(items, total, page, page_size))
-    }).await.map_err(|e| e.to_string())?
+    }).await
 }
 
 #[tauri::command(rename_all = "snake_case")]
@@ -2609,9 +2218,7 @@ pub async fn db_mark_read(
     target_type: Option<String>, // "application" | "notification" | null = all
     ids: Option<Vec<u64>>,       // null = mark all as read
 ) -> Result<ApiResponse, String> {
-    let pool = state.pool.clone();
-    tokio::task::spawn_blocking(move || {
-        let mut conn = pool.get_conn().map_err(|e| e.to_string())?;
+    with_conn(state.inner(), move |conn: &mut PooledConn| {
 
         if let Some(ttype) = &target_type {
             match ttype.as_str() {
@@ -2660,7 +2267,7 @@ pub async fn db_mark_read(
         }
 
         Ok(ApiResponse::ok_msg("Marked as read"))
-    }).await.map_err(|e| e.to_string())?
+    }).await
 }
 
 /// 查询任意用户的公开资料（用户名/头像 + MOD 数/总下载/总获赞）
@@ -2669,9 +2276,7 @@ pub async fn db_get_user_public_profile(
     state: tauri::State<'_, DbState>,
     user_id: u64,
 ) -> Result<ApiResponse, String> {
-    let pool = state.pool.clone();
-    tokio::task::spawn_blocking(move || {
-        let mut conn = pool.get_conn().map_err(|e| e.to_string())?;
+    with_conn(state.inner(), move |conn: &mut PooledConn| {
 
         let row: Option<Row> = conn.exec_first(
             "SELECT id, username, avatar FROM users WHERE id = ?",
@@ -2712,5 +2317,46 @@ pub async fn db_get_user_public_profile(
             }
             None => Ok(ApiResponse::err("User not found")),
         }
-    }).await.map_err(|e| e.to_string())?
+    }).await
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn semver_cmp_equal() {
+        assert_eq!(semver_cmp("1.0.0", "1.0.0"), 0);
+        assert_eq!(semver_cmp("v1.2.3", "1.2.3"), 0);
+        assert_eq!(semver_cmp("1.0", "1.0.0"), 0);
+    }
+
+    #[test]
+    fn semver_cmp_less() {
+        assert_eq!(semver_cmp("1.0.0", "1.0.1"), -1);
+        assert_eq!(semver_cmp("1.2.3", "1.2.10"), -1);
+    }
+
+    #[test]
+    fn semver_cmp_greater() {
+        assert_eq!(semver_cmp("1.0.1", "1.0.0"), 1);
+        assert_eq!(semver_cmp("2.0.0", "1.9.9"), 1);
+    }
+
+    #[test]
+    fn hash_password_known_sha256() {
+        assert_eq!(
+            hash_password("abc"),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+        assert_eq!(hash_password("abc").len(), 64);
+    }
+
+    #[test]
+    fn hash_password_deterministic_and_distinct() {
+        assert_eq!(hash_password("abc"), hash_password("abc"));
+        assert_ne!(hash_password("abc"), hash_password("xyz"));
+        assert!(!hash_password("").is_empty());
+    }
 }
