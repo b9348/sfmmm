@@ -24,6 +24,7 @@ import ModDetailPage from './ModDetailPage'
 import { ConfirmDialog, BackButton, ProgressModal, AsyncView, LoginForm, EmptyState } from '../../components'
 import PermissionSettings from './PermissionSettings'
 import { LANGUAGES, LANG_LABELS } from '../../i18n/languages'
+import Database from '@tauri-apps/plugin-sql'
 
 const MAX_INSTRUCTIONS_LENGTH = 10000
 
