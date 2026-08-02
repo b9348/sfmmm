@@ -42,13 +42,6 @@
     },
     "shell:allow-execute",
     {
-      "identifier": "http:default",
-      "allow": [
-        { "url": "https://sfm.b9349.dpdns.org/**" },
-        { "url": "http://localhost:8088/**" }
-      ]
-    },
-    {
       "identifier": "fs:scope",
       "allow": [
         { "path": "**" }

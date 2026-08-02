@@ -25,7 +25,7 @@ export function ProgressModal({ open, title, percent, stepText }) {
         <DialogBody>
           <DialogTitle>{title}</DialogTitle>
           <DialogContent>
-            <div className={styles.content} tabIndex={-1}>
+            <div className={styles.content} tabIndex={0}>
               <ProgressBar value={percent / 100} />
               <Text size="small" className={styles.step}>{stepText}</Text>
             </div>

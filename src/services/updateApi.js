@@ -4,9 +4,9 @@
 
 import { invoke, Channel } from '@tauri-apps/api/core'
 
-const API_BASE = import.meta.env.DEV
-  ? 'http://localhost:3000'
-  : 'https://sfm.b9349.dpdns.org'
+// 版本清单固定 URL（图床公开文件，CI 发版时删旧传新维护；无需认证）
+// 构建时通过环境变量注入，例如：VITE_LATEST_URL=https://img.b9349.dpdns.org/file/sfm/installer/latest.json
+const LATEST_URL = import.meta.env.VITE_LATEST_URL
 
 export function compareVersions(a, b) {
   const cleanA = a.replace(/^v/i, '')
@@ -25,11 +25,19 @@ export function compareVersions(a, b) {
  * 检测新版本
  */
 export async function checkForUpdates() {
+  // 本地开发时跳过更新检测（无后端服务，避免请求报错）
+  if (import.meta.env.DEV) {
+    return null
+  }
   try {
-    const res = await fetch(`${API_BASE}/api/admin/version`)
+    const res = await fetch(LATEST_URL)
+    if (!res.ok) {
+      // 404 等异常响应视为无更新
+      return null
+    }
     const data = await res.json()
-    if (data.success && data.data) {
-      return data.data
+    if (data && data.version) {
+      return data
     }
     return null
   } catch (e) {

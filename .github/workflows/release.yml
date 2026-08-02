@@ -67,6 +67,9 @@ jobs:
       - name: Create .env
         run: |
           echo "DB_URL=${{ secrets.DB_URL }}" > src-tauri/.env
+          echo "IMGBED_URL=${{ secrets.IMGBED_URL }}" >> src-tauri/.env
+          echo "IMGBED_TOKEN=${{ secrets.IMGBED_TOKEN }}" >> src-tauri/.env
+          echo "VITE_LATEST_URL=${{ secrets.IMGBED_URL }}/file/sfm/installer/latest.json" > .env
         shell: bash
 
       - name: Remove local Cargo config for CI
@@ -123,11 +126,12 @@ jobs:
           echo "Found installer: $EXE_FILE"
 
           NEW_VERSION="${{ needs.build.outputs.version }}"
+          IMGBED_URL="${{ secrets.IMGBED_URL }}"
 
           # 1. 上传安装包到 ImgBed（图床 CDN）
           echo "::group::Upload to ImgBed"
           UPLOAD_RESP=$(curl -s -X POST \
-            "https://img.b9349.dpdns.org/upload?uploadChannel=telegram&uploadFolder=sfm/installer/v${NEW_VERSION}&returnFormat=full" \
+            "${IMGBED_URL}/upload?uploadChannel=telegram&uploadFolder=sfm/installer/v${NEW_VERSION}&returnFormat=full" \
             -H "Authorization: Bearer ${{ secrets.IMGBED_TOKEN }}" \
             -F "file=@${EXE_FILE}")
           echo "ImgBed response: $UPLOAD_RESP"
@@ -141,7 +145,31 @@ jobs:
           fi
           echo "Download URL: $DOWNLOAD_URL"
 
-          # 2. 通过 DB_URL 直连 MySQL 更新 version_config
+          # 2. 更新固定路径的版本清单 latest.json（先删旧再传新，uploadNameType=origin 保证 URL 固定）
+          echo "::group::Update latest.json manifest"
+          LATEST_URL="${IMGBED_URL}/file/sfm/installer/latest.json"
+
+          echo "Deleting old manifest (if any)..."
+          curl -s -X GET \
+            "${IMGBED_URL}/api/manage/delete/sfm/installer/latest.json" \
+            -H "Authorization: Bearer ${{ secrets.IMGBED_TOKEN }}" || true
+
+          echo "{\"version\":\"${NEW_VERSION}\",\"update_url\":\"${DOWNLOAD_URL}\"}" > latest.json
+          MANIFEST_RESP=$(curl -s -X POST \
+            "${IMGBED_URL}/upload?uploadChannel=telegram&uploadFolder=sfm/installer&returnFormat=full&uploadNameType=origin" \
+            -H "Authorization: Bearer ${{ secrets.IMGBED_TOKEN }}" \
+            -F "file=@latest.json")
+          echo "Manifest upload response: $MANIFEST_RESP"
+          MANIFEST_SRC=$(echo "$MANIFEST_RESP" | jq -r '.[0].src // empty')
+          if [ -z "$MANIFEST_SRC" ]; then
+            echo "::error::Failed to upload latest.json to ImgBed"
+            echo "$MANIFEST_RESP"
+            exit 1
+          fi
+          echo "✅ Manifest available at: $LATEST_URL"
+          echo "::endgroup::"
+
+          # 3. 通过 DB_URL 直连 MySQL 更新 version_config
           #（Cloud API sfm.b9349.dpdns.org 在 CI 中不可达，故用直连方式）
           echo "::group::Update version_config via MySQL"
           apt-get update -qq && apt-get install -y -qq default-mysql-client 2>&1 | tail -2

@@ -684,57 +684,6 @@ async fn http_request(url: String, method: String, body: Option<String>) -> Resu
 }
 
 #[tauri::command]
-async fn test_network() -> Result<String, String> {
-    use std::net::ToSocketAddrs;
-    
-    let mut results = vec![];
-    
-    // 测试 DNS 解析
-    match "sfm.b9349.dpdns.org:443".to_socket_addrs() {
-        Ok(addrs) => {
-            let addrs_vec: Vec<_> = addrs.collect();
-            results.push(format!("DNS 解析成功: {:?}", addrs_vec));
-        }
-        Err(e) => {
-            results.push(format!("DNS 解析失败: {}", e));
-        }
-    }
-    
-    // 测试 TCP 连接
-    use std::net::TcpStream;
-    match TcpStream::connect("sfm.b9349.dpdns.org:443") {
-        Ok(_) => results.push("TCP 连接成功".to_string()),
-        Err(e) => results.push(format!("TCP 连接失败: {}", e)),
-    }
-    
-    // 测试 HTTP 连接 - 使用详细错误
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(10))
-        .build()
-        .map_err(|e| e.to_string())?;
-    
-    match client.get("https://sfm.b9349.dpdns.org/api/mods/list").send().await {
-        Ok(resp) => {
-            results.push(format!("HTTP 请求成功: HTTP {}", resp.status()));
-        }
-        Err(e) => {
-            let err_msg = if e.is_timeout() {
-                format!("HTTP 请求超时: {}", e)
-            } else if e.is_connect() {
-                format!("HTTP 连接错误: {}", e)
-            } else if let Some(status) = e.status() {
-                format!("HTTP 错误状态: {}", status)
-            } else {
-                format!("HTTP 请求失败: {:?}", e)
-            };
-            results.push(err_msg);
-        }
-    }
-    
-    Ok(results.join("\n"))
-}
-
-#[tauri::command]
 fn scan_mods(game_path: String) -> Result<ScanModsResult, String> {
     let game_path = PathBuf::from(game_path);
 
@@ -944,7 +893,7 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_http::init())
         .invoke_handler(tauri::generate_handler![
-            open_folder, scan_mods, toggle_mod_enabled, batch_toggle_mod_enabled, http_request, test_network, download_and_extract_7z,
+            open_folder, scan_mods, toggle_mod_enabled, batch_toggle_mod_enabled, http_request, download_and_extract_7z,
             db::db_login, db::db_register, db::db_update_profile,
             db::db_list_mods, db::db_list_my_mods,
             db::db_get_mod_detail, db::db_get_mod_for_edit,
