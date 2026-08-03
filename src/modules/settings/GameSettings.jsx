@@ -189,7 +189,7 @@ export function GameSettings({ config, onConfigChange }) {
   ]
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '8px' }}>
       <Card appearance="outline">
         <CardHeader header={<Title2>{t('settings.language')}</Title2>} />
         <div style={{ padding: '8px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
@@ -323,7 +323,9 @@ export function GameSettings({ config, onConfigChange }) {
         </div>
       </Card>
 
-      <Acknowledgments />
+      <div style={{ gridColumn: '1 / -1' }}>
+        <Acknowledgments />
+      </div>
     </div>
   )
 }
