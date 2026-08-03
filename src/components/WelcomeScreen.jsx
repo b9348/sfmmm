@@ -26,7 +26,7 @@ const useStyles = makeStyles({
     flexDirection: 'column',
     alignItems: 'center',
     justifyContent: 'center',
-    height: '100vh',
+    flex: 1,
     gap: '16px',
     padding: '16px',
     backgroundColor: tokens.colorNeutralBackground2,

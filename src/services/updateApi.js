@@ -29,8 +29,18 @@ export async function checkForUpdates() {
   if (import.meta.env.DEV) {
     return null
   }
+  // 优先走 Rust reqwest 拉取（无 HTTP 缓存，规避 WebView 对图床文件的强缓存）
   try {
-    const res = await fetch(LATEST_URL)
+    const res = await invoke('db_fetch_latest', { url: LATEST_URL })
+    if (res && res.success && res.data && res.data.version) {
+      return res.data
+    }
+  } catch (e) {
+    console.warn('[Update] Rust 检测失败，回退前端 fetch:', e)
+  }
+  // 回退：前端 fetch 强制 no-store 绕过缓存
+  try {
+    const res = await fetch(LATEST_URL, { cache: 'no-store' })
     if (!res.ok) {
       // 404 等异常响应视为无更新
       return null

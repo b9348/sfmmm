@@ -68,7 +68,7 @@ function App() {
   const [navTarget, setNavTarget] = useState(null)
   const { sidebarCollapsed, toggleSidebar } = usePersistUI()
   const [state, dispatch] = useReducer(appReducer, initialState)
-  const [updateInfo, setUpdateInfo] = useState({ hasUpdate: false })
+  const [updateInfo, setUpdateInfo] = useState(null)
 
   // 全局拦截外部链接点击：改用系统默认浏览器打开，避免 WebView 原地导航
   useEffect(() => {
@@ -211,7 +211,10 @@ function App() {
   if (state.isFirstRun) {
     return (
       <FluentProvider theme={webLightTheme}>
-        <WelcomeScreen onComplete={handleWelcomeComplete} />
+        <div className={styles.root}>
+          <TitleBar />
+          <WelcomeScreen onComplete={handleWelcomeComplete} />
+        </div>
       </FluentProvider>
     )
   }
@@ -247,7 +250,7 @@ function App() {
                 setNavTarget({ modId, commentId })
                 handleTabChange('workshop')
               }} />}
-              {selectedTab === 'settings' && <GameSettings config={state.config} onConfigChange={handleConfigChange} />}
+              {selectedTab === 'settings' && <GameSettings config={state.config} onConfigChange={handleConfigChange} appUpdateInfo={updateInfo} />}
             </main>
           </div>
         </div>

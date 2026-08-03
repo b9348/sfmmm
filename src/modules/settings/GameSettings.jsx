@@ -70,7 +70,7 @@ const useStyles = makeStyles({
   },
 })
 
-export function GameSettings({ config, onConfigChange }) {
+export function GameSettings({ config, onConfigChange, appUpdateInfo }) {
   const { t, i18n: i18nInstance } = useTranslation()
   const styles = useStyles()
   const [gamePath, setGamePath] = useState(config?.game_path || '')
@@ -125,6 +125,13 @@ export function GameSettings({ config, onConfigChange }) {
       }
     })()
   }, [])
+
+  // 复用 App 启动时检测的结果（与侧边栏 NEW 徽标同一数据源），打开设置页无需再手动点击检测
+  useEffect(() => {
+    if (appUpdateInfo) {
+      setUpdateInfo(appUpdateInfo)
+    }
+  }, [appUpdateInfo])
 
   const handleCheckUpdate = async () => {
     setChecking(true)
