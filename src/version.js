@@ -1,3 +1,3 @@
 // 应用版本号 — CI 自动更新此文件
-const APP_VERSION = '0.1.61'
+const APP_VERSION = '0.1.62'
 export default APP_VERSION

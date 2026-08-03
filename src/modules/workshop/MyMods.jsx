@@ -1,8 +1,8 @@
 import { useTranslation } from 'react-i18next'
 import { useState, useEffect, useCallback, useRef } from 'react'
 import {
-  Card, CardHeader, Text, Button, Spinner,
-  Input, Textarea, Select, makeStyles, tokens,
+  Card, CardHeader, Text, Button,
+  Input, Select, makeStyles, tokens,
   Badge, Dialog, DialogTrigger, DialogSurface,
   DialogBody, DialogTitle, DialogContent,
 } from '@fluentui/react-components'
@@ -13,7 +13,7 @@ import {
   Heart24Regular, Heart24Filled,
   ArrowLeft24Regular,
 } from '@fluentui/react-icons'
-import { listMyMods, createMod, updateMod, uploadModFile, deleteModFile, deleteImgbedFile, getModForEdit, getModDetail, deleteMod, checkModKey, setModPermissions, getDeviceId } from '../../services/workshopApi'
+import { listMyMods, createMod, updateMod, uploadModFile, deleteModFile, getModForEdit, getModDetail, deleteMod, checkModKey, setModPermissions, getDeviceId } from '../../services/workshopApi'
 import { resolveTranslationImages, extractImgbedUrls, deleteImageFromImgbed } from '../../services/imageApi'
 import { useAuth } from '../../contexts/useAuth'
 import { LanguageTranslationBlock } from './LanguageTranslationBlock'
@@ -25,8 +25,6 @@ import { ConfirmDialog, BackButton, ProgressModal, AsyncView, LoginForm, EmptySt
 import PermissionSettings from './PermissionSettings'
 import { LANGUAGES, LANG_LABELS } from '../../i18n/languages'
 import Database from '@tauri-apps/plugin-sql'
-
-const MAX_INSTRUCTIONS_LENGTH = 10000
 
 // 追加去重：按 zipPath（缺失时回退 name）合并条目，新条目覆盖同 key 旧条目
 function mergeEntries(existing, incoming) {
@@ -370,6 +368,7 @@ export function CreateModPage({ onClose, onCreated }) {
             size="small"
             placeholder={t('workshop.modIdCreatePlaceholder')}
             value={modKey}
+            maxLength={64}
             onChange={(_, d) => setModKey(d.value)}
           />
         </div>

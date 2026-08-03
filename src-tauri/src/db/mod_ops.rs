@@ -585,6 +585,12 @@ pub async fn db_create_mod(
     with_conn(state.inner(), move |conn: &mut PooledConn| {
         let cat = category.unwrap_or_else(|| "v1".into());
 
+        // mods.mod_id 列为 varchar(64)（按字符计），超长时 MySQL 会报 ERROR 1406，
+        // 这里提前校验并返回友好错误；用 chars().count() 而非 len()，避免误杀多字节字符。
+        if mod_key.chars().count() > 64 {
+            return Ok(ApiResponse::err("mod_key 长度不能超过 64 个字符"));
+        }
+
         let exists: Option<(u64,)> = conn.exec_first(
             "SELECT id FROM mods WHERE mod_id = ?", (&mod_key,)
         ).map_err(|e| e.to_string())?;
