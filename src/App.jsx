@@ -2,7 +2,7 @@ import { useState, useEffect, useReducer } from 'react'
 import { FluentProvider, webLightTheme, Dialog, DialogSurface, DialogBody, DialogTitle, DialogContent, DialogActions, DialogTrigger, Button, Text } from '@fluentui/react-components'
 import { makeStyles, tokens } from '@fluentui/react-components'
 import { TabNavigation, WelcomeScreen, TitleBar } from './components'
-import { SaveManagement, ImportExport, GameSettings, Workshop, MissionFolder, ApplicationsPage } from './modules'
+import { SaveManagement, ImportExport, GameSettings, Workshop, MissionFolder, ApplicationsPage, LikeRecords } from './modules'
 import { AuthProvider } from './contexts/AuthContext.jsx'
 import { UserNavProvider } from './contexts/UserNavProvider.jsx'
 import { NotificationProvider } from './contexts/NotificationContext'
@@ -134,7 +134,7 @@ function App() {
           }
         }
 
-        const validTabs = ['mods', 'v1', 'v2', 'saves', 'import-export', 'workshop', 'apply', 'settings']
+        const validTabs = ['mods', 'v1', 'v2', 'saves', 'import-export', 'workshop', 'likes', 'apply', 'settings']
         if (configMap.selected_tab && validTabs.includes(configMap.selected_tab)) {
           setSelectedTab(configMap.selected_tab)
         }
@@ -242,6 +242,7 @@ function App() {
               {selectedTab === 'saves' && <SaveManagement config={state.config} />}
               {selectedTab === 'import-export' && <ImportExport config={state.config} />}
               {selectedTab === 'workshop' && <Workshop initialModId={navTarget?.modId} initialCommentId={navTarget?.commentId} onConsumeNavTarget={() => setNavTarget(null)} />}
+              {selectedTab === 'likes' && <LikeRecords />}
               {selectedTab === 'apply' && <ApplicationsPage onNavigate={(modId, commentId) => {
                 setNavTarget({ modId, commentId })
                 handleTabChange('workshop')

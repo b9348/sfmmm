@@ -24,6 +24,7 @@ import {
   PersonAccounts24Regular,
   Folder24Regular,
   DocumentFolder24Regular,
+  Heart24Regular,
   MoreHorizontal20Regular,
 } from '@fluentui/react-icons'
 import { useAuth } from '../../contexts/useAuth'
@@ -241,6 +242,7 @@ export function TabNavigation({ value, onChange, isCollapsed, onToggleCollapse, 
     // { value: 'saves', label: '存档', icon: Save24Regular },
     // { value: 'import-export', label: '导入/导出', icon: ArrowSwap24Regular },
     { value: 'workshop', label: t('nav.workshop'), icon: Cloud24Regular },
+    { value: 'likes', label: t('nav.likes'), icon: Heart24Regular },
     { value: 'apply', label: t('nav.apply'), icon: PersonAccounts24Regular },
     { value: 'settings', label: t('nav.settings'), icon: Settings24Regular },
   ]

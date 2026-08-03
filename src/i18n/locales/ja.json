@@ -18,6 +18,7 @@
     "v1": "v1",
     "v2": "v2",
     "workshop": "ワークショップ",
+    "likes": "いいね履歴",
     "apply": "申請と通知",
     "settings": "設定",
     "saves": "セーブデータ",
@@ -405,5 +406,11 @@
     "reloadTaskHint": "ゲーム実行中にカスタム任務を有効/無効にした後は、ゲーム内で ALT+F9 を押して任務を再読み込みしてください",
     "folderCount": "{{dirs}} フォルダ、{{files}} ファイル",
     "itemCount": "{{count}} 項目"
+  },
+  "likes": {
+    "loginHint": "ログインすると、いいねしたModを確認できます",
+    "count": "いいねしたMod {{count}} 件",
+    "empty": "いいねしたModはまだありません",
+    "emptyHint": "ワークショップで気に入ったModにいいねしましょう"
   }
 }

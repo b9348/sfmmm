@@ -18,6 +18,7 @@ import { RichTextContent, MarkdownContent } from '../../components/common/RichTe
 import { invoke } from '@tauri-apps/api/core'
 import { useAuth } from '../../contexts/useAuth'
 import { submitApplication, likeMod, unlikeMod, getDeviceId } from '../../services/workshopApi'
+import { upsertLikedModToCache, removeLikedModFromCache } from '../../services/likedModsCache'
 import CommentSection from './CommentSection'
 import { getDb, getGamePath } from '../../services/dbHelper'
 import { BackButton, FloatingActions, FileRow, UserLink } from '../../components'
@@ -120,10 +121,12 @@ export default function ModDetailPage({ mod, onBack, onEdit, scrollToCommentId }
         const res = await unlikeMod(mod.id, deviceIdRef.current)
         setLikeCount(res.like_count || Math.max((likeCount) - 1, 0))
         setIsLiked(false)
+        removeLikedModFromCache(mod.id)
       } else {
         const res = await likeMod(mod.id, deviceIdRef.current)
         setLikeCount(res.like_count || (likeCount + 1))
         setIsLiked(true)
+        upsertLikedModToCache(mod)
       }
     } catch (e) {
       console.error('Like toggle failed', e)

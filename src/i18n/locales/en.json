@@ -18,6 +18,7 @@
     "v1": "v1",
     "v2": "v2",
     "workshop": "Workshop",
+    "likes": "Likes",
     "apply": "Applications & Notifications",
     "settings": "Settings",
     "saves": "Saves",
@@ -405,5 +406,11 @@
     "reloadTaskHint": "While the game is running, press ALT+F9 in-game to reload custom missions after enabling/disabling them.",
     "folderCount": "{{dirs}} folders, {{files}} files",
     "itemCount": "{{count}} items"
+  },
+  "likes": {
+    "loginHint": "Log in to view the mods you have liked",
+    "count": "{{count}} liked mods",
+    "empty": "No liked mods yet",
+    "emptyHint": "Go to the workshop and like a mod you enjoy"
   }
 }

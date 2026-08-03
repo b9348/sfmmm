@@ -183,6 +183,17 @@ export async function listMyMods({ author_id, lang = 'zh', page = 1, page_size =
   }
 }
 
+export async function listLikedMods({ device_id, lang = 'zh', page = 1, page_size = 20 } = {}) {
+  const res = await dbCall('db_list_liked_mods', { device_id: device_id || null, lang, page, page_size })
+  return {
+    success: true,
+    mods: res.mods || [],
+    total: res.total || 0,
+    page: res.page || 1,
+    page_size: res.page_size || page_size,
+  }
+}
+
 export async function likeMod(mod_id, device_id) {
   const res = await dbCall('db_like_mod', { mod_id: Number(mod_id), device_id })
   return res.data || { like_count: 0, is_liked: true }

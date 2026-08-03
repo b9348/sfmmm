@@ -885,6 +885,31 @@ pub fn run() {
             sql: "ALTER TABLE installed_workshop_mods ADD COLUMN file_hashes TEXT DEFAULT '';",
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 8,
+            description: "create_liked_workshop_mods_cache",
+            sql: "CREATE TABLE IF NOT EXISTS liked_workshop_mods (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                mod_id INTEGER NOT NULL UNIQUE,
+                mod_key TEXT DEFAULT '',
+                display_name TEXT DEFAULT '',
+                description TEXT DEFAULT '',
+                category TEXT DEFAULT '',
+                author_id INTEGER DEFAULT 0,
+                author_name TEXT DEFAULT '',
+                author_avatar TEXT DEFAULT '',
+                download_count INTEGER DEFAULT 0,
+                like_count INTEGER DEFAULT 0,
+                is_liked INTEGER DEFAULT 1,
+                comment_count INTEGER DEFAULT 0,
+                files TEXT DEFAULT '',
+                translations TEXT DEFAULT '',
+                created_at TEXT DEFAULT '',
+                updated_at TEXT DEFAULT '',
+                cached_at TEXT DEFAULT CURRENT_TIMESTAMP
+            );",
+            kind: MigrationKind::Up,
+        },
     ];
 
     tauri::Builder::default()
@@ -895,7 +920,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             open_folder, scan_mods, toggle_mod_enabled, batch_toggle_mod_enabled, http_request, download_and_extract_7z,
             db::db_login, db::db_register, db::db_update_profile,
-            db::db_list_mods, db::db_list_my_mods,
+            db::db_list_mods, db::db_list_my_mods, db::db_list_liked_mods,
             db::db_get_mod_detail, db::db_get_mod_for_edit,
             db::db_create_mod, db::db_update_mod, db::db_delete_mod,
             db::db_save_mod_file,

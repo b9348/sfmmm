@@ -18,6 +18,7 @@
     "v1": "v1",
     "v2": "v2",
     "workshop": "创意工坊",
+    "likes": "点赞记录",
     "apply": "申请与通知",
     "settings": "设置",
     "saves": "存档",
@@ -405,5 +406,11 @@
     "reloadTaskHint": "游戏运行时，停用/启用自定义任务需要在游戏中按下组合键 ALT+F9 来更新游戏任务",
     "folderCount": "{{dirs}} 个文件夹，{{files}} 个文件",
     "itemCount": "{{count}} 项"
+  },
+  "likes": {
+    "loginHint": "登录后即可查看你点赞过的模组",
+    "count": "已点赞 {{count}} 个模组",
+    "empty": "还没有点赞记录",
+    "emptyHint": "去创意工坊给喜欢的模组点个赞吧"
   }
 }

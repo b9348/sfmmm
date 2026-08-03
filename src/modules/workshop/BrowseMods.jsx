@@ -1,18 +1,15 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import {
-  Card, CardHeader, Text, Button, SearchBox,
-  Spinner, makeStyles, tokens, Badge,
+  Card, Text, Button, SearchBox,
+  Spinner, makeStyles,
   Select,
 } from '@fluentui/react-components'
 import {
   ArrowClockwise24Regular,
   Search24Regular,
   Add24Regular,
-  HeartRegular,
-  HeartFilled,
   Add20Regular,
   Subtract20Regular,
-  CommentRegular,
 } from '@fluentui/react-icons'
 import { useTranslation } from 'react-i18next'
 import { listMods, getModDetail, getModForEdit, getDeviceId } from '../../services/workshopApi'
@@ -20,14 +17,8 @@ import ModDetailPage from './ModDetailPage'
 import { useAuth } from '../../contexts/useAuth'
 import { EditModPage, CreateModPage } from './MyMods'
 import { getConfig, setConfig } from '../../services/dbHelper'
-import { Pagination, AsyncView, LoginDialog, FloatingActions, FileRow, EmptyState, UserLink } from '../../components'
-
-const CATEGORIES = [
-  { value: 'v1', label: 'v1' },
-  { value: 'v2', label: 'v2' },
-  { value: 'dll', label: 'dll' },
-  { value: 'composite', label: 'composite' },
-]
+import { Pagination, AsyncView, LoginDialog, FloatingActions, EmptyState } from '../../components'
+import { ModCard } from './ModCard'
 
 const useStyles = makeStyles({
   root: {
@@ -52,57 +43,6 @@ const useStyles = makeStyles({
     display: 'grid',
     gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
     gap: '12px',
-  },
-  card: {
-    padding: '12px',
-    cursor: 'pointer',
-    height: '100%',
-    minHeight: '220px',
-    transition: 'box-shadow 0.2s ease',
-    '&:hover': {
-      boxShadow: tokens.shadow4,
-    },
-  },
-  cardBody: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '8px',
-    marginTop: '8px',
-  },
-  meta: {
-    color: tokens.colorNeutralForeground2,
-    fontSize: tokens.fontSizeSmall,
-  },
-  description: {
-    display: '-webkit-box',
-    WebkitLineClamp: 2,
-    WebkitBoxOrient: 'vertical',
-    overflow: 'hidden',
-    color: tokens.colorNeutralForeground2,
-    fontSize: tokens.fontSizeSmall,
-    lineHeight: '1.4',
-  },
-  emptyState: {
-    display: 'flex',
-    flexDirection: 'column',
-    justifyContent: 'center',
-    alignItems: 'center',
-    gap: '8px',
-    padding: '32px',
-    textAlign: 'center',
-  },
-  footerRow: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: '8px',
-  },
-  stats: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '4px',
-    color: tokens.colorNeutralForeground3,
-    fontSize: tokens.fontSizeSmall,
   },
   })
 
@@ -363,71 +303,15 @@ export function BrowseMods({ initialModId, initialCommentId, onConsumeNavTarget 
         ) : (
           <>
             <div className={styles.grid} style={{ gridTemplateColumns: `repeat(${itemsPerRow}, 1fr)` }}>
-              {mods.map(mod => {
-                const cat = CATEGORIES.find(c => c.value === mod.category)
-                return (
-                <Card key={mod.id} className={styles.card} appearance="outline" onClick={() => {
+              {mods.map(mod => (
+                <ModCard key={mod.id} mod={mod} onClick={() => {
                   window.location.hash = `#/mod/${mod.id}`
                   setDetailMod(mod)
                   getModDetail(mod.id, 'zh', user?.user_id, deviceIdRef.current)
                     .then(data => { if (data.data?.mod) setDetailMod(data.data.mod) })
                     .catch(() => {})
-                }}>
-                  <CardHeader
-                    header={
-                      <Text size="small" className={styles.meta} truncate>{mod.mod_key}</Text>
-                    }
-                    description={
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                        <UserLink
-                          userId={mod.author_id}
-                          username={mod.author_name}
-                          avatar={mod.author_avatar}
-                          size={16}
-                          nameSize={100}
-                        />
-                        <Text size="small" className={styles.meta}>
-                          {mod.updated_at && mod.updated_at !== mod.created_at ? mod.updated_at : mod.created_at}
-                        </Text>
-                      </div>
-                    }
-                    action={
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
-                          <CommentRegular style={{ fontSize: '16px', color: tokens.colorNeutralForeground3 }} />
-                          <Text size="small">{mod.comment_count || 0}</Text>
-                        </div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '3px' }} title={mod.is_liked ? t('workshop.likedHint') : t('workshop.unlikedHint')}>
-                          {mod.is_liked ? (
-                            <HeartFilled style={{ color: tokens.colorPaletteRedForeground1, fontSize: '16px' }} />
-                          ) : (
-                            <HeartRegular style={{ fontSize: '16px', color: tokens.colorNeutralForeground3 }} />
-                          )}
-                          <Text size="small">{mod.like_count || 0}</Text>
-                        </div>
-                        <Badge appearance="outline" size="small" style={{ whiteSpace: 'nowrap' }}>
-                          {cat ? t(`workshop.category_${cat.value}`) : (mod.category ? t(`workshop.category_${mod.category}`, mod.category) : t('workshop.uncategorized'))}
-                        </Badge>
-                      </div>
-                    }
-                  />
-                  <div className={styles.cardBody}>
-                    {mod.description && (
-                      <Text size="small" className={styles.description}>{mod.description}</Text>
-                    )}
-                    {mod.files && mod.files.length > 0 && (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                        {mod.files.map(f => {
-                          const langName = mod.translations?.[f.lang_code]?.name || mod.display_name
-                          return (
-                          <FileRow key={f.lang_code} langCode={f.lang_code} name={langName} version={f.version} fileSize={f.file_size} />
-                        )})}
-                      </div>
-                    )}
-                  </div>
-                </Card>
-              )
-            })}
+                }} />
+              ))}
             </div>
 
             <Pagination page={page} totalPages={totalPages} onChange={(p) => fetchMods(p)} />
