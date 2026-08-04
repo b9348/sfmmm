@@ -67,6 +67,7 @@ export function BrowseMods({ initialModId, initialCommentId, onConsumeNavTarget 
   const [detailMod, setDetailMod] = useState(null)
   const [detailCommentId, setDetailCommentId] = useState(null)
   const [detailLoading, setDetailLoading] = useState(!!initialModId)
+  const modStackRef = useRef([]) // 导航栈：返回上一页而非列表
   const [editingMod, setEditingMod] = useState(null)
   const [showCreatePage, setShowCreatePage] = useState(false)
   const [itemsPerRow, setItemsPerRow] = useState(3)
@@ -87,6 +88,10 @@ export function BrowseMods({ initialModId, initialCommentId, onConsumeNavTarget 
     // 非数字时作为 mod_key 传入，后端按 mod_key 解析详情。
     const fromNav = !!initialModId
     const modKey = Number.isFinite(Number(modId)) ? null : modId
+    // 从外部导航（资料弹窗等）进入时，保存当前 mod 到导航栈，返回时回到上一页
+    if (fromNav && detailMod) {
+      modStackRef.current.push(detailMod)
+    }
     getModDetail(modId, 'zh', user?.user_id, deviceIdRef.current, modKey)
       .then(data => {
         if (data.data?.mod) {
@@ -228,7 +233,18 @@ export function BrowseMods({ initialModId, initialCommentId, onConsumeNavTarget 
   if (editingMod) return <EditModPage mod={editingMod} onClose={() => setEditingMod(null)} onUpdated={() => { setEditingMod(null); fetchMods() }} />
 
   if (detailMod) {
-    return <ModDetailPage key={detailMod.id} mod={detailMod} onBack={() => { setDetailMod(null); setDetailCommentId(null); window.location.hash = '' }} onEdit={handleEdit} scrollToCommentId={detailCommentId} />
+    return <ModDetailPage key={detailMod.id} mod={detailMod} onBack={() => {
+      if (modStackRef.current.length > 0) {
+        const prevMod = modStackRef.current.pop()
+        window.location.hash = `#/mod/${prevMod.id}`
+        setDetailMod(prevMod)
+        setDetailCommentId(null)
+      } else {
+        setDetailMod(null)
+        setDetailCommentId(null)
+        window.location.hash = ''
+      }
+    }} onEdit={handleEdit} scrollToCommentId={detailCommentId} />
   }
 
   if (detailLoading) {
@@ -305,6 +321,7 @@ export function BrowseMods({ initialModId, initialCommentId, onConsumeNavTarget 
             <div className={styles.grid} style={{ gridTemplateColumns: `repeat(${itemsPerRow}, 1fr)` }}>
               {mods.map(mod => (
                 <ModCard key={mod.id} mod={mod} onClick={() => {
+                  if (detailMod) modStackRef.current.push(detailMod)
                   window.location.hash = `#/mod/${mod.id}`
                   setDetailMod(mod)
                   getModDetail(mod.id, 'zh', user?.user_id, deviceIdRef.current)

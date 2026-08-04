@@ -175,18 +175,7 @@
     "languageDesc": "选择应用程序的显示语言（保存后重启生效）",
     "aboutTitle": "关于",
     "aboutDesc": "欢迎提交 Issue 和反馈，帮助我们改进这个工具。",
-    "openGitHub": "打开 GitHub 仓库",
-    "acknowledgments": {
-      "title": "感谢名单",
-      "desc": "感谢以下朋友对本项目的支持与打赏：",
-      "items": [
-        "感谢 `Eiener` 通过 QQ 转账打赏的 100 人民币",
-        "感谢 B站用户 `捞鱼R` 充电评论 6 B币",
-        "感谢 B站用户 `歪吐斯瑞儿` 充电评论 6 B币",
-        "感谢 B站用户 `在线求钱买奥迪` 充电评论 7 B币",
-        "感谢 B站用户 `FasWust` 充电评论 6 B币"
-      ]
-    }
+    "openGitHub": "打开 GitHub 仓库"
   },
   "workshop": {
     "cloud": "云",

@@ -223,6 +223,7 @@ function App() {
     <FluentProvider theme={webLightTheme}>
       <AuthProvider>
         <UserNavProvider onOpenMod={(modId) => {
+          window.location.hash = `#/mod/${modId}`
           setNavTarget({ modId, commentId: null })
           handleTabChange('workshop')
         }}>
