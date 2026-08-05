@@ -98,7 +98,6 @@
     "checked": "已检查",
     "hasUpdate": "有更新",
     "workshopBadge": "创意工坊",
-    "workshopFrom": "来自：{{name}}",
     "hashShort": "哈希 {{hash}}",
     "hashFull": "完整哈希：{{hash}}",
     "sourceMismatch": "来源冲突",

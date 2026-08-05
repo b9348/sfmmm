@@ -98,7 +98,6 @@
     "checked": "確認済み",
     "hasUpdate": "更新あり",
     "workshopBadge": "ワークショップ",
-    "workshopFrom": "由来：{{name}}",
     "hashShort": "ハッシュ {{hash}}",
     "hashFull": "完全ハッシュ：{{hash}}",
     "sourceMismatch": "ソース不一致",

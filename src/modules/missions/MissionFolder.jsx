@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { makeStyles, tokens, Text, Button, Card, CardHeader, Badge, Tooltip, Spinner, ProgressBar } from '@fluentui/react-components'
 import { FolderOpen24Regular, ArrowClockwise24Regular, Document24Regular, Folder24Regular, ChevronRight24Regular, Play24Regular, Pause24Regular, Delete24Regular, Cloud24Regular, ArrowDownload24Regular, Warning24Regular } from '@fluentui/react-icons'
@@ -74,7 +74,7 @@ const useStyles = makeStyles({
       boxShadow: tokens.shadow4,
     },
   },
-  // 同一创意工坊订阅的分组容器：横贯整行，带清晰边框与品牌色描边
+  // 同一创意工坊订阅的分组容器：横贯整行，带淡绿描边（创意工坊徽章同色更淡，避免与单选高亮的品牌蓝撞色）
   groupCard: {
     padding: '12px 14px',
     flexBasis: '100%',
@@ -82,9 +82,9 @@ const useStyles = makeStyles({
     display: 'flex',
     flexDirection: 'column',
     gap: '10px',
-    border: `2px solid ${tokens.colorBrandStroke1}`,
+    border: `2px solid ${tokens.colorStatusSuccessBackground2}`,
     borderRadius: tokens.borderRadiusXLarge,
-    boxShadow: `0 0 0 3px ${tokens.colorBrandBackground2}, ${tokens.shadow4}`,
+    boxShadow: `0 0 0 3px ${tokens.colorStatusSuccessBackground3}, ${tokens.shadow4}`,
   },
   groupHeader: {
     display: 'flex',
@@ -259,9 +259,21 @@ async function getChildCount(dirPath) {
   }
 }
 
+// 取文件扩展名。禁用后文件被重命名为 xxx[ban]dll/json（点号被 [ban] 替代），
+// 若只看最后一个点号会取不到扩展名，导致扩展名徽章渲染成空心圆圈；需先识别 [ban] 后缀
 function getExt(name) {
+  const banned = name.match(/\[ban\]([a-z0-9]+)$/i)
+  if (banned) return banned[1].toLowerCase()
   const i = name.lastIndexOf('.')
   return i > 0 ? name.slice(i + 1).toLowerCase() : ''
+}
+
+// 归一化名称用于解析创意工坊 mod_key：去扩展名、去 [ban] 禁用标记。
+// 禁用是重命名为 xxx[ban]dll/json（[ban] 后直接跟无点号的扩展名），必须连同其后缀
+// 一起去掉，否则 foo[ban]json 会归一化成 foojson 而失配。即：改名不影响来源识别，
+// 来源仍以 installed_workshop_mods（SQLite）里的 mod_key 为准。
+function getWorkshopKey(name) {
+  return name.replace(/\.\w+$/, '').replace(/\[ban\][^./]*$/i, '').replace(/\/$/, '')
 }
 
 // 由 MissionFolder 的 subfolder 推断 mod 类别，供后端预检使用
@@ -343,22 +355,6 @@ function FolderCard({ name, fullPath, onNavigate, isWorkshop, workshopDetail, cl
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0 }}>
             <Folder24Regular />
             <Text size="small" weight="semibold" className={styles.fileName}>{name}</Text>
-            {showWorkshopInfo && <Badge appearance="filled" color="success" size="small">{t('mods.workshopBadge')}</Badge>}
-            {showWorkshopInfo && workshopDetail?.version && <Badge appearance="outline" size="small">v{workshopDetail.version}</Badge>}
-            {showWorkshopInfo && workshopDetail?.langCode && <Badge appearance="outline" size="small">{LANG_LABELS[workshopDetail.langCode] || workshopDetail.langCode}</Badge>}
-            {showWorkshopInfo && cloudInfo?.displayName && (
-              <Tooltip content={cloudInfo.displayName} relationship="label">
-                <Badge appearance="outline" size="small">{t('mods.workshopFrom', { name: cloudInfo.displayName })}</Badge>
-              </Tooltip>
-            )}
-            {showWorkshopInfo && workshopDetail?.fileHash && (
-              <Tooltip content={t('mods.hashFull', { hash: workshopDetail.fileHash })} relationship="label">
-                <Badge appearance="outline" size="small">{t('mods.hashShort', { hash: workshopDetail.fileHash.slice(0, 8) })}</Badge>
-              </Tooltip>
-            )}
-            {showWorkshopInfo && workshopDetail?.fileHash && cloudInfo?.latestFileHash && workshopDetail.fileHash !== cloudInfo.latestFileHash && (
-              <Badge appearance="filled" color="danger" size="small">{t('mods.sourceMismatch')}</Badge>
-            )}
           </div>
         }
         description={
@@ -374,9 +370,17 @@ function FolderCard({ name, fullPath, onNavigate, isWorkshop, workshopDetail, cl
         }
       />
       <div className={styles.buttonRow}>
-          <Tooltip content={t('mods.openContainingFolder')} relationship="label">
-            <Button size="small" icon={<FolderOpen24Regular />} appearance="subtle" onClick={(e) => { e.stopPropagation(); onOpenLocation?.(fullPath) }} />
-          </Tooltip>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexWrap: 'wrap', marginRight: 'auto' }}>
+          {showWorkshopInfo && <Badge appearance="filled" color="success" size="small">{t('mods.workshopBadge')}</Badge>}
+          {showWorkshopInfo && workshopDetail?.version && <Badge appearance="outline" size="small">v{workshopDetail.version}</Badge>}
+          {showWorkshopInfo && workshopDetail?.langCode && <Badge appearance="outline" size="small">{LANG_LABELS[workshopDetail.langCode] || workshopDetail.langCode}</Badge>}
+          {showWorkshopInfo && workshopDetail?.fileHash && cloudInfo?.latestFileHash && workshopDetail.fileHash !== cloudInfo.latestFileHash && (
+            <Badge appearance="filled" color="danger" size="small">{t('mods.sourceMismatch')}</Badge>
+          )}
+        </div>
+        <Tooltip content={t('mods.openContainingFolder')} relationship="label">
+          <Button size="small" icon={<FolderOpen24Regular />} appearance="subtle" onClick={(e) => { e.stopPropagation(); onOpenLocation?.(fullPath) }} />
+        </Tooltip>
         {showWorkshopInfo && (
           <ModCardActions modKey={modKey} hasUpdate={hasUpdate} onViewDetail={onViewDetail} onUpdate={onUpdate} onUninstall={onUninstall} pushRight={false} />
         )}
@@ -408,35 +412,23 @@ function FileCard({ name, fullPath, isBanned, onToggle, isWorkshop, hasUpdate, w
             <Text size="small" weight="semibold" className={styles.fileName}>{name}</Text>
           </div>
         }
-        description={
-          <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexWrap: 'wrap' }}>
-            <Badge appearance="outline" size="small">{ext.toUpperCase()}</Badge>
-            {isBanned && <Badge appearance="filled" color="danger" size="small">{t('mods.disabled')}</Badge>}
-            {showWorkshopInfo && <Badge appearance="filled" color="success" size="small">{t('mods.workshopBadge')}</Badge>}
-            {showWorkshopInfo && workshopDetail?.version && <Badge appearance="outline" size="small">v{workshopDetail.version}</Badge>}
-            {showWorkshopInfo && workshopDetail?.langCode && <Badge appearance="outline" size="small">{LANG_LABELS[workshopDetail.langCode] || workshopDetail.langCode}</Badge>}
-            {showWorkshopInfo && cloudInfo?.displayName && (
-              <Tooltip content={cloudInfo.displayName} relationship="label">
-                <Badge appearance="outline" size="small">{t('mods.workshopFrom', { name: cloudInfo.displayName })}</Badge>
-              </Tooltip>
-            )}
-            {showWorkshopInfo && workshopDetail?.fileHash && (
-              <Tooltip content={t('mods.hashFull', { hash: workshopDetail.fileHash })} relationship="label">
-                <Badge appearance="outline" size="small">{t('mods.hashShort', { hash: workshopDetail.fileHash.slice(0, 8) })}</Badge>
-              </Tooltip>
-            )}
-            {showWorkshopInfo && workshopDetail?.fileHash && cloudInfo?.latestFileHash && workshopDetail.fileHash !== cloudInfo.latestFileHash && (
-              <Badge appearance="filled" color="danger" size="small">{t('mods.sourceMismatch')}</Badge>
-            )}
-            {!inGroup && hasUpdate && <Badge appearance="filled" color="warning" size="small">{t('mods.hasUpdate')}</Badge>}
-          </div>
-        }
       />
       <div className={styles.buttonRow}>
-          <Tooltip content={t('mods.openContainingFolder')} relationship="label">
-            <Button size="small" icon={<FolderOpen24Regular />} appearance="subtle" onClick={(e) => { e.stopPropagation(); onOpenLocation?.(fullPath) }} />
-          </Tooltip>
-          <Tooltip content={isBanned ? t('mods.enable') : t('mods.disable')} relationship="label">
+        <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexWrap: 'wrap', marginRight: 'auto' }}>
+          <Badge appearance="outline" size="small">{ext.toUpperCase()}</Badge>
+          {isBanned && <Badge appearance="filled" color="danger" size="small">{t('mods.disabled')}</Badge>}
+          {showWorkshopInfo && <Badge appearance="filled" color="success" size="small">{t('mods.workshopBadge')}</Badge>}
+          {showWorkshopInfo && workshopDetail?.version && <Badge appearance="outline" size="small">v{workshopDetail.version}</Badge>}
+          {showWorkshopInfo && workshopDetail?.langCode && <Badge appearance="outline" size="small">{LANG_LABELS[workshopDetail.langCode] || workshopDetail.langCode}</Badge>}
+          {showWorkshopInfo && workshopDetail?.fileHash && cloudInfo?.latestFileHash && workshopDetail.fileHash !== cloudInfo.latestFileHash && (
+            <Badge appearance="filled" color="danger" size="small">{t('mods.sourceMismatch')}</Badge>
+          )}
+          {!inGroup && hasUpdate && <Badge appearance="filled" color="warning" size="small">{t('mods.hasUpdate')}</Badge>}
+        </div>
+        <Tooltip content={t('mods.openContainingFolder')} relationship="label">
+          <Button size="small" icon={<FolderOpen24Regular />} appearance="subtle" onClick={(e) => { e.stopPropagation(); onOpenLocation?.(fullPath) }} />
+        </Tooltip>
+        <Tooltip content={isBanned ? t('mods.enable') : t('mods.disable')} relationship="label">
           <Button
             size="small"
             icon={isBanned ? <Play24Regular /> : <Pause24Regular />}
@@ -454,7 +446,7 @@ function FileCard({ name, fullPath, isBanned, onToggle, isWorkshop, hasUpdate, w
 
 // 同一创意工坊订阅源（同 mod_key）下多个文件/文件夹的分组卡片：
 // 订阅级信息与操作集中在组头，组内成员保留各自的独立交互（打开、启用/停用等）
-function ModGroupCard({ modKey, items, children, workshopDetail, cloudInfo, hasUpdate, onViewDetail, onUpdate, onUninstall }) {
+function ModGroupCard({ modKey, items, children, workshopDetail, cloudInfo, hasUpdate, onViewDetail, onUpdate, onUninstall, onDisableAll, onEnableAll }) {
   const { t } = useTranslation()
   const styles = useStyles()
   const title = cloudInfo?.displayName || modKey
@@ -465,28 +457,28 @@ function ModGroupCard({ modKey, items, children, workshopDetail, cloudInfo, hasU
         <Tooltip content={modKey} relationship="label">
           <Text size="small" weight="semibold" className={styles.fileName}>{title}</Text>
         </Tooltip>
-        <Badge appearance="filled" color="success" size="small">{t('mods.workshopBadge')}</Badge>
-        <Badge appearance="outline" size="small">{t('mods.groupCount', { count: items.length })}</Badge>
-        {workshopDetail?.version && <Badge appearance="outline" size="small">v{workshopDetail.version}</Badge>}
-        {workshopDetail?.langCode && <Badge appearance="outline" size="small">{LANG_LABELS[workshopDetail.langCode] || workshopDetail.langCode}</Badge>}
-        {cloudInfo?.displayName && (
-          <Tooltip content={cloudInfo.displayName} relationship="label">
-            <Badge appearance="outline" size="small">{t('mods.workshopFrom', { name: cloudInfo.displayName })}</Badge>
-          </Tooltip>
-        )}
-        {workshopDetail?.fileHash && (
-          <Tooltip content={t('mods.hashFull', { hash: workshopDetail.fileHash })} relationship="label">
-            <Badge appearance="outline" size="small">{t('mods.hashShort', { hash: workshopDetail.fileHash.slice(0, 8) })}</Badge>
-          </Tooltip>
-        )}
-        {workshopDetail?.fileHash && cloudInfo?.latestFileHash && workshopDetail.fileHash !== cloudInfo.latestFileHash && (
-          <Badge appearance="filled" color="danger" size="small">{t('mods.sourceMismatch')}</Badge>
-        )}
-        {hasUpdate && <Badge appearance="filled" color="warning" size="small">{t('mods.hasUpdate')}</Badge>}
-        <ModCardActions modKey={modKey} hasUpdate={hasUpdate} onViewDetail={onViewDetail} onUpdate={onUpdate} onUninstall={onUninstall} />
       </div>
       <div className={styles.groupInnerGrid}>
         {children}
+      </div>
+      <div className={styles.buttonRow}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexWrap: 'wrap', marginRight: 'auto' }}>
+          <Badge appearance="filled" color="success" size="small">{t('mods.workshopBadge')}</Badge>
+          <Badge appearance="outline" size="small">{t('mods.groupCount', { count: items.length })}</Badge>
+          {workshopDetail?.version && <Badge appearance="outline" size="small">v{workshopDetail.version}</Badge>}
+          {workshopDetail?.langCode && <Badge appearance="outline" size="small">{LANG_LABELS[workshopDetail.langCode] || workshopDetail.langCode}</Badge>}
+          {workshopDetail?.fileHash && cloudInfo?.latestFileHash && workshopDetail.fileHash !== cloudInfo.latestFileHash && (
+            <Badge appearance="filled" color="danger" size="small">{t('mods.sourceMismatch')}</Badge>
+          )}
+          {hasUpdate && <Badge appearance="filled" color="warning" size="small">{t('mods.hasUpdate')}</Badge>}
+        </div>
+        <Tooltip content={t('mods.disableAll')} relationship="label">
+          <Button size="small" icon={<Pause24Regular />} appearance="subtle" onClick={(e) => { e.stopPropagation(); onDisableAll?.(modKey) }} />
+        </Tooltip>
+        <Tooltip content={t('mods.enableAll')} relationship="label">
+          <Button size="small" icon={<Play24Regular />} appearance="subtle" onClick={(e) => { e.stopPropagation(); onEnableAll?.(modKey) }} />
+        </Tooltip>
+        <ModCardActions modKey={modKey} hasUpdate={hasUpdate} onViewDetail={onViewDetail} onUpdate={onUpdate} onUninstall={onUninstall} pushRight={false} />
       </div>
     </Card>
   )
@@ -620,11 +612,10 @@ export function MissionFolder({ config, subfolder, onUninstall }) {
   }, [currentDir])
 
   // 检查文件/文件夹是否是已安装的工坊模组
-  const getWorkshopKey = (name) => name.replace(/\.\w+$/, '').replace(/\/$/, '')
   // 解析出对应的创意工坊 mod_key：
   // 1) 名称直接等于 mod_key（dll / 多数 v1 顶层文件夹）
   // 2) v1 部署后顶层文件夹名可能等于某已安装 mod 的 manifest 首段
-  const resolveModKey = (name) => {
+  const resolveModKey = useCallback((name) => {
     const key = getWorkshopKey(name)
     if (installed.has(key)) return key
     for (const [mk, d] of modDetails) {
@@ -639,7 +630,7 @@ export function MissionFolder({ config, subfolder, onUninstall }) {
       } catch { /* 忽略损坏的 manifest */ }
     }
     return null
-  }
+  }, [installed, modDetails])
   const isWorkshopMod = (name) => resolveModKey(name) !== null
   const hasUpdate = (name) => { const k = resolveModKey(name); return k ? updates.has(k) : false }
   const getWorkshopDetail = (name) => { const k = resolveModKey(name); return k ? modDetails.get(k) : null }
@@ -813,6 +804,53 @@ export function MissionFolder({ config, subfolder, onUninstall }) {
     }
   }, [currentDir, loadFiles, setLoading])
 
+  // 按 mod_key 把当前目录文件索引成 Map（O(1) 取组），供组级「暂停/继续」共用，
+  // 避免每次操作都对 files 全表扫描一遍（filesByKey 依赖 resolveModKey，已用 useCallback 稳定化）
+  const filesByKey = useMemo(() => {
+    const map = new Map()
+    for (const f of files) {
+      const k = resolveModKey(f.name)
+      if (!k) continue
+      if (!map.has(k)) map.set(k, [])
+      map.get(k).push(f)
+    }
+    return map
+  }, [files, resolveModKey])
+
+  // 组级「暂停/继续」共用逻辑：
+  //   ban=true  → 只把组内【未禁用】的文件禁用（已禁用的跳过）
+  //   ban=false → 只把组内【已禁用】的文件恢复（未禁用的跳过）
+  // 因此两个按钮始终同时显示，即使组内混有用户手动暂停的文件也各自幂等、不会误操作。
+  // 与 toggleItemEnabled 相同，只就地更新 files 状态而不重新扫描目录，
+  // 配合 getWorkshopKey 对 [ban] 标记的归一化，改名后文件仍留在所属分组容器内。
+  const handleGroupToggleAll = useCallback(async (modKey, ban) => {
+    if (!currentDir) return
+    const targets = (filesByKey.get(modKey) || [])
+      .filter(f => !f.isDir && (ban ? !f.isBanned : f.isBanned))
+    if (targets.length === 0) return
+    const results = await Promise.allSettled(
+      targets.map(f => invoke('toggle_mod_enabled', { path: `${currentDir}/${f.name}`.replace(/\//g, '\\') }))
+    )
+    const renamed = new Map() // 旧完整路径 -> 新文件名
+    results.forEach((r, i) => {
+      if (r.status === 'fulfilled') {
+        const newPath = r.value[1]
+        renamed.set(`${currentDir}/${targets[i].name}`, newPath.split(/[/\\]/).pop())
+      } else {
+        console.error(`Failed to ${ban ? 'disable' : 'enable'} group member:`, r.reason)
+      }
+    })
+    if (renamed.size === 0) return
+    setFiles(prev => prev.map(f => {
+      const fullPath = `${currentDir}/${f.name}`
+      const newName = renamed.get(fullPath)
+      return newName ? { ...f, name: newName, isBanned: ban } : f
+    }))
+  }, [currentDir, filesByKey, setFiles])
+
+  const handleGroupDisableAll = useCallback((modKey) => handleGroupToggleAll(modKey, true), [handleGroupToggleAll])
+  const handleGroupEnableAll = useCallback((modKey) => handleGroupToggleAll(modKey, false), [handleGroupToggleAll])
+
   return (
     <div className={styles.root}>
       <Card className={styles.toolbarCard}>
@@ -920,6 +958,8 @@ export function MissionFolder({ config, subfolder, onUninstall }) {
                   onViewDetail={handleViewDetail}
                   onUpdate={handleUpdate}
                   onUninstall={onUninstall}
+                  onDisableAll={handleGroupDisableAll}
+                  onEnableAll={handleGroupEnableAll}
                 >
                   {members.map(({ m, j }) => renderItem(m, j, true))}
                 </ModGroupCard>

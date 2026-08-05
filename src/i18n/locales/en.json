@@ -98,7 +98,6 @@
     "checked": "Checked",
     "hasUpdate": "Has update",
     "workshopBadge": "Workshop",
-    "workshopFrom": "From: {{name}}",
     "hashShort": "Hash {{hash}}",
     "hashFull": "Full hash: {{hash}}",
     "sourceMismatch": "Source conflict",
