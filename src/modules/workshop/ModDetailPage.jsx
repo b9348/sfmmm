@@ -36,6 +36,23 @@ function compareSemver(a, b) {
   return 0
 }
 
+// 打开目录时的高亮项：manifest 路径可能带子目录前缀（作者上传的是文件夹，如
+// "上级--长--.../01.json"），而 Windows 资源管理器只显示 installedDir 的【直接子项】，
+// 深层文件在当前视图中不可见、无法高亮。故取每项第一段并去重——文件夹型 mod 高亮
+// 文件夹本身，平铺的单/多文件高亮文件名，保证高亮目标在视图中可见、可被选中。
+function openDirHighlightItems(files) {
+  const seen = new Set()
+  const items = []
+  for (const f of files || []) {
+    const first = String(f).split(/[/\\]/)[0]
+    if (first && !seen.has(first)) {
+      seen.add(first)
+      items.push(first)
+    }
+  }
+  return items
+}
+
 const useStyles = makeStyles({
   root: {
     display: 'flex',
@@ -207,8 +224,21 @@ export default function ModDetailPage({ mod, onBack, onEdit, scrollToCommentId }
               const fileList = manifest ? JSON.parse(manifest) : []
               const firstPath = fileList[0] || ''
               const segments = firstPath.split('/')
-              const topDir = segments.length > 1 ? segments.slice(0, -1).join('\\') : firstPath
-              targetDir = topDir ? `${base}\\${topDir}` : base
+              if (segments.length > 1) {
+                const topDirSegs = segments.slice(0, -1)
+                targetDir = `${base}\\${topDirSegs.join('\\')}`
+                // installedFiles（manifest 是相对游戏根的路径）需转换为相对收窄后
+                // targetDir 的路径，使 open_folder 的 path.join(item) 解析到真实文件
+                setInstalledFiles(fileList.map(f => {
+                  const segs = f.split('/')
+                  return segs.length > topDirSegs.length
+                    ? segs.slice(topDirSegs.length).join('\\')
+                    : f.replace(/\//g, '\\')
+                }))
+              } else {
+                // 第一项是根级文件（单段路径）：targetDir 保持游戏根，files 保持相对游戏根
+                targetDir = base
+              }
             } else {
               targetDir = `${base}\\CustomMissions`
             }
@@ -458,7 +488,7 @@ export default function ModDetailPage({ mod, onBack, onEdit, scrollToCommentId }
                       onClick={(e) => {
                         e.stopPropagation()
                         if (installedDir) {
-                          invoke('open_folder', { path: installedDir, selected_items: installedFiles })
+                          invoke('open_folder', { path: installedDir, selected_items: openDirHighlightItems(installedFiles) })
                         }
                       }}
                     >
@@ -510,7 +540,7 @@ export default function ModDetailPage({ mod, onBack, onEdit, scrollToCommentId }
             <Text size="small" style={{ color: tokens.colorPaletteGreenForeground1 }}>
               {t('workshop.installSuccess')}{installedDir}
             </Text>
-            <Button size="small" appearance="subtle" style={{ marginLeft: '8px' }} onClick={() => invoke('open_folder', { path: installedDir, selected_items: installedFiles })}>
+            <Button size="small" appearance="subtle" style={{ marginLeft: '8px' }} onClick={() => invoke('open_folder', { path: installedDir, selected_items: openDirHighlightItems(installedFiles) })}>
               {t('workshop.openDir')}
             </Button>
           </div>

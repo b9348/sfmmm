@@ -144,6 +144,27 @@ export async function installMod({ modKey, category, fileUrl, version, fileHash,
 
   await extractAll(zip)
 
+  // composite 类别：从解出的文件推断顶层目录，使返回的 targetDir 更具体
+  // （如 "BepInEx/plugins/CosplayShop" 而非游戏根目录），供前端"打开目录"精确定位。
+  // 注意：extractedFiles 始终保留相对游戏根的全路径（manifest/卸载依赖此语义），
+  // 返回给前端的 files 需转换为相对收窄后 targetDir 的路径，保证 open_folder 的
+  // path.join(item) 能解析到真实文件。第一项是根级文件（单段路径）时保持 base。
+  let openFiles = extractedFiles
+  if (category === 'composite' && extractedFiles.length > 0) {
+    const firstPath = extractedFiles[0] || ''
+    const segments = firstPath.split('/')
+    if (segments.length > 1) {
+      const topDirSegs = segments.slice(0, -1)
+      targetDir = `${base}\\${topDirSegs.join('\\')}`
+      openFiles = extractedFiles.map(f => {
+        const segs = f.split('/')
+        return segs.length > topDirSegs.length
+          ? segs.slice(topDirSegs.length).join('\\')
+          : f.replace(/\//g, '\\')
+      })
+    }
+  }
+
   // 后端回填：把本 mod 的逐文件指纹（与上传者 computeZipFileHashes、预检 compute_local_hashes 同一 basename 口径，
   // 含嵌套 zip 递归展开）写回云端 mod_files.file_hashes。始终以官方 zip 算出的规范指纹覆盖（幂等），
   // 使旧的非递归（缺内包文件）指纹也能在安装时被升级为精确指纹。失败仅告警，绝不阻断安装流程。
@@ -200,7 +221,7 @@ export async function installMod({ modKey, category, fileUrl, version, fileHash,
     console.warn('[installMod] 保存安装记录失败:', e)
   }
 
-  return { targetDir, fileCount, files: extractedFiles }
+  return { targetDir, fileCount, files: openFiles }
 }
 
 export async function uninstallMod({ modKey }) {

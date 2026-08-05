@@ -333,7 +333,7 @@ fn missing_bepinex_core_files(game_path: &PathBuf) -> Vec<String> {
 
 #[tauri::command(rename_all = "snake_case")]
 fn open_folder(path: String, selected_items: Option<Vec<String>>) -> Result<(), String> {
-    let input_path = PathBuf::from(path);
+    let input_path = PathBuf::from(&path);
     let mut items = selected_items.unwrap_or_default();
 
     // selected_items 为空 => 前端要“打开该路径本身”：
@@ -347,8 +347,18 @@ fn open_folder(path: String, selected_items: Option<Vec<String>>) -> Result<(), 
     let open_path = if items.is_empty() {
         if input_path.is_dir() {
             input_path.clone()
-        } else {
+        } else if input_path.is_file() {
             // 单文件：在其父目录中高亮该文件
+            if let Some(name) = input_path.file_name().and_then(|n| n.to_str()) {
+                items.push(name.to_string());
+            }
+            input_path.parent().map(|p| p.to_path_buf()).unwrap_or_else(|| input_path.clone())
+        } else if input_path.exists() {
+            // 路径存在但既不是常规文件也不是常规目录（如 junction/符号链接/交接点）。
+            // is_dir() 对 junction 可能误判为假，直接打开该路径，由 SHParseDisplayName 可靠解析。
+            input_path.clone()
+        } else {
+            // 路径不存在：尝试打开父目录并高亮原路径名称
             if let Some(name) = input_path.file_name().and_then(|n| n.to_str()) {
                 items.push(name.to_string());
             }
@@ -422,9 +432,14 @@ fn open_folder(path: String, selected_items: Option<Vec<String>>) -> Result<(), 
         // （ILCreateFromPath 生成绝对 PIDL 多选）与 Windows 资源管理器实际行为一致：会打开
         // pidlFolder 并高亮这些条目；对符号链接/目录交接点(junction) 子项也稳定，故不转换为
         // 相对 PIDL（ILFindChild 对 junction 子项会返回 null，反而导致高亮丢失）。
+        // 注意：item 可能来自前端 manifest（含 '/' 分隔符），必须归一化为 '\' 再 join，
+        // 否则 SHParseDisplayName 对混合分隔符路径返回 E_INVALIDARG(0x80070057) 解析失败，
+        // 导致 item_pidls 为空、cidl=0，SHOpenFolderAndSelectItems 转而打开父目录并选中
+        // pidlFolder 本身（表现为"打开游戏根目录 + 高亮 v1 文件夹"的错位）。
         let mut item_pidls: Vec<LPITEMIDLIST> = Vec::new();
         for item in &items {
-            let item_path = open_path.join(item);
+            let item_norm = item.replace('/', "\\");
+            let item_path = open_path.join(&item_norm);
             let item_wide = to_wide(&item_path.to_string_lossy());
             let mut item_pidl: LPITEMIDLIST = std::ptr::null_mut();
             let hr = unsafe {
