@@ -17,6 +17,7 @@ import { listMyMods, createMod, updateMod, uploadModFile, deleteModFile, getModF
 import { resolveTranslationImages, extractImgbedUrls, deleteImageFromImgbed } from '../../services/imageApi'
 import { useAuth } from '../../contexts/useAuth'
 import { LanguageTranslationBlock } from './LanguageTranslationBlock'
+import { RatingStarsDisplay } from '../../components/common/RatingStars'
 import { selectModFiles, selectModFolders } from '../../hooks/useFileSelection'
 import JSZip from 'jszip'
 import { runReplaceFlow } from './runReplaceFlow'
@@ -1125,6 +1126,9 @@ export function MyMods() {
                 }
                 action={
                   <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    {mod.rating_count > 0 && (
+                      <RatingStarsDisplay value={mod.rating_avg} count={mod.rating_count} size="small" compact />
+                    )}
                     <div style={{ display: 'flex', alignItems: 'center', gap: '3px' }} title={mod.is_liked ? t('workshop.likedHint') : t('workshop.unlikedHint')}>
                       {mod.is_liked ? (
                         <Heart24Filled style={{ color: tokens.colorPaletteRedForeground1, fontSize: '16px' }} />

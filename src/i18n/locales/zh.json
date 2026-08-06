@@ -18,7 +18,7 @@
     "v1": "v1",
     "v2": "v2",
     "workshop": "创意工坊",
-    "likes": "点赞记录",
+    "likes": "点赞与评分",
     "apply": "申请与通知",
     "settings": "设置",
     "saves": "存档",
@@ -358,6 +358,11 @@
     "sortBy": "排序",
     "sortNewest": "最新",
     "sortLikes": "最多赞",
+    "sortRating": "评分最高",
+    "loginToRate": "登录后可评分",
+    "clearRating": "清除评分",
+    "confirmClearRating": "清除评分",
+    "clearRatingHint": "确定要清除你的评分吗？",
     "likeCount": "{{count}} 赞",
     "likedHint": "你已赞过",
     "unlikedHint": "尚未点赞",
@@ -398,9 +403,14 @@
     "itemCount": "{{count}} 项"
   },
   "likes": {
-    "loginHint": "登录后即可查看你点赞过的模组",
+    "loginHint": "登录后即可查看你的点赞与评分记录",
     "count": "已点赞 {{count}} 个模组",
     "empty": "还没有点赞记录",
-    "emptyHint": "去创意工坊给喜欢的模组点个赞吧"
+    "emptyHint": "去创意工坊给喜欢的模组点个赞吧",
+    "likedTitle": "我的点赞",
+    "ratedTitle": "我的评分",
+    "ratedCount": "已评分 {{count}} 个模组",
+    "ratedEmpty": "还没有评分记录",
+    "ratedEmptyHint": "去创意工坊给模组评个分吧"
   }
 }

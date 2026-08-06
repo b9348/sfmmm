@@ -18,7 +18,7 @@
     "v1": "v1",
     "v2": "v2",
     "workshop": "ワークショップ",
-    "likes": "いいね履歴",
+    "likes": "いいねと評価",
     "apply": "申請と通知",
     "settings": "設定",
     "saves": "セーブデータ",
@@ -358,6 +358,11 @@
     "sortBy": "並び替え",
     "sortNewest": "最新",
     "sortLikes": "いいね順",
+    "sortRating": "評価が高い順",
+    "loginToRate": "ログインして評価する",
+    "clearRating": "評価をクリア",
+    "confirmClearRating": "評価をクリア",
+    "clearRatingHint": "評価をクリアしてもよろしいですか？",
     "likeCount": "{{count}} いいね",
     "likedHint": "いいね済み",
     "unlikedHint": "まだいいねしていません",
@@ -398,9 +403,14 @@
     "itemCount": "{{count}} 項目"
   },
   "likes": {
-    "loginHint": "ログインすると、いいねしたModを確認できます",
+    "loginHint": "ログインすると、いいねと評価を確認できます",
     "count": "いいねしたMod {{count}} 件",
     "empty": "いいねしたModはまだありません",
-    "emptyHint": "ワークショップで気に入ったModにいいねしましょう"
+    "emptyHint": "ワークショップで気に入ったModにいいねしましょう",
+    "likedTitle": "いいね",
+    "ratedTitle": "評価",
+    "ratedCount": "評価したMod {{count}} 件",
+    "ratedEmpty": "評価したModはまだありません",
+    "ratedEmptyHint": "ワークショップでModを評価しましょう"
   }
 }

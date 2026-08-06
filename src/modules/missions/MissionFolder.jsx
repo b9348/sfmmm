@@ -10,6 +10,7 @@ import { getModDetail } from '../../services/workshopApi'
 import { installMod } from '../../services/installMod'
 import { AsyncView, EmptyState } from '../../components'
 import { LANG_LABELS } from '../../i18n/languages'
+import { RatingStarsDisplay } from '../../components/common/RatingStars'
 
 const useStyles = makeStyles({
   root: {
@@ -374,6 +375,9 @@ function FolderCard({ name, fullPath, onNavigate, isWorkshop, workshopDetail, cl
           {showWorkshopInfo && <Badge appearance="filled" color="success" size="small">{t('mods.workshopBadge')}</Badge>}
           {showWorkshopInfo && workshopDetail?.version && <Badge appearance="outline" size="small">v{workshopDetail.version}</Badge>}
           {showWorkshopInfo && workshopDetail?.langCode && <Badge appearance="outline" size="small">{LANG_LABELS[workshopDetail.langCode] || workshopDetail.langCode}</Badge>}
+          {showWorkshopInfo && cloudInfo?.ratingCount > 0 && (
+            <RatingStarsDisplay value={cloudInfo.ratingAvg} count={cloudInfo.ratingCount} size="small" compact />
+          )}
           {showWorkshopInfo && workshopDetail?.fileHash && cloudInfo?.latestFileHash && workshopDetail.fileHash !== cloudInfo.latestFileHash && (
             <Badge appearance="filled" color="danger" size="small">{t('mods.sourceMismatch')}</Badge>
           )}
@@ -420,6 +424,9 @@ function FileCard({ name, fullPath, isBanned, onToggle, isWorkshop, hasUpdate, w
           {showWorkshopInfo && <Badge appearance="filled" color="success" size="small">{t('mods.workshopBadge')}</Badge>}
           {showWorkshopInfo && workshopDetail?.version && <Badge appearance="outline" size="small">v{workshopDetail.version}</Badge>}
           {showWorkshopInfo && workshopDetail?.langCode && <Badge appearance="outline" size="small">{LANG_LABELS[workshopDetail.langCode] || workshopDetail.langCode}</Badge>}
+          {showWorkshopInfo && cloudInfo?.ratingCount > 0 && (
+            <RatingStarsDisplay value={cloudInfo.ratingAvg} count={cloudInfo.ratingCount} size="small" compact />
+          )}
           {showWorkshopInfo && workshopDetail?.fileHash && cloudInfo?.latestFileHash && workshopDetail.fileHash !== cloudInfo.latestFileHash && (
             <Badge appearance="filled" color="danger" size="small">{t('mods.sourceMismatch')}</Badge>
           )}
@@ -467,6 +474,9 @@ function ModGroupCard({ modKey, items, children, workshopDetail, cloudInfo, hasU
           <Badge appearance="outline" size="small">{t('mods.groupCount', { count: items.length })}</Badge>
           {workshopDetail?.version && <Badge appearance="outline" size="small">v{workshopDetail.version}</Badge>}
           {workshopDetail?.langCode && <Badge appearance="outline" size="small">{LANG_LABELS[workshopDetail.langCode] || workshopDetail.langCode}</Badge>}
+          {cloudInfo?.ratingCount > 0 && (
+            <RatingStarsDisplay value={cloudInfo.ratingAvg} count={cloudInfo.ratingCount} size="small" compact />
+          )}
           {workshopDetail?.fileHash && cloudInfo?.latestFileHash && workshopDetail.fileHash !== cloudInfo.latestFileHash && (
             <Badge appearance="filled" color="danger" size="small">{t('mods.sourceMismatch')}</Badge>
           )}

@@ -6,6 +6,7 @@ import {
   Dialog, DialogSurface, DialogBody, DialogTitle,
   DialogContent, DialogTrigger, DialogActions, Textarea, Select, Checkbox,
   Popover, PopoverTrigger, PopoverSurface,
+  Menu, MenuTrigger, MenuList, MenuItem, MenuPopover,
 } from '@fluentui/react-components'
 import {
   ArrowLeft24Regular, ArrowDownload24Regular,
@@ -17,11 +18,13 @@ import { installMod, uninstallMod } from '../../services/installMod'
 import { RichTextContent, MarkdownContent } from '../../components/common/RichTextEditor'
 import { invoke } from '@tauri-apps/api/core'
 import { useAuth } from '../../contexts/useAuth'
-import { submitApplication, likeMod, unlikeMod, getDeviceId } from '../../services/workshopApi'
+import { submitApplication, likeMod, unlikeMod, getDeviceId, rateMod, unrateMod } from '../../services/workshopApi'
 import { upsertLikedModToCache, removeLikedModFromCache } from '../../services/likedModsCache'
+import { upsertRatedModToCache } from '../../services/ratingCache'
 import CommentSection from './CommentSection'
 import { getDb, getGamePath } from '../../services/dbHelper'
 import { BackButton, FloatingActions, FileRow, UserLink } from '../../components'
+import { RatingStars, RatingStarsDisplay } from '../../components/common/RatingStars'
 import { LANGUAGES, LANG_LABELS } from '../../i18n/languages'
 
 function compareSemver(a, b) {
@@ -81,6 +84,12 @@ const useStyles = makeStyles({
     alignItems: 'center',
     gap: '6px',
   },
+  ratingRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '10px',
+    flexWrap: 'wrap',
+  },
   stats: {
     display: 'flex',
     alignItems: 'center',
@@ -116,6 +125,10 @@ export default function ModDetailPage({ mod, onBack, onEdit, scrollToCommentId }
   const [likeCount, setLikeCount] = useState(mod.like_count || 0)
   const [isLiked, setIsLiked] = useState(!!mod.is_liked)
   const [likeBusy, setLikeBusy] = useState(false)
+  const [ratingAvg, setRatingAvg] = useState(mod.rating_avg || 0)
+  const [ratingCount, setRatingCount] = useState(mod.rating_count || 0)
+  const [myRating, setMyRating] = useState(mod.my_rating || 0)
+  const [ratingBusy, setRatingBusy] = useState(false)
 
   const onBackRef = useRef(onBack)
   onBackRef.current = onBack
@@ -129,6 +142,19 @@ export default function ModDetailPage({ mod, onBack, onEdit, scrollToCommentId }
     window.addEventListener('mouseup', handleMouseUp)
     return () => window.removeEventListener('mouseup', handleMouseUp)
   }, [])
+
+  // 列表页点开时先渲染列表数据（不含 my_rating），异步详情数据到达后同步评分/点赞状态。
+  // 用 ref 记录已同步的 mod 引用，避免用户交互后的状态被旧 props 覆盖。
+  const syncedModRef = useRef(null)
+  useEffect(() => {
+    if (syncedModRef.current === mod) return
+    syncedModRef.current = mod
+    setLikeCount(mod.like_count || 0)
+    setIsLiked(!!mod.is_liked)
+    setRatingAvg(mod.rating_avg || 0)
+    setRatingCount(mod.rating_count || 0)
+    setMyRating(mod.my_rating || 0)
+  }, [mod])
 
   const handleLikeToggle = async () => {
     if (likeBusy) return
@@ -149,6 +175,52 @@ export default function ModDetailPage({ mod, onBack, onEdit, scrollToCommentId }
       console.error('Like toggle failed', e)
     } finally {
       setLikeBusy(false)
+    }
+  }
+
+  const handleRate = async (rating) => {
+    if (!user || ratingBusy || rating === myRating) return
+    setRatingBusy(true)
+    try {
+      const res = await rateMod(mod.id, user.user_id, rating)
+      setMyRating(res.my_rating || rating)
+      setRatingAvg(res.rating_avg ?? ratingAvg)
+      setRatingCount(res.rating_count ?? ratingCount)
+      upsertRatedModToCache({
+        ...mod,
+        mod_id: mod.id,
+        mod_key: mod.mod_key,
+        my_rating: res.my_rating || rating,
+        rating_avg: res.rating_avg ?? ratingAvg,
+        rating_count: res.rating_count ?? ratingCount,
+      })
+    } catch (e) {
+      console.error('Rate failed', e)
+    } finally {
+      setRatingBusy(false)
+    }
+  }
+
+  const handleUnrate = async () => {
+    if (!user || ratingBusy) return
+    setRatingBusy(true)
+    try {
+      const res = await unrateMod(mod.id, user.user_id)
+      setMyRating(0)
+      setRatingAvg(res.rating_avg ?? ratingAvg)
+      setRatingCount(res.rating_count ?? ratingCount)
+      upsertRatedModToCache({
+        ...mod,
+        mod_id: mod.id,
+        mod_key: mod.mod_key,
+        my_rating: 0,
+        rating_avg: res.rating_avg ?? ratingAvg,
+        rating_count: res.rating_count ?? ratingCount,
+      })
+    } catch (e) {
+      console.error('Unrate failed', e)
+    } finally {
+      setRatingBusy(false)
     }
   }
 
@@ -388,6 +460,46 @@ export default function ModDetailPage({ mod, onBack, onEdit, scrollToCommentId }
             <Badge appearance="outline" size="small" style={{ whiteSpace: 'nowrap' }}>
               {t(`workshop.category_${mod.category}`)}
             </Badge>
+          )}
+        </div>
+        <div className={styles.ratingRow}>
+          <RatingStarsDisplay value={ratingAvg} count={ratingCount} size="medium" />
+          {user ? (
+            <>
+              <RatingStars
+                value={myRating}
+                size="medium"
+                disabled={ratingBusy}
+                onChange={handleRate}
+              />
+              {myRating > 0 && (
+                <Menu>
+                  <MenuTrigger disableButtonEnhancement>
+                    <Button
+                      size="small"
+                      appearance="subtle"
+                      disabled={ratingBusy}
+                    >
+                      {t('workshop.clearRating')}
+                    </Button>
+                  </MenuTrigger>
+                  <MenuPopover>
+                    <MenuList>
+                      <MenuItem onClick={handleUnrate} disabled={ratingBusy}>
+                        {t('workshop.confirmClearRating')}
+                      </MenuItem>
+                      <MenuItem>
+                        {t('workshop.cancel')}
+                      </MenuItem>
+                    </MenuList>
+                  </MenuPopover>
+                </Menu>
+              )}
+            </>
+          ) : (
+            <Text size="small" className={styles.meta}>
+              {t('workshop.loginToRate')}
+            </Text>
           )}
         </div>
         {(mod.created_at || mod.updated_at) && (

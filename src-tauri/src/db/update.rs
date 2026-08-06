@@ -1,7 +1,8 @@
 use mysql::prelude::*;
 use mysql::*;
 
-use crate::db::{semver_cmp, val_to_string, with_conn, ApiResponse, DbState};
+use crate::db::rating::{ensure_rating_schema, val_to_f64};
+use crate::db::{semver_cmp, val_to_i64, val_to_string, with_conn, ApiResponse, DbState};
 
 #[tauri::command(rename_all = "snake_case")]
 pub async fn db_check_updates(
@@ -9,6 +10,9 @@ pub async fn db_check_updates(
     installed: Vec<serde_json::Value>,
 ) -> Result<ApiResponse, String> {
     with_conn(state.inner(), move |conn: &mut PooledConn| {
+        // 幂等确保 mods 含评分冗余列，兼容服务端尚未迁移的旧库
+        ensure_rating_schema(conn)?;
+
         let mut results: Vec<serde_json::Value> = Vec::new();
 
         for item in &installed {
@@ -19,7 +23,7 @@ pub async fn db_check_updates(
             if mod_key.is_empty() { continue; }
 
             let row: Option<Row> = conn.exec_first(
-                "SELECT t.version, t.name, f.file_hash
+                "SELECT t.version, t.name, f.file_hash, m.rating_avg, m.rating_count
                  FROM mods m
                  LEFT JOIN mod_translations t ON t.mod_id = m.id AND t.lang_code = ?
                  LEFT JOIN mod_files f ON f.mod_id = m.id AND f.lang_code = ?
@@ -28,16 +32,18 @@ pub async fn db_check_updates(
                 (lang_code, lang_code, mod_key),
             ).map_err(|e| e.to_string())?;
 
-            let (latest_ver, display_name, latest_file_hash) = match row {
+            let (latest_ver, display_name, latest_file_hash, rating_avg, rating_count) = match row {
                 Some(r) => {
                     let vals: Vec<Value> = r.unwrap();
                     (
                         val_to_string(vals[0].clone()),
                         val_to_string(vals[1].clone()),
                         val_to_string(vals[2].clone()),
+                        val_to_f64(&vals[3]),
+                        val_to_i64(&vals[4]),
                     )
                 }
-                None => (String::new(), String::new(), String::new()),
+                None => (String::new(), String::new(), String::new(), 0.0, 0),
             };
             let has_update = !latest_ver.is_empty() && semver_cmp(&latest_ver, &installed_ver) > 0;
 
@@ -47,6 +53,8 @@ pub async fn db_check_updates(
                 "latest_version": latest_ver,
                 "display_name": display_name,
                 "latest_file_hash": latest_file_hash,
+                "rating_avg": rating_avg,
+                "rating_count": rating_count,
                 "has_update": has_update,
             }));
         }

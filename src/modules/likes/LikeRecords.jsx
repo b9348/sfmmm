@@ -6,12 +6,15 @@ import {
 } from '@fluentui/react-components'
 import {
   ArrowClockwise24Regular, Heart24Regular,
-  Add20Regular, Subtract20Regular,
+  Star24Regular, Add20Regular, Subtract20Regular,
 } from '@fluentui/react-icons'
-import { listLikedMods, getModDetail, getDeviceId } from '../../services/workshopApi'
+import { listLikedMods, listRatedMods, getModDetail, getDeviceId } from '../../services/workshopApi'
 import {
   loadLikedModsFromCache, saveLikedModsToCache,
 } from '../../services/likedModsCache'
+import {
+  loadRatedModsFromCache, saveRatedModsToCache,
+} from '../../services/ratingCache'
 import { getConfig, setConfig } from '../../services/dbHelper'
 import { useAuth } from '../../contexts/useAuth'
 import ModDetailPage from '../workshop/ModDetailPage'
@@ -21,23 +24,48 @@ import { AsyncView, LoginForm, EmptyState } from '../../components'
 const useStyles = makeStyles({
   root: {
     display: 'flex',
+    flexDirection: 'row',
+    height: '100%',
+    minHeight: 0,
+    gap: '16px',
+    padding: '16px',
+    '@media (max-width: 768px)': {
+      flexDirection: 'column',
+    },
+  },
+  panel: {
+    flex: 1,
+    minWidth: 0,
+    minHeight: 0,
+    display: 'flex',
     flexDirection: 'column',
     gap: '8px',
   },
-  toolbarRow: {
+  sectionTitle: {
+    fontWeight: '600',
+    fontSize: tokens.fontSizeBase400,
+    margin: 0,
+  },
+  sectionHeader: {
     display: 'flex',
     alignItems: 'center',
     gap: '6px',
+    marginBottom: '8px',
     flexWrap: 'wrap',
+  },
+  meta: {
+    color: tokens.colorNeutralForeground2,
+    fontSize: tokens.fontSizeSmall,
+  },
+  content: {
+    flex: 1,
+    minHeight: 0,
+    overflow: 'auto',
   },
   list: {
     display: 'grid',
     gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
     gap: '12px',
-  },
-  meta: {
-    color: tokens.colorNeutralForeground2,
-    fontSize: tokens.fontSizeSmall,
   },
   loginCard: {
     padding: '24px',
@@ -73,12 +101,16 @@ function LoginPage() {
 export function LikeRecords() {
   const styles = useStyles()
   const { t } = useTranslation()
-  const { isLoggedIn } = useAuth()
+  const { isLoggedIn, user } = useAuth()
   const deviceIdRef = useRef(getDeviceId())
-  const [mods, setMods] = useState([])
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
+  const [likedMods, setLikedMods] = useState([])
+  const [ratedMods, setRatedMods] = useState([])
+  const [likedLoading, setLikedLoading] = useState(false)
+  const [ratedLoading, setRatedLoading] = useState(false)
+  const [likedError, setLikedError] = useState('')
+  const [ratedError, setRatedError] = useState('')
   const [detailMod, setDetailMod] = useState(null)
+  const [detailPanel, setDetailPanel] = useState('liked')
   const [itemsPerRow, setItemsPerRow] = useState(3)
   const initialFetch = useRef(false)
 
@@ -116,50 +148,75 @@ export function LikeRecords() {
     })
   }, [saveItemsPerRow])
 
-  // 查远程库并回写 SQLite 缓存
-  const refreshFromRemote = useCallback(async () => {
-    setLoading(true)
-    setError('')
+  // 查远程库并回写 SQLite 缓存（点赞栏）
+  const refreshLiked = useCallback(async () => {
+    setLikedLoading(true)
+    setLikedError('')
     try {
       const data = await listLikedMods({ device_id: deviceIdRef.current, lang: 'zh' })
       const list = data.mods || []
-      setMods(list)
+      setLikedMods(list)
       await saveLikedModsToCache(list)
     } catch (e) {
-      setError(e.message)
+      setLikedError(e.message)
     } finally {
-      setLoading(false)
+      setLikedLoading(false)
     }
   }, [])
+
+  // 查远程库并回写 SQLite 缓存（评分栏，按用户维度）
+  const refreshRated = useCallback(async () => {
+    if (!user) return
+    setRatedLoading(true)
+    setRatedError('')
+    try {
+      const data = await listRatedMods({ user_id: user.user_id, lang: 'zh' })
+      const list = data.mods || []
+      setRatedMods(list)
+      await saveRatedModsToCache(list)
+    } catch (e) {
+      setRatedError(e.message)
+    } finally {
+      setRatedLoading(false)
+    }
+  }, [user])
 
   // 打开标签页默认只读 SQLite 缓存，避免每次查远程库
   useEffect(() => {
     if (!isLoggedIn || initialFetch.current) return
     initialFetch.current = true
     ;(async () => {
-      const cached = await loadLikedModsFromCache()
-      setMods(cached)
+      const [likedCached, ratedCached] = await Promise.all([
+        loadLikedModsFromCache(),
+        loadRatedModsFromCache(),
+      ])
+      setLikedMods(likedCached)
+      setRatedMods(ratedCached)
       // 缓存为空时（首次使用）查一次库填充
-      if (cached.length === 0) {
-        refreshFromRemote()
-      }
+      if (likedCached.length === 0) refreshLiked()
+      if (ratedCached.length === 0) refreshRated()
     })()
-  }, [isLoggedIn, refreshFromRemote])
+  }, [isLoggedIn, refreshLiked, refreshRated])
 
   // 点进详情直接查库，获取最新信息（不写缓存）
-  const handleDetail = async (mod) => {
+  const handleDetail = async (mod, panel) => {
     try {
-      const res = await getModDetail(mod.id, 'zh', null, deviceIdRef.current)
+      const res = await getModDetail(mod.id, 'zh', user?.user_id ?? null, deviceIdRef.current)
       setDetailMod(res.data?.mod || mod)
     } catch {
       setDetailMod(mod)
     }
+    setDetailPanel(panel)
   }
 
-  // 返回列表：重新读缓存（详情中取消点赞等变更通过查库同步）
+  // 返回列表：重新读缓存（详情中取消点赞/撤评等变更通过查库同步）
   const handleBack = async () => {
     setDetailMod(null)
-    await refreshFromRemote()
+    if (detailPanel === 'liked') {
+      await refreshLiked()
+    } else {
+      await refreshRated()
+    }
   }
 
   if (!isLoggedIn) {
@@ -178,48 +235,83 @@ export function LikeRecords() {
 
   return (
     <div className={styles.root}>
-      <div className={styles.toolbarRow}>
-        <Text size="small" className={styles.meta} style={{ flex: 1 }}>
-          {t('likes.count', { count: mods.length })}
-        </Text>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-          <Text size="small">{t('workshop.itemsPerRow')}</Text>
-          <Button
-            size="small"
-            icon={<Subtract20Regular />}
-            appearance="subtle"
-            onClick={() => handleItemsPerRowChange(-1)}
-            disabled={itemsPerRow <= 1 || loading}
-          />
-          <Text size="small" style={{ minWidth: '20px', textAlign: 'center' }}>{itemsPerRow}</Text>
-          <Button
-            size="small"
-            icon={<Add20Regular />}
-            appearance="subtle"
-            onClick={() => handleItemsPerRowChange(1)}
-            disabled={itemsPerRow >= 10 || loading}
-          />
+      {/* 左栏：我的点赞 */}
+      <div className={styles.panel}>
+        <div className={styles.sectionHeader}>
+          <Text size="small" weight="semibold">{t('likes.likedTitle')}</Text>
+          <Text size="small" className={styles.meta} style={{ flex: 1 }}>
+            {t('likes.count', { count: likedMods.length })}
+          </Text>
+          <Button size="small" icon={<ArrowClockwise24Regular />} onClick={refreshLiked} disabled={likedLoading}>
+            {t('workshop.refresh')}
+          </Button>
         </div>
-        <Button size="small" icon={<ArrowClockwise24Regular />} onClick={refreshFromRemote} disabled={loading}>
-          {t('workshop.refresh')}
-        </Button>
+        <div className={styles.content}>
+          <AsyncView loading={likedLoading} error={likedError} onRetry={refreshLiked} loadingLabel={t('workshop.loading')}>
+            {likedMods.length === 0 ? (
+              <EmptyState
+                icon={<Heart24Regular style={{ fontSize: '32px' }} />}
+                title={t('likes.empty')}
+                description={t('likes.emptyHint')}
+              />
+            ) : (
+              <div className={styles.list} style={{ gridTemplateColumns: `repeat(${itemsPerRow}, 1fr)` }}>
+                {likedMods.map(mod => (
+                  <ModCard key={mod.id} mod={mod} onClick={() => handleDetail(mod, 'liked')} />
+                ))}
+              </div>
+            )}
+          </AsyncView>
+        </div>
       </div>
 
-      <AsyncView loading={loading} error={error} onRetry={refreshFromRemote} loadingLabel={t('workshop.loading')}>
-        {mods.length === 0 ? (
-          <EmptyState
-            icon={<Heart24Regular style={{ fontSize: '32px' }} />}
-            title={t('likes.empty')}
-            description={t('likes.emptyHint')}
-          />
-        ) : (
-        <div className={styles.list} style={{ gridTemplateColumns: `repeat(${itemsPerRow}, 1fr)` }}>
-          {mods.map(mod => (
-            <ModCard key={mod.id} mod={mod} onClick={() => handleDetail(mod)} />
-          ))}
+      {/* 右栏：我的评分 */}
+      <div className={styles.panel}>
+        <div className={styles.sectionHeader}>
+          <Text size="small" weight="semibold">{t('likes.ratedTitle')}</Text>
+          <Text size="small" className={styles.meta} style={{ flex: 1 }}>
+            {t('likes.ratedCount', { count: ratedMods.length })}
+          </Text>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <Text size="small">{t('workshop.itemsPerRow')}</Text>
+            <Button
+              size="small"
+              icon={<Subtract20Regular />}
+              appearance="subtle"
+              onClick={() => handleItemsPerRowChange(-1)}
+              disabled={itemsPerRow <= 1 || likedLoading || ratedLoading}
+            />
+            <Text size="small" style={{ minWidth: '20px', textAlign: 'center' }}>{itemsPerRow}</Text>
+            <Button
+              size="small"
+              icon={<Add20Regular />}
+              appearance="subtle"
+              onClick={() => handleItemsPerRowChange(1)}
+              disabled={itemsPerRow >= 10 || likedLoading || ratedLoading}
+            />
+          </div>
+          <Button size="small" icon={<ArrowClockwise24Regular />} onClick={refreshRated} disabled={ratedLoading}>
+            {t('workshop.refresh')}
+          </Button>
         </div>
-        )}
-      </AsyncView>
+        <div className={styles.content}>
+          <AsyncView loading={ratedLoading} error={ratedError} onRetry={refreshRated} loadingLabel={t('workshop.loading')}>
+            {ratedMods.length === 0 ? (
+              <EmptyState
+                icon={<Star24Regular style={{ fontSize: '32px' }} />}
+                title={t('likes.ratedEmpty')}
+                description={t('likes.ratedEmptyHint')}
+              />
+            ) : (
+              <div className={styles.list} style={{ gridTemplateColumns: `repeat(${itemsPerRow}, 1fr)` }}>
+                {ratedMods.map(mod => (
+                  <ModCard key={mod.id} mod={mod} onClick={() => handleDetail(mod, 'rated')} />
+                ))}
+              </div>
+            )}
+          </AsyncView>
+        </div>
+      </div>
     </div>
   )
 }

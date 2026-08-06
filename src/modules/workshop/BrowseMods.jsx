@@ -287,6 +287,7 @@ export function BrowseMods({ initialModId, initialCommentId, onConsumeNavTarget 
             <Select size="small" value={sortBy} onChange={(_, d) => { const v = d.value; setSortBy(v); setPage(1); fetchMods(1, search, categoryFilter, v) }} disabled={loading}>
               <option value="created_at">{t('workshop.sortNewest')}</option>
               <option value="likes">{t('workshop.sortLikes')}</option>
+              <option value="rating">{t('workshop.sortRating')}</option>
             </Select>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>

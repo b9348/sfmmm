@@ -194,6 +194,17 @@ export async function listLikedMods({ device_id, lang = 'zh', page = 1, page_siz
   }
 }
 
+export async function listRatedMods({ user_id, lang = 'zh', page = 1, page_size = 20 } = {}) {
+  const res = await dbCall('db_list_rated_mods', { user_id: Number(user_id), lang, page, page_size })
+  return {
+    success: true,
+    mods: res.mods || [],
+    total: res.total || 0,
+    page: res.page || 1,
+    page_size: res.page_size || page_size,
+  }
+}
+
 export async function likeMod(mod_id, device_id) {
   const res = await dbCall('db_like_mod', { mod_id: Number(mod_id), device_id })
   return res.data || { like_count: 0, is_liked: true }
@@ -202,6 +213,16 @@ export async function likeMod(mod_id, device_id) {
 export async function unlikeMod(mod_id, device_id) {
   const res = await dbCall('db_unlike_mod', { mod_id: Number(mod_id), device_id })
   return res.data || { like_count: 0, is_liked: false }
+}
+
+export async function rateMod(mod_id, user_id, rating) {
+  const res = await dbCall('db_rate_mod', { mod_id: Number(mod_id), user_id: Number(user_id), rating })
+  return res.data || { my_rating: rating, rating_avg: 0, rating_count: 0 }
+}
+
+export async function unrateMod(mod_id, user_id) {
+  const res = await dbCall('db_unrate_mod', { mod_id: Number(mod_id), user_id: Number(user_id) })
+  return res.data || { my_rating: 0, rating_avg: 0, rating_count: 0 }
 }
 
 export async function checkModKey(mod_key) {

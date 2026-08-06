@@ -18,7 +18,7 @@
     "v1": "v1",
     "v2": "v2",
     "workshop": "Workshop",
-    "likes": "Likes",
+    "likes": "Likes & Ratings",
     "apply": "Applications & Notifications",
     "settings": "Settings",
     "saves": "Saves",
@@ -358,6 +358,11 @@
     "sortBy": "Sort by",
     "sortNewest": "Newest",
     "sortLikes": "Most likes",
+    "sortRating": "Top rated",
+    "loginToRate": "Log in to rate",
+    "clearRating": "Clear rating",
+    "confirmClearRating": "Clear rating",
+    "clearRatingHint": "Are you sure you want to clear your rating?",
     "likeCount": "{{count}} likes",
     "likedHint": "You liked this",
     "unlikedHint": "Not liked yet",
@@ -398,9 +403,14 @@
     "itemCount": "{{count}} items"
   },
   "likes": {
-    "loginHint": "Log in to view the mods you have liked",
+    "loginHint": "Log in to view your likes and ratings",
     "count": "{{count}} liked mods",
     "empty": "No liked mods yet",
-    "emptyHint": "Go to the workshop and like a mod you enjoy"
+    "emptyHint": "Go to the workshop and like a mod you enjoy",
+    "likedTitle": "My Likes",
+    "ratedTitle": "My Ratings",
+    "ratedCount": "{{count}} rated mods",
+    "ratedEmpty": "No ratings yet",
+    "ratedEmptyHint": "Go to the workshop and rate a mod"
   }
 }

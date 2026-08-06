@@ -23,6 +23,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useInstalledMods } from '../../hooks/useInstalledMods'
 import { LANG_LABELS } from '../../i18n/languages'
+import { RatingStarsDisplay } from '../../components/common/RatingStars'
 
 const useStyles = makeStyles({
   root: {
@@ -244,16 +245,19 @@ export function ModList({ config, onUninstall }) {
       const key = mod.name.replace(/\.\w+$/, '').replace(/\/$/, '') // DLL 去扩展名，目录去斜杠
       if (installed.has(key)) {
         const detail = modDetails.get(key)
+        const cloud = cloudInfo.get(key)
         map.set(mod.id, {
           isWorkshop: true,
           hasUpdate: updates.has(key),
           version: detail?.version,
           langCode: detail?.langCode,
+          ratingAvg: cloud?.ratingAvg,
+          ratingCount: cloud?.ratingCount,
         })
       }
     }
     return map
-  }, [mods, installed, updates, modDetails])
+  }, [mods, installed, updates, modDetails, cloudInfo])
 
   const openPath = async (path) => {
     if (path) {
@@ -464,6 +468,9 @@ export function ModList({ config, onUninstall }) {
                 {workshopInfo.get(mod.id)?.isWorkshop && <Badge appearance="filled" color="success" size="small">{t('mods.workshopBadge')}</Badge>}
                 {workshopInfo.get(mod.id)?.isWorkshop && workshopInfo.get(mod.id)?.version && <Badge appearance="outline" size="small">v{workshopInfo.get(mod.id).version}</Badge>}
                 {workshopInfo.get(mod.id)?.isWorkshop && workshopInfo.get(mod.id)?.langCode && <Badge appearance="outline" size="small">{LANG_LABELS[workshopInfo.get(mod.id).langCode] || workshopInfo.get(mod.id).langCode}</Badge>}
+                {workshopInfo.get(mod.id)?.ratingCount > 0 && (
+                  <RatingStarsDisplay value={workshopInfo.get(mod.id).ratingAvg} count={workshopInfo.get(mod.id).ratingCount} size="small" compact />
+                )}
                 {workshopInfo.get(mod.id)?.hasUpdate && <Badge appearance="filled" color="warning" size="small">{t('mods.hasUpdate')}</Badge>}
               </div>
               <Text size="small" className={mergeClasses(styles.truncatedText, styles.muted)} title={mod.relativePath}>

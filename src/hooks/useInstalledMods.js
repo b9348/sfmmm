@@ -62,6 +62,8 @@ export function useInstalledMods() {
                 displayName: u.display_name || undefined,
                 latestVersion: u.latest_version || '',
                 latestFileHash: u.latest_file_hash || undefined,
+                ratingAvg: u.rating_avg || 0,
+                ratingCount: u.rating_count || 0,
                 hasUpdate: !!u.has_update,
               })
             }

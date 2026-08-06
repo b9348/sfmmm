@@ -925,6 +925,39 @@ pub fn run() {
             );",
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 9,
+            description: "create_rated_workshop_mods_cache",
+            sql: "CREATE TABLE IF NOT EXISTS rated_workshop_mods (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                mod_id INTEGER NOT NULL UNIQUE,
+                mod_key TEXT DEFAULT '',
+                my_rating REAL DEFAULT 0,
+                rating_avg REAL DEFAULT 0,
+                rating_count INTEGER DEFAULT 0,
+                cached_at TEXT DEFAULT CURRENT_TIMESTAMP
+            );",
+            kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 10,
+            description: "add_full_snapshot_to_rated_workshop_mods",
+            sql: "ALTER TABLE rated_workshop_mods ADD COLUMN display_name TEXT DEFAULT '';
+            ALTER TABLE rated_workshop_mods ADD COLUMN description TEXT DEFAULT '';
+            ALTER TABLE rated_workshop_mods ADD COLUMN category TEXT DEFAULT '';
+            ALTER TABLE rated_workshop_mods ADD COLUMN author_id INTEGER DEFAULT 0;
+            ALTER TABLE rated_workshop_mods ADD COLUMN author_name TEXT DEFAULT '';
+            ALTER TABLE rated_workshop_mods ADD COLUMN author_avatar TEXT DEFAULT '';
+            ALTER TABLE rated_workshop_mods ADD COLUMN download_count INTEGER DEFAULT 0;
+            ALTER TABLE rated_workshop_mods ADD COLUMN like_count INTEGER DEFAULT 0;
+            ALTER TABLE rated_workshop_mods ADD COLUMN is_liked INTEGER DEFAULT 0;
+            ALTER TABLE rated_workshop_mods ADD COLUMN comment_count INTEGER DEFAULT 0;
+            ALTER TABLE rated_workshop_mods ADD COLUMN files TEXT DEFAULT '';
+            ALTER TABLE rated_workshop_mods ADD COLUMN translations TEXT DEFAULT '';
+            ALTER TABLE rated_workshop_mods ADD COLUMN created_at TEXT DEFAULT '';
+            ALTER TABLE rated_workshop_mods ADD COLUMN updated_at TEXT DEFAULT '';",
+            kind: MigrationKind::Up,
+        },
     ];
 
     tauri::Builder::default()
@@ -935,7 +968,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             open_folder, scan_mods, toggle_mod_enabled, batch_toggle_mod_enabled, http_request, download_and_extract_7z,
             db::db_login, db::db_register, db::db_update_profile,
-            db::db_list_mods, db::db_list_my_mods, db::db_list_liked_mods,
+            db::db_list_mods, db::db_list_my_mods, db::db_list_liked_mods, db::db_list_rated_mods,
             db::db_get_mod_detail, db::db_get_mod_for_edit,
             db::db_create_mod, db::db_update_mod, db::db_delete_mod,
             db::db_save_mod_file,
@@ -946,6 +979,7 @@ pub fn run() {
             db::db_get_version,
             db::db_add_comment, db::db_get_comments, db::db_get_replies, db::db_edit_comment, db::db_delete_comment,
             db::db_like_mod, db::db_unlike_mod,
+            db::db_rate_mod, db::db_unrate_mod,
             db::db_check_updates,
             db::db_fetch_latest,
             db::hash::db_preflight_mod,

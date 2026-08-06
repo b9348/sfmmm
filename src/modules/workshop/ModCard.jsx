@@ -9,6 +9,7 @@ import {
   CommentRegular,
 } from '@fluentui/react-icons'
 import { FileRow, UserLink } from '../../components'
+import { RatingStarsDisplay } from '../../components/common/RatingStars'
 
 const CATEGORIES = [
   { value: 'v1', label: 'v1' },
@@ -75,22 +76,27 @@ export function ModCard({ mod, onClick }) {
           </div>
         }
         action={
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
-              <CommentRegular style={{ fontSize: '16px', color: tokens.colorNeutralForeground3 }} />
-              <Text size="small">{mod.comment_count || 0}</Text>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '6px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
+                <CommentRegular style={{ fontSize: '16px', color: tokens.colorNeutralForeground3 }} />
+                <Text size="small">{mod.comment_count || 0}</Text>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '3px' }} title={mod.is_liked ? t('workshop.likedHint') : t('workshop.unlikedHint')}>
+                {mod.is_liked ? (
+                  <HeartFilled style={{ color: tokens.colorPaletteRedForeground1, fontSize: '16px' }} />
+                ) : (
+                  <HeartRegular style={{ fontSize: '16px', color: tokens.colorNeutralForeground3 }} />
+                )}
+                <Text size="small">{mod.like_count || 0}</Text>
+              </div>
+              <Badge appearance="outline" size="small" style={{ whiteSpace: 'nowrap' }}>
+                {cat ? t(`workshop.category_${cat.value}`) : (mod.category ? t(`workshop.category_${mod.category}`, mod.category) : t('workshop.uncategorized'))}
+              </Badge>
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '3px' }} title={mod.is_liked ? t('workshop.likedHint') : t('workshop.unlikedHint')}>
-              {mod.is_liked ? (
-                <HeartFilled style={{ color: tokens.colorPaletteRedForeground1, fontSize: '16px' }} />
-              ) : (
-                <HeartRegular style={{ fontSize: '16px', color: tokens.colorNeutralForeground3 }} />
-              )}
-              <Text size="small">{mod.like_count || 0}</Text>
-            </div>
-            <Badge appearance="outline" size="small" style={{ whiteSpace: 'nowrap' }}>
-              {cat ? t(`workshop.category_${cat.value}`) : (mod.category ? t(`workshop.category_${mod.category}`, mod.category) : t('workshop.uncategorized'))}
-            </Badge>
+            {mod.rating_count > 0 && (
+              <RatingStarsDisplay value={mod.rating_avg} count={mod.rating_count} size="small" compact />
+            )}
           </div>
         }
       />

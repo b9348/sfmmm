@@ -8,6 +8,7 @@ struct ModBatchData {
     trans_by_mod: std::collections::HashMap<u64, serde_json::Value>,
     likes_by_mod: std::collections::HashMap<u64, (i64, bool)>,
     comment_counts: std::collections::HashMap<u64, i64>,
+    ratings_by_mod: std::collections::HashMap<u64, (f64, i64)>,
 }
 
 impl ModBatchData {
@@ -16,9 +17,10 @@ impl ModBatchData {
         let mut trans_by_mod: std::collections::HashMap<u64, serde_json::Value> = std::collections::HashMap::new();
         let mut likes_by_mod: std::collections::HashMap<u64, (i64, bool)> = std::collections::HashMap::new();
         let mut comment_counts: std::collections::HashMap<u64, i64> = std::collections::HashMap::new();
+        let mut ratings_by_mod: std::collections::HashMap<u64, (f64, i64)> = std::collections::HashMap::new();
 
         if mod_ids.is_empty() {
-            return Ok(Self { files_by_mod, trans_by_mod, likes_by_mod, comment_counts });
+            return Ok(Self { files_by_mod, trans_by_mod, likes_by_mod, comment_counts, ratings_by_mod });
         }
 
         let ph: Vec<String> = mod_ids.iter().map(|_| "?".to_string()).collect();
@@ -89,7 +91,30 @@ impl ModBatchData {
             comment_counts.insert(mid, cnt);
         }).map_err(|e| e.to_string())?;
 
-        Ok(Self { files_by_mod, trans_by_mod, likes_by_mod, comment_counts })
+        // 评分统计（均分 + 人数）。服务端尚未建 mod_ratings 表时容错为 0，避免旧库列表请求失败。
+        let rating_sql = format!(
+            "SELECT mod_id, AVG(rating), COUNT(*) FROM mod_ratings WHERE mod_id IN ({}) GROUP BY mod_id",
+            ph.join(",")
+        );
+        match conn.exec_map(&rating_sql, &id_params, |row: Row| {
+            let vals: Vec<Value> = row.unwrap();
+            let mid = val_to_i64(&vals[0]) as u64;
+            let avg = if matches!(vals[1], Value::NULL) { 0.0 } else { crate::db::rating::val_to_f64(&vals[1]) };
+            let cnt = val_to_i64(&vals[2]);
+            ratings_by_mod.insert(mid, (avg, cnt));
+        }) {
+            Ok(_) => {}
+            Err(e) => {
+                let msg = e.to_string().to_lowercase();
+                if msg.contains("doesn't exist") || msg.contains("unknown table") || msg.contains("er_no_such_table") {
+                    // mod_ratings 表尚未创建（服务端未迁移），跳过评分聚合
+                } else {
+                    return Err(e.to_string());
+                }
+            }
+        }
+
+        Ok(Self { files_by_mod, trans_by_mod, likes_by_mod, comment_counts, ratings_by_mod })
     }
 }
 
@@ -112,6 +137,7 @@ pub async fn db_list_mods(
         let sort_by = sort_by.filter(|s| !s.is_empty()).unwrap_or_else(|| "created_at".into());
         let order_sql = match sort_by.as_str() {
             "likes" => "ORDER BY m.like_count DESC, m.created_at DESC",
+            "rating" => "ORDER BY m.rating_avg DESC, m.rating_count DESC, m.created_at DESC",
             _ => "ORDER BY m.created_at DESC",
         };
 
@@ -172,6 +198,7 @@ pub async fn db_list_mods(
         let items: Vec<serde_json::Value> = mod_rows.into_iter().map(|r| {
             let mid = val_to_i64(&r[0]) as u64;
             let (like_count, is_liked) = batch.likes_by_mod.get(&mid).copied().unwrap_or((0, false));
+            let (rating_avg, rating_count) = batch.ratings_by_mod.get(&mid).copied().unwrap_or((0.0, 0));
             serde_json::json!({
                 "id": mid,
                 "mod_key": val_to_string(r[1].clone()),
@@ -188,6 +215,8 @@ pub async fn db_list_mods(
                 "like_count": like_count,
                 "is_liked": is_liked,
                 "comment_count": batch.comment_counts.get(&mid).copied().unwrap_or(0),
+                "rating_avg": rating_avg,
+                "rating_count": rating_count,
                 "language": val_to_string(r[14].clone()),
                 "files": batch.files_by_mod.remove(&mid).unwrap_or_default(),
                 "translations": batch.trans_by_mod.remove(&mid).unwrap_or_default(),
@@ -253,6 +282,7 @@ pub async fn db_list_my_mods(
         let items: Vec<serde_json::Value> = mod_rows.into_iter().map(|r| {
             let mid = val_to_i64(&r[0]) as u64;
             let (like_count, is_liked) = batch.likes_by_mod.get(&mid).copied().unwrap_or((0, false));
+            let (rating_avg, rating_count) = batch.ratings_by_mod.get(&mid).copied().unwrap_or((0.0, 0));
             serde_json::json!({
                 "id": mid,
                 "mod_key": val_to_string(r[1].clone()),
@@ -266,6 +296,8 @@ pub async fn db_list_my_mods(
                 "like_count": like_count,
                 "is_liked": is_liked,
                 "comment_count": batch.comment_counts.get(&mid).copied().unwrap_or(0),
+                "rating_avg": rating_avg,
+                "rating_count": rating_count,
                 "files": batch.files_by_mod.remove(&mid).unwrap_or_default(),
                 "translations": batch.trans_by_mod.remove(&mid).unwrap_or_default(),
                 "created_at": val_to_string(r[5].clone()),
@@ -333,6 +365,7 @@ pub async fn db_list_liked_mods(
         let items: Vec<serde_json::Value> = mod_rows.into_iter().map(|r| {
             let mid = val_to_i64(&r[0]) as u64;
             let (like_count, is_liked) = batch.likes_by_mod.get(&mid).copied().unwrap_or((0, false));
+            let (rating_avg, rating_count) = batch.ratings_by_mod.get(&mid).copied().unwrap_or((0.0, 0));
             serde_json::json!({
                 "id": mid,
                 "mod_key": val_to_string(r[1].clone()),
@@ -349,6 +382,97 @@ pub async fn db_list_liked_mods(
                 "like_count": like_count,
                 "is_liked": is_liked,
                 "comment_count": batch.comment_counts.get(&mid).copied().unwrap_or(0),
+                "rating_avg": rating_avg,
+                "rating_count": rating_count,
+                "language": val_to_string(r[14].clone()),
+                "files": batch.files_by_mod.remove(&mid).unwrap_or_default(),
+                "translations": batch.trans_by_mod.remove(&mid).unwrap_or_default(),
+                "created_at": val_to_string(r[6].clone()),
+                "updated_at": val_to_string(r[7].clone()),
+            })
+        }).collect();
+
+        Ok(ApiResponse::ok_list(items, total, page, page_size))
+    }).await
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn db_list_rated_mods(
+    state: tauri::State<'_, DbState>,
+    user_id: u64,
+    lang: Option<String>,
+    page: Option<u64>,
+    page_size: Option<u64>,
+) -> Result<ApiResponse, String> {
+    with_conn(state.inner(), move |conn: &mut PooledConn| {
+        // 幂等确保 mod_ratings 表存在，兼容服务端尚未迁移的旧库
+        crate::db::rating::ensure_rating_schema(conn)?;
+
+        let lang = lang.filter(|s| !s.is_empty()).unwrap_or_else(|| "en".into());
+        let page = page.unwrap_or(1).max(1);
+        let page_size = page_size.unwrap_or(20).clamp(1, 100);
+        let offset = (page - 1) * page_size;
+
+        let total: i64 = conn.exec_first(
+            "SELECT COUNT(*) FROM mod_ratings WHERE user_id = ?", (user_id,)
+        ).map_err(|e| e.to_string())?.unwrap_or(0i64);
+
+        let query_sql = format!(
+            "SELECT m.id, m.mod_id, COALESCE(mt_t.version, mt_en.version) as version, m.category, m.download_count, m.like_count,
+                    m.created_at, m.updated_at, u.username,
+                    COALESCE(mt_t.name, mt_en.name, m.mod_id),
+                    COALESCE(mt_t.description, mt_en.description, ''),
+                    COALESCE(mt_t.instructions, mt_en.instructions, ''),
+                    COALESCE(mt_t.instructions_format, mt_en.instructions_format, 'markdown'),
+                    COALESCE(mt_t.changelog, mt_en.changelog, ''),
+                    CASE WHEN mt_t.name IS NOT NULL THEN ? WHEN mt_en.name IS NOT NULL THEN 'en' ELSE 'default' END,
+                    u.avatar, u.id, mr.rating
+             FROM mod_ratings mr
+             JOIN mods m ON m.id = mr.mod_id
+             JOIN users u ON m.author_id = u.id
+             LEFT JOIN mod_translations mt_t ON m.id = mt_t.mod_id AND mt_t.lang_code = ?
+             LEFT JOIN mod_translations mt_en ON m.id = mt_en.mod_id AND mt_en.lang_code = 'en'
+             WHERE mr.user_id = ?
+             ORDER BY mr.id DESC
+             LIMIT ? OFFSET ?"
+        );
+
+        let mut mod_rows: Vec<Vec<Value>> = Vec::new();
+        conn.exec_map(&query_sql, vec![
+            lang.clone().into(), lang.clone().into(),
+            user_id.into(),
+            (page_size as i64).into(), (offset as i64).into(),
+        ] as Vec<Value>, |row: Row| {
+            mod_rows.push(row.unwrap());
+        }).map_err(|e| e.to_string())?;
+
+        let mod_ids: Vec<u64> = mod_rows.iter().map(|r| val_to_i64(&r[0]) as u64).collect();
+        let mut batch = ModBatchData::collect(conn, &mod_ids, None)?;
+
+        let items: Vec<serde_json::Value> = mod_rows.into_iter().map(|r| {
+            let mid = val_to_i64(&r[0]) as u64;
+            let (like_count, is_liked) = batch.likes_by_mod.get(&mid).copied().unwrap_or((0, false));
+            let (rating_avg, rating_count) = batch.ratings_by_mod.get(&mid).copied().unwrap_or((0.0, 0));
+            let my_rating = crate::db::rating::val_to_f64(&r[17]);
+            serde_json::json!({
+                "id": mid,
+                "mod_key": val_to_string(r[1].clone()),
+                "display_name": val_to_string(r[9].clone()),
+                "description": val_to_string(r[10].clone()),
+                "instructions": val_to_string(r[11].clone()),
+                "instructions_format": val_to_string(r[12].clone()),
+                "changelog": val_to_string(r[13].clone()),
+                "category": val_to_string(r[3].clone()),
+                "author_name": val_to_string(r[8].clone()),
+                "author_avatar": val_to_string(r[15].clone()),
+                "author_id": val_to_i64(&r[16]),
+                "download_count": val_to_i64(&r[4]),
+                "like_count": like_count,
+                "is_liked": is_liked,
+                "comment_count": batch.comment_counts.get(&mid).copied().unwrap_or(0),
+                "rating_avg": rating_avg,
+                "rating_count": rating_count,
+                "my_rating": my_rating,
                 "language": val_to_string(r[14].clone()),
                 "files": batch.files_by_mod.remove(&mid).unwrap_or_default(),
                 "translations": batch.trans_by_mod.remove(&mid).unwrap_or_default(),
@@ -450,6 +574,28 @@ pub async fn db_get_mod_detail(
                     serde_json::json!({ "is_author": false, "can_edit_mod_info": false, "can_edit_all_langs": false, "editable_langs": null, "can_apply_mod_info": false, "can_apply_lang": false, "applyable_langs": null, "mode": "author_only" })
                 };
 
+                // 评分统计 + 我的评分（服务端未建 mod_ratings 表时容错为 0）
+                let mut rating_avg: f64 = 0.0;
+                let mut rating_count: i64 = 0;
+                let mut my_rating: f64 = 0.0;
+                if let Ok(Some(row)) = conn.exec_first::<Row, _, _>(
+                    "SELECT AVG(rating), COUNT(*) FROM mod_ratings WHERE mod_id = ?",
+                    (mid,),
+                ) {
+                    let vals: Vec<Value> = row.unwrap();
+                    rating_avg = if matches!(vals[0], Value::NULL) { 0.0 } else { crate::db::rating::val_to_f64(&vals[0]) };
+                    rating_count = val_to_i64(&vals[1]);
+                }
+                if let Some(uid) = user_id {
+                    if let Ok(Some(row)) = conn.exec_first::<Row, _, _>(
+                        "SELECT rating FROM mod_ratings WHERE mod_id = ? AND user_id = ?",
+                        (mid, uid),
+                    ) {
+                        let vals: Vec<Value> = row.unwrap();
+                        my_rating = crate::db::rating::val_to_f64(&vals[0]);
+                    }
+                }
+
                 Ok(ApiResponse::ok_val(serde_json::json!({
                     "mod": {
                         "id": mid,
@@ -466,6 +612,9 @@ pub async fn db_get_mod_detail(
                         "download_count": val_to_i64(&vals[4]),
                         "like_count": like_count,
                         "is_liked": is_liked,
+                        "rating_avg": rating_avg,
+                        "rating_count": rating_count,
+                        "my_rating": my_rating,
                         "language": val_to_string(vals[14].clone()),
                         "files": files,
                         "created_at": val_to_string(vals[6].clone()),
@@ -753,6 +902,8 @@ pub async fn db_delete_mod(
                 tx.exec_drop("DELETE FROM user_favorites WHERE mod_id = ?", (mod_id,))
                     .map_err(|e| e.to_string())?;
                 tx.exec_drop("DELETE FROM user_ratings WHERE mod_id = ?", (mod_id,))
+                    .map_err(|e| e.to_string())?;
+                tx.exec_drop("DELETE FROM mod_ratings WHERE mod_id = ?", (mod_id,))
                     .map_err(|e| e.to_string())?;
                 tx.exec_drop("DELETE FROM mod_dependencies WHERE mod_id = ? OR dependency_mod_id = ?", (mod_id, mod_id))
                     .map_err(|e| e.to_string())?;
