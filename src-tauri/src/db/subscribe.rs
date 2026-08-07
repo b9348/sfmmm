@@ -38,7 +38,7 @@ fn tasks() -> &'static Mutex<HashMap<i64, JoinHandle<()>>> {
 // ── SQLite 路径 ────────────────────────────────────────────
 // tauri_plugin_sql 把 "sqlite:config.db" 解析到 app_data_dir 下（开发时为工作目录）。
 // rusqlite 必须打开同一文件才能与前端 getDb() 共享 subscription_tasks 表。
-fn config_db_path(app_handle: &tauri::AppHandle) -> Result<PathBuf, String> {
+pub(crate) fn config_db_path(app_handle: &tauri::AppHandle) -> Result<PathBuf, String> {
     // 开发时 plugin-sql 落盘到当前工作目录；生产时到 app_data_dir。
     // 优先用 app_data_dir，回退到 cwd，二者都试打开确认。
     if let Ok(dir) = app_handle.path().app_data_dir() {
@@ -61,7 +61,7 @@ fn config_db_path(app_handle: &tauri::AppHandle) -> Result<PathBuf, String> {
         .map_err(|e| format!("无法获取工作目录: {e}"))
 }
 
-fn open_sqlite(app_handle: &tauri::AppHandle) -> Result<Connection, String> {
+pub(crate) fn open_sqlite(app_handle: &tauri::AppHandle) -> Result<Connection, String> {
     let path = config_db_path(app_handle)?;
     let conn = Connection::open(&path).map_err(|e| format!("打开 SQLite 失败: {e}"))?;
     // 强制 WAL：与前端 tauri_plugin_sql 并发读写不锁库（修订点 2）
@@ -71,7 +71,7 @@ fn open_sqlite(app_handle: &tauri::AppHandle) -> Result<Connection, String> {
 }
 
 // ── 游戏目录读取（不依赖前端传参，后台任务自洽）──────────
-fn read_game_path(app_handle: &tauri::AppHandle) -> Result<String, String> {
+pub(crate) fn read_game_path(app_handle: &tauri::AppHandle) -> Result<String, String> {
     let conn = open_sqlite(app_handle)?;
     let path: String = conn
         .query_row(

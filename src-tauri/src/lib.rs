@@ -1000,6 +1000,24 @@ pub fn run() {
                 ALTER TABLE subscription_tasks ADD COLUMN translations TEXT DEFAULT '';",
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 13,
+            description: "create_bepinex_tasks",
+            // BepInEx 前置一键安装的后台任务表：与 subscription_tasks 同款持久化，
+            // 让 Rust 后台下载不依赖前端生命周期，重启可恢复进度/错误。
+            sql: "CREATE TABLE IF NOT EXISTS bepinex_tasks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                url TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'pending',
+                percent INTEGER DEFAULT 0,
+                stage TEXT DEFAULT '',
+                error TEXT DEFAULT '',
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                finished_at TEXT DEFAULT ''
+            );",
+            kind: MigrationKind::Up,
+        },
     ];
 
     tauri::Builder::default()
@@ -1031,6 +1049,8 @@ pub fn run() {
             db::subscribe::db_subscribe_mod,
             db::subscribe::db_list_subscription_tasks,
             db::subscribe::db_cancel_subscription,
+            db::bepinex::db_install_bepinex,
+            db::bepinex::db_get_bepinex_task,
             // 权限系统
             db::db_set_mod_permissions,
             db::db_submit_application,

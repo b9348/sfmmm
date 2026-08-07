@@ -78,7 +78,7 @@
     "prereqNotInstalled": "Mod prerequisites not installed",
     "prereqInstalled": "Mod prerequisites installed",
     "prereqChecking": "Checking mod prerequisites…",
-    "bepInExHint": "DLL mods require the BepInEx loader as a prerequisite. Once installed, plugins under BepInEx/plugins will appear here and can be enabled, disabled and managed individually.",
+    "bepInExHint": "{{category}} require the BepInEx loader as a prerequisite. Once installed, plugins under BepInEx/plugins will appear here and can be enabled, disabled and managed individually.",
     "missingFiles": "Missing {{count}} core file(s):",
     "missing": "Missing",
     "moreFiles": "{{count}} more file(s) not shown",
@@ -123,10 +123,13 @@
     "updateNoFile": "No file available to update",
     "updateFailed": "Update failed: {{msg}}",
     "groupCount": "{{count}} items",
-    "downloadInstallBepInEx": "Download & Install BepInEx",
+    "cloudflareDownload": "Cloudflare Download",
     "installingBepInEx": "Installing BepInEx...",
     "downloadingBepInEx": "Downloading BepInEx",
-    "extractingBepInEx": "Extracting BepInEx..."
+    "extractingBepInEx": "Extracting BepInEx...",
+    "bepInExManualHint1": "Install BepInEx automatically via the built-in download point, or install manually.",
+    "bepInExManualHintLink": "Click here to visit the author's official site",
+    "bepInExManualHint2": ", select \"BepInEx Unity (IL2CPP) for Windows (x64) games\" to download. After downloading, extract the contents directly to the game root directory (the same directory as the BepInEx folder). Do NOT create an extra folder named after the archive."
   },
   "saves": {
     "openFolder": "Open folder",

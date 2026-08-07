@@ -18,12 +18,14 @@ import {
   ArrowDownload24Regular,
 } from '@fluentui/react-icons'
 import { makeStyles, tokens, mergeClasses } from '@fluentui/react-components'
-import { invoke, Channel } from '@tauri-apps/api/core'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { invoke } from '@tauri-apps/api/core'
+import { listen } from '@tauri-apps/api/event'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useInstalledMods } from '../../hooks/useInstalledMods'
 import { LANG_LABELS } from '../../i18n/languages'
 import { RatingStarsDisplay } from '../../components/common/RatingStars'
+import { BEPINEX_URL } from '../../components/common/BepInExPrereqBanner'
 
 const useStyles = makeStyles({
   root: {
@@ -197,6 +199,7 @@ export function ModList({ config, onUninstall }) {
   const [installingBepInEx, setInstallingBepInEx] = useState(false)
   const [bepInExProgress, setBepInExProgress] = useState(0)
   const [bepInExStage, setBepInExStage] = useState('')
+  const bepInExTaskIdRef = useRef(null)
   const { installed, updates, modDetails } = useInstalledMods()
 
   const scanMods = useCallback(async () => {
@@ -300,6 +303,9 @@ export function ModList({ config, onUninstall }) {
     }
   }, [filteredMods, scanMods])
 
+  // BepInEx 前置安装：Rust 后台任务（db_install_bepinex，与订阅记录同模式）。
+  // 进度经全局事件 "bepinex-progress" 广播，本页按 taskId 匹配刷新；
+  // 离开页面/切换标签下载照常执行，回来自动恢复进行中的进度。
   const installBepInEx = useCallback(async () => {
     if (!gamePath) return
     setInstallingBepInEx(true)
@@ -307,23 +313,60 @@ export function ModList({ config, onUninstall }) {
     setBepInExStage('downloading')
     setError('')
     try {
-      const channel = new Channel((msg) => {
-        setBepInExProgress(msg.percent)
-        setBepInExStage(msg.stage)
+      const result = await invoke('db_install_bepinex', {
+        url: BEPINEX_URL,
       })
-      await invoke('download_and_extract_7z', {
-        url: 'https://img.b9349.dpdns.org/file/sfm/BepInEx6/BepInEx6.7z',
-        targetDir: gamePath,
-        onProgress: channel,
-      })
-      await scanMods()
+      // 命中进行中任务时返回 deduplicated=true，同样接管其进度
+      bepInExTaskIdRef.current = result.taskId
     } catch (e) {
       setError(String(e))
-    } finally {
       setInstallingBepInEx(false)
       setBepInExStage('')
     }
-  }, [gamePath, scanMods])
+  }, [gamePath])
+
+  // 全局进度事件：后台任务 emit 广播，本页按 taskId 匹配刷新
+  useEffect(() => {
+    let unlistenFn = null
+    listen('bepinex-progress', (ev) => {
+      const payload = ev.payload || {}
+      if (bepInExTaskIdRef.current === null || payload.taskId !== bepInExTaskIdRef.current) return
+      setBepInExProgress(payload.percent ?? 0)
+      setBepInExStage(payload.stage || '')
+      if (payload.status === 'done') {
+        setInstallingBepInEx(false)
+        setBepInExStage('')
+        scanMods()
+      } else if (payload.status === 'failed' || payload.status === 'cancelled') {
+        setInstallingBepInEx(false)
+        setBepInExStage('')
+        setError(payload.error || String(payload.status))
+      }
+    })
+      .then(fn => { unlistenFn = fn })
+      .catch(() => {})
+    return () => { if (unlistenFn) unlistenFn() }
+  }, [scanMods])
+
+  // 挂载时恢复进行中的后台任务（离开页面再回来，下载不中断）
+  useEffect(() => {
+    let cancelled = false
+    invoke('db_get_bepinex_task')
+      .then((task) => {
+        if (cancelled || !task) return
+        const running = ['pending', 'downloading', 'extracting'].includes(task.status)
+        if (running) {
+          bepInExTaskIdRef.current = task.id
+          setInstallingBepInEx(true)
+          setBepInExProgress(task.percent ?? 0)
+          setBepInExStage(task.stage || 'downloading')
+        } else if (task.status === 'failed') {
+          setError(task.error || '')
+        }
+      })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [])
 
   const activeDir = scanInfo?.activeDirs?.[0]
   const missingCoreFiles = scanInfo?.missingCoreFiles || []
@@ -394,12 +437,20 @@ export function ModList({ config, onUninstall }) {
               onClick={installBepInEx}
               disabled={installingBepInEx || loading}
             >
-              {installingBepInEx ? t('mods.installingBepInEx') : t('mods.downloadInstallBepInEx')}
+              {installingBepInEx ? t('mods.installingBepInEx') : t('mods.cloudflareDownload')}
             </Button>
           </div>
+          <Text size="small" className={styles.emptyDetails}>
+            {t('mods.bepInExManualHint1')}
+            {' '}
+            <a href="https://builds.bepinex.dev/projects/bepinex_be" target="_blank" rel="noopener noreferrer">
+              {t('mods.bepInExManualHintLink')}
+            </a>
+            {t('mods.bepInExManualHint2')}
+          </Text>
           {installingBepInEx && (
             <div className={styles.progressRow}>
-              <ProgressBar value={bepInExProgress} />
+              <ProgressBar value={bepInExProgress / 100} />
               <Text size="small" className={styles.muted}>
                 {bepInExStage === 'downloading' && `${t('mods.downloadingBepInEx')} ${bepInExProgress}%`}
                 {bepInExStage === 'extracting' && t('mods.extractingBepInEx')}

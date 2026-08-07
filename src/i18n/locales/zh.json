@@ -78,7 +78,7 @@
     "prereqNotInstalled": "mod 前置未安装",
     "prereqInstalled": "mod 前置已安装",
     "prereqChecking": "正在检测 mod 前置…",
-    "bepInExHint": "DLL 类模组需要 BepInEx 加载器作为前置。安装后，BepInEx/plugins 下的插件会出现在这里，可逐个启用、停用与管理。",
+    "bepInExHint": "{{category}} 需要 BepInEx 加载器作为前置。安装后，BepInEx/plugins 下的插件会出现在这里，可逐个启用、停用与管理。",
     "missingFiles": "缺少 {{count}} 个核心文件：",
     "missing": "缺少",
     "moreFiles": "还有 {{count}} 个文件未显示",
@@ -123,10 +123,13 @@
     "updateNoFile": "未找到可更新的文件",
     "updateFailed": "更新失败：{{msg}}",
     "groupCount": "共 {{count}} 项",
-    "downloadInstallBepInEx": "下载安装 BepInEx",
+    "cloudflareDownload": "cloudflare 下载点",
     "installingBepInEx": "正在安装 BepInEx...",
     "downloadingBepInEx": "正在下载 BepInEx",
-    "extractingBepInEx": "正在解压 BepInEx..."
+    "extractingBepInEx": "正在解压 BepInEx...",
+    "bepInExManualHint1": "可通过程序内置下载点自动安装 BepInEx 前置，或自行安装。",
+    "bepInExManualHintLink": "点此访问作者原网站",
+    "bepInExManualHint2": "，选择「BepInEx Unity (IL2CPP) for Windows (x64) games」下载。下载后请将压缩包中的内容直接解压到游戏根目录（BepInEx 文件夹所在目录），不要额外创建压缩包名的文件夹。"
   },
   "saves": {
     "openFolder": "打开文件夹",

@@ -78,7 +78,7 @@
     "prereqNotInstalled": "Mod 前提条件がインストールされていません",
     "prereqInstalled": "Mod 前提条件はインストール済み",
     "prereqChecking": "Mod 前提条件を確認中…",
-    "bepInExHint": "DLL Mod には前提として BepInEx ローダーが必要です。インストールすると、BepInEx/plugins 配下のプラグインがここに表示され、個別に有効化・無効化・管理できます。",
+    "bepInExHint": "{{category}} には前提として BepInEx ローダーが必要です。インストールすると、BepInEx/plugins 配下のプラグインがここに表示され、個別に有効化・無効化・管理できます。",
     "missingFiles": "コアファイルが {{count}} 個不足しています：",
     "missing": "不足",
     "moreFiles": "他 {{count}} ファイルが表示されていません",
@@ -123,10 +123,13 @@
     "updateNoFile": "更新可能なファイルがありません",
     "updateFailed": "更新失敗：{{msg}}",
     "groupCount": "全 {{count}} 件",
-    "downloadInstallBepInEx": "BepInEx をダウンロードしてインストール",
+    "cloudflareDownload": "Cloudflare ダウンロード",
     "installingBepInEx": "BepInEx をインストール中...",
     "downloadingBepInEx": "BepInEx をダウンロード中",
-    "extractingBepInEx": "BepInEx を展開中..."
+    "extractingBepInEx": "BepInEx を展開中...",
+    "bepInExManualHint1": "プログラム内蔵のダウンロードポイントから BepInEx を自動インストールするか、手動でインストールできます。",
+    "bepInExManualHintLink": "こちらから作者の公式サイトにアクセス",
+    "bepInExManualHint2": "し、「BepInEx Unity (IL2CPP) for Windows (x64) games」を選択してダウンロードしてください。ダウンロード後、アーカイブの中身をゲームのルートディレクトリ（BepInEx フォルダと同じ階層）に直接展開してください。アーカイブ名のフォルダを追加で作成しないでください。"
   },
   "saves": {
     "openFolder": "フォルダを開く",

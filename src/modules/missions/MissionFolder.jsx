@@ -1,14 +1,14 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
-import { makeStyles, tokens, Text, Button, Card, CardHeader, Badge, Tooltip, Spinner, ProgressBar } from '@fluentui/react-components'
-import { FolderOpen24Regular, ArrowClockwise24Regular, Document24Regular, Folder24Regular, ChevronRight24Regular, Play24Regular, Pause24Regular, Delete24Regular, Cloud24Regular, ArrowDownload24Regular, Warning24Regular } from '@fluentui/react-icons'
-import { invoke, Channel } from '@tauri-apps/api/core'
+import { makeStyles, tokens, Text, Button, Card, CardHeader, Badge, Tooltip } from '@fluentui/react-components'
+import { FolderOpen24Regular, ArrowClockwise24Regular, Document24Regular, Folder24Regular, ChevronRight24Regular, Play24Regular, Pause24Regular, Delete24Regular, Cloud24Regular, ArrowDownload24Regular } from '@fluentui/react-icons'
+import { invoke } from '@tauri-apps/api/core'
 import { readDir, stat } from '@tauri-apps/plugin-fs'
 import { useInstalledMods } from '../../hooks/useInstalledMods'
 import { useUserNav } from '../../contexts/useUserNav'
 import { getModDetail } from '../../services/workshopApi'
 import { installMod } from '../../services/installMod'
-import { AsyncView, EmptyState } from '../../components'
+import { AsyncView, EmptyState, BepInExPrereqBanner } from '../../components'
 import { LANG_LABELS } from '../../i18n/languages'
 import { RatingStarsDisplay } from '../../components/common/RatingStars'
 
@@ -165,34 +165,6 @@ const useStyles = makeStyles({
     justifyContent: 'flex-end',
     marginTop: '4px',
   },
-  // BepInEx 前置未安装时的提示 banner（仅 DLL 模组页 subfolder 含 bepinex 时出现）
-  prereqBanner: {
-    padding: '12px 14px',
-    flexShrink: 0,
-    border: `1px solid ${tokens.colorStatusDangerStroke1}`,
-    borderRadius: tokens.borderRadiusLarge,
-    backgroundColor: tokens.colorNeutralBackground1,
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '8px',
-  },
-  prereqRow: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '6px',
-    minWidth: 0,
-  },
-  prereqText: {
-    color: tokens.colorNeutralForeground2,
-    fontSize: tokens.fontSizeSmall,
-  },
-  prereqProgress: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '4px',
-    width: '100%',
-    maxWidth: '320px',
-  },
 })
 
 let entryCache = {}
@@ -229,7 +201,11 @@ async function listFiles(dir) {
       return a.name.localeCompare(b.name)
     })
   } catch (e) {
-    console.error('[MissionFolder] listFiles error:', e)
+    // 目录不存在（如 BepInEx 未安装时 BepInEx/plugins 缺失）是预期情况，静默返回空列表；
+    // 仅对真正的读取错误打日志。
+    const msg = String(e?.message || e)
+    const notFound = /os error 3|ENOENT|No such file|not found/i.test(msg)
+    if (!notFound) console.error('[MissionFolder] listFiles error:', e)
     return []
   }
 }
@@ -494,53 +470,6 @@ function ModGroupCard({ modKey, items, children, workshopDetail, cloudInfo, hasU
   )
 }
 
-// DLL 模组页（subfolder 含 bepinex）缺少 BepInEx 前置时显示的提示卡片，
-// 复用 ModList 的检测结论与一键安装流程
-function PrereqBanner({ checking, installing, progress, stage, error, onInstall, onRescan }) {
-  const { t } = useTranslation()
-  const styles = useStyles()
-  if (checking) {
-    return (
-      <Card className={styles.prereqBanner}>
-        <div className={styles.prereqRow}>
-          <Spinner size="tiny" />
-          <Text size="small">{t('mods.prereqChecking')}</Text>
-        </div>
-      </Card>
-    )
-  }
-  return (
-    <Card className={styles.prereqBanner}>
-      <div className={styles.prereqRow}>
-        <Warning24Regular />
-        <Text size="small" weight="semibold">{t('mods.prereqNotInstalled')}</Text>
-        <Button size="small" icon={<ArrowClockwise24Regular />} appearance="subtle" onClick={onRescan} disabled={installing}>{t('mods.reDetect')}</Button>
-      </div>
-      <Text size="small" className={styles.prereqText}>{t('mods.bepInExHint')}</Text>
-      {error && <Text size="small" className={styles.prereqText} style={{ color: tokens.colorStatusDangerForeground1 }}>{error}</Text>}
-      <div className={styles.prereqRow}>
-        <Button
-          size="small"
-          icon={installing ? <Spinner size="tiny" /> : <ArrowDownload24Regular />}
-          onClick={onInstall}
-          disabled={installing}
-        >
-          {installing ? t('mods.installingBepInEx') : t('mods.downloadInstallBepInEx')}
-        </Button>
-      </div>
-      {installing && (
-        <div className={styles.prereqProgress}>
-          <ProgressBar value={progress} />
-          <Text size="small" className={styles.prereqText}>
-            {stage === 'downloading' && `${t('mods.downloadingBepInEx')} ${progress}%`}
-            {stage === 'extracting' && t('mods.extractingBepInEx')}
-          </Text>
-        </div>
-      )}
-    </Card>
-  )
-}
-
 export function MissionFolder({ config, subfolder, onUninstall }) {
   const styles = useStyles()
   const { t } = useTranslation()
@@ -670,55 +599,11 @@ export function MissionFolder({ config, subfolder, onUninstall }) {
     }
   }, [currentDir, loadFiles])
 
-  // DLL 模组页（subfolder 含 bepinex）前置：检测 BepInEx 是否安装；未安装则显示一键安装 banner
-  const isBepInEx = (subfolder || '').toLowerCase().includes('bepinex')
-  const [prereqMissing, setPrereqMissing] = useState(null) // null=检测中, true=缺, false=已装
-  const [prereqError, setPrereqError] = useState('')
-  const [installingPrereq, setInstallingPrereq] = useState(false)
-  const [prereqProgress, setPrereqProgress] = useState(0)
-  const [prereqStage, setPrereqStage] = useState('')
-
-  const checkPrereq = useCallback(async () => {
-    if (!isBepInEx || !gamePath) return
-    try {
-      const res = await invoke('scan_mods', { gamePath })
-      setPrereqMissing(res.bepinExInstalled !== true)
-    } catch (e) {
-      setPrereqError(String(e))
-    }
-  }, [isBepInEx, gamePath])
-
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    if (isBepInEx && gamePath) checkPrereq()
-  }, [isBepInEx, gamePath, checkPrereq])
-
-  const installPrereq = useCallback(async () => {
-    if (!gamePath) return
-    setInstallingPrereq(true)
-    setPrereqProgress(0)
-    setPrereqStage('downloading')
-    setPrereqError('')
-    try {
-      const channel = new Channel((msg) => {
-        setPrereqProgress(msg.percent)
-        setPrereqStage(msg.stage)
-      })
-      await invoke('download_and_extract_7z', {
-        url: 'https://img.b9349.dpdns.org/file/sfm/BepInEx6/BepInEx6.7z',
-        targetDir: gamePath,
-        onProgress: channel,
-      })
-      setPrereqMissing(false)
-      entryCache = {}
-      await loadFiles()
-    } catch (e) {
-      setPrereqError(String(e))
-    } finally {
-      setInstallingPrereq(false)
-      setPrereqStage('')
-    }
-  }, [gamePath, loadFiles])
+  // BepInEx 前置安装完成后：清空目录缓存并刷新文件列表
+  const onPrereqInstalled = useCallback(() => {
+    entryCache = {}
+    loadFiles()
+  }, [loadFiles])
 
   const navigateTo = useCallback((targetDir) => {
     entryCache = {}
@@ -908,19 +793,10 @@ export function MissionFolder({ config, subfolder, onUninstall }) {
         </Text>
       )}
 
-      {isBepInEx && prereqMissing !== false && (
-        <PrereqBanner
-          checking={prereqMissing === null}
-          installing={installingPrereq}
-          progress={prereqProgress}
-          stage={prereqStage}
-          error={prereqError}
-          onInstall={installPrereq}
-          onRescan={checkPrereq}
-        />
+      {categoryFromSubfolder(subfolder) === 'dll' && (
+        <BepInExPrereqBanner gamePath={gamePath} category="dll" onInstalled={onPrereqInstalled} />
       )}
 
-      {!(isBepInEx && prereqMissing !== false) && (
       <AsyncView loading={loading} loadingLabel={t('app.loading')}>
         {files.length === 0 && (
           <EmptyState
@@ -982,7 +858,6 @@ export function MissionFolder({ config, subfolder, onUninstall }) {
         )
       })()}
       </AsyncView>
-      )}
     </div>
   )
 }

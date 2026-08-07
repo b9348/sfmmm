@@ -9,6 +9,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 pub mod hash;
 pub mod installer;
 pub mod subscribe;
+pub mod bepinex;
 
 mod user;
 mod mod_ops;
