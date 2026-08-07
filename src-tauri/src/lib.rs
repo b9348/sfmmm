@@ -12,6 +12,7 @@ use tauri_plugin_sql::{Builder, Migration, MigrationKind};
 use futures_util::StreamExt;
 
 mod db;
+mod webview_check;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -825,6 +826,12 @@ fn scan_mods(game_path: String) -> Result<ScanModsResult, String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // 启动前检测 WebView2 运行时；缺失则弹 Windows 原生 MessageBox
+    // （按系统语言选择中/英/日文案），并用系统默认浏览器打开下载链接。
+    if !webview_check::ensure_webview2() {
+        std::process::exit(1);
+    }
+
     let migrations = vec![
         Migration {
             version: 1,
