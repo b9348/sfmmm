@@ -77,14 +77,17 @@ pub async fn db_apply_update(app_handle: tauri::AppHandle) -> Result<String, Str
     let current_exe = std::env::current_exe()
         .map_err(|e| format!("无法获取当前可执行路径: {}", e))?;
 
-    // 创建临时 bat 脚本：等待当前进程退出 → 静默安装 → 启动新版本
+    // 创建临时 bat 脚本：等待当前进程退出 → 静默升级 → 启动新版本
     let bat_path = std::env::temp_dir().join("sfmmm_restart_update.bat");
+    // /S  = NSIS 静默模式
+    // /UPDATE = Tauri NSIS 模板约定的升级参数：跳过"卸载旧版本/请勿卸载"询问页，
+    //           直接覆盖安装，保留 %APPDATA%\com.sfmmm.app 下的 sqlite 数据
     let bat_content = format!(
         "@echo off\r\n\
          rem 等待当前应用完全退出\r\n\
          ping 127.0.0.1 -n 5 > nul\r\n\r\n\
-         rem 静默安装更新\r\n\
-         \"{}\" /S\r\n\r\n\
+         rem 静默升级（不卸载旧版本，直接覆盖）\r\n\
+         \"{}\" /S /UPDATE\r\n\r\n\
          rem 启动更新后的应用\r\n\
          start \"\" \"{}\"\r\n\r\n\
          rem 删除自身\r\n\
