@@ -4,6 +4,9 @@ use tauri::ipc::Channel;
 use tauri::Manager;
 use futures_util::StreamExt;
 
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
+
 fn installer_path(app_handle: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
     let data_dir = app_handle.path().app_data_dir().map_err(|e| format!("无法获取应用数据目录: {}", e))?;
     std::fs::create_dir_all(&data_dir).map_err(|e| format!("创建应用数据目录失败: {}", e))?;
@@ -94,8 +97,18 @@ pub async fn db_apply_update(app_handle: tauri::AppHandle) -> Result<String, Str
         .map_err(|e| format!("创建更新脚本失败: {}", e))?;
 
     // 启动 bat 脚本（独立进程，不受当前进程退出影响）
-    std::process::Command::new(&bat_path)
-        .spawn()
+    // Windows 上 .bat 默认会弹出 cmd 控制台窗口，用 CREATE_NO_WINDOW 隐藏
+    #[cfg(windows)]
+    let mut cmd = {
+        use std::os::windows::process::CommandExt;
+        let mut c = std::process::Command::new(&bat_path);
+        c.creation_flags(CREATE_NO_WINDOW);
+        c
+    };
+    #[cfg(not(windows))]
+    let mut cmd = std::process::Command::new(&bat_path);
+
+    cmd.spawn()
         .map_err(|e| format!("启动更新脚本失败: {}", e))?;
 
     // 退出当前应用，避免安装程序无法覆盖运行中的 exe

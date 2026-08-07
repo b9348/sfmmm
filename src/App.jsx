@@ -101,6 +101,13 @@ function App() {
         if (cfg.initialized !== 'true') return
         if (cfg.pending_update !== 'true') return
 
+        // 关键：应用更新前先清除 pending_update 标志。
+        // applyUpdate() 会调用 app_handle.exit(0) 终止当前进程，
+        // 由 bat 脚本静默安装后重启。若不在此清标志，重启后的新进程
+        // 仍会读到 pending_update='true' 并再次触发 applyUpdate()，
+        // 形成"白屏 → 退出 → bat 弹窗 → 重启 → 白屏"的死循环。
+        await setConfig('pending_update', 'false')
+
         await applyUpdate()
       } catch (e) {
         console.warn('[Update] 自动应用待更新失败:', e)
