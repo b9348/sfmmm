@@ -958,6 +958,41 @@ pub fn run() {
             ALTER TABLE rated_workshop_mods ADD COLUMN updated_at TEXT DEFAULT '';",
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 11,
+            description: "create_subscription_tasks",
+            sql: "CREATE TABLE IF NOT EXISTS subscription_tasks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                mod_key TEXT NOT NULL,
+                mod_id INTEGER DEFAULT 0,
+                category TEXT DEFAULT '',
+                lang_code TEXT DEFAULT '',
+                version TEXT DEFAULT '',
+                file_url TEXT NOT NULL,
+                file_hash TEXT DEFAULT '',
+                status TEXT NOT NULL DEFAULT 'pending',
+                percent INTEGER DEFAULT 0,
+                stage TEXT DEFAULT '',
+                error TEXT DEFAULT '',
+                target_dir TEXT DEFAULT '',
+                manifest TEXT DEFAULT '',
+                retry_of INTEGER DEFAULT NULL,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                finished_at TEXT DEFAULT ''
+            );",
+            kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 12,
+            description: "add_subscription_tasks_meta_cols",
+            // 订阅时冗余存一份工坊卡片的展示信息，让订阅记录页离线也能显示文件名+简介，
+            // 与工坊/任务文件夹卡片语义一致；避免每条任务进页都回查 MySQL。
+            sql: "ALTER TABLE subscription_tasks ADD COLUMN display_name TEXT DEFAULT '';
+                ALTER TABLE subscription_tasks ADD COLUMN description TEXT DEFAULT '';
+                ALTER TABLE subscription_tasks ADD COLUMN translations TEXT DEFAULT '';",
+            kind: MigrationKind::Up,
+        },
     ];
 
     tauri::Builder::default()
@@ -986,6 +1021,9 @@ pub fn run() {
             db::hash::db_set_mod_file_hashes,
             db::installer::db_prepare_update,
             db::installer::db_apply_update,
+            db::subscribe::db_subscribe_mod,
+            db::subscribe::db_list_subscription_tasks,
+            db::subscribe::db_cancel_subscription,
             // 权限系统
             db::db_set_mod_permissions,
             db::db_submit_application,

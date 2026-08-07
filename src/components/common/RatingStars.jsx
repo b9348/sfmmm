@@ -1,7 +1,9 @@
 import { useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import {
   Rating,
   RatingDisplay,
+  Text,
   makeStyles,
   tokens,
   mergeClasses,
@@ -147,6 +149,100 @@ export function RatingStarsDisplay({
         <span className={styles.countText}>
           ({count})
         </span>
+      )}
+    </span>
+  )
+}
+
+/**
+ * 详情页合并评分组件 —— 只用一组星，既展示均分又能交互打分。
+ *
+ * - 未登录：只读均分星 + 人数文字 + "登录后评分" 提示
+ * - 登录未评分：可交互空星 + 旁边均分提示
+ * - 登录已评分：显示用户自己打的分（可改/可清），旁边小字显示均分 (ratingAvg · count 人)
+ *
+ * @param {number} ratingAvg  均分
+ * @param {number} ratingCount 评分人数
+ * @param {number} myRating   当前用户评分（0 表示未评）
+ * @param {boolean} canRate   是否允许交互（已登录）
+ * @param {boolean} busy      提交中
+ * @param {(v:number)=>void} onRate  打分回调
+ * @param {'small'|'medium'|'large'} size
+ */
+export function RatingStarsInteractiveDisplay({
+  ratingAvg = 0,
+  ratingCount = 0,
+  myRating = 0,
+  canRate = false,
+  busy = false,
+  onRate,
+  size = 'medium',
+}) {
+  const { t } = useTranslation()
+  const styles = useStyles()
+  const [pulse, setPulse] = useState(false)
+  const pulseTimer = useRef(null)
+
+  const handleChange = (_, data) => {
+    if (!canRate || busy) return
+    const v = roundHalf(data.value)
+    setPulse(true)
+    if (pulseTimer.current) clearTimeout(pulseTimer.current)
+    pulseTimer.current = setTimeout(() => setPulse(false), 400)
+    onRate?.(v)
+  }
+
+  // 已登录：一组可交互星（已评分显示自己的分，未评分显示空星）
+  // 未登录：只读均分星
+  const interactive = canRate
+  const avgText = t('workshop.myRatingAvg', {
+    avg: roundHalf(ratingAvg).toFixed(1),
+    count: ratingCount,
+  })
+
+  return (
+    <span className={styles.readOnly}>
+      {!interactive && (
+        <RatingDisplay
+          value={roundHalf(ratingAvg)}
+          count={ratingCount}
+          size={size}
+          color="marigold"
+          compact
+        />
+      )}
+      {interactive && (
+        <span
+          className={mergeClasses(
+            styles.interactive,
+            busy && styles.disabled,
+            pulse && styles.pop,
+          )}
+          title={myRating > 0 ? `${myRating} / 5` : undefined}
+        >
+          <Rating
+            step={0.5}
+            value={myRating}
+            onChange={handleChange}
+            size={size}
+            color="marigold"
+            readOnly={busy}
+          />
+        </span>
+      )}
+
+      {/* 旁边的小字提示 */}
+      {!interactive && ratingCount > 0 && (
+        <span className={styles.countText}>({ratingCount})</span>
+      )}
+      {interactive && (
+        <Text size={size === 'small' ? 200 : 300} className={styles.countText}>
+          {myRating > 0
+            ? avgText
+            : ratingCount > 0
+              ? `${roundHalf(ratingAvg).toFixed(1)} (${ratingCount})`
+              : t('workshop.rateHint')}
+        </Text>
       )}
     </span>
   )

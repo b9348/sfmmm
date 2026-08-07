@@ -1,6 +1,6 @@
 [package]
 name = "app"
-version = "0.1.67"
+version = "0.1.68"
 description = "A Tauri App"
 authors = ["you"]
 license = ""
@@ -36,3 +36,8 @@ hex = "0.4"
 tokio = { version = "1", features = ["full"] }
 sevenz-rust = "0.6"
 futures-util = "0.3"
+zip = "2"
+rusqlite = { version = "0.31", features = ["bundled"] }
+lazy_static = "1"
+once_cell = "1"
+chrono = "0.4"

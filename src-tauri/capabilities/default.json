@@ -19,6 +19,7 @@
     "core:window:allow-outer-position",
     "core:window:allow-is-maximized",
     "dialog:default",
+    "core:event:default",
     "sql:default",
     "sql:allow-execute",
     "sql:allow-load",

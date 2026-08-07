@@ -1,7 +1,7 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
-  Text, Button, Badge,
+  Text, Button, Badge, ProgressBar,
   makeStyles, tokens,
   Dialog, DialogSurface, DialogBody, DialogTitle,
   DialogContent, DialogTrigger, DialogActions, Textarea, Select, Checkbox,
@@ -15,6 +15,7 @@ import {
   Folder24Regular, Document24Regular,
 } from '@fluentui/react-icons'
 import { installMod, uninstallMod } from '../../services/installMod'
+import { listen } from '@tauri-apps/api/event'
 import { RichTextContent, MarkdownContent } from '../../components/common/RichTextEditor'
 import { invoke } from '@tauri-apps/api/core'
 import { useAuth } from '../../contexts/useAuth'
@@ -24,7 +25,7 @@ import { upsertRatedModToCache } from '../../services/ratingCache'
 import CommentSection from './CommentSection'
 import { getDb, getGamePath } from '../../services/dbHelper'
 import { BackButton, FloatingActions, FileRow, UserLink } from '../../components'
-import { RatingStars, RatingStarsDisplay } from '../../components/common/RatingStars'
+import { RatingStarsInteractiveDisplay } from '../../components/common/RatingStars'
 import { LANGUAGES, LANG_LABELS } from '../../i18n/languages'
 
 function compareSemver(a, b) {
@@ -111,6 +112,12 @@ export default function ModDetailPage({ mod, onBack, onEdit, scrollToCommentId }
   const canApply = perms.can_apply_mod_info || perms.can_apply_lang
   const [installingLang, setInstallingLang] = useState('')
   const [installError, setInstallError] = useState('')
+  const [installInfo, setInstallInfo] = useState('')
+  // 订阅下载实时进度：按 lang_code 存 { percent, stage, status, error }
+  // 与订阅记录页共享同一 subscription-progress 事件源，本页只关心本 mod 的任务
+  const [subscribeProgress, setSubscribeProgress] = useState({})
+  // 当前活跃订阅任务：lang_code → taskId（用于 listen 时按 taskId 匹配回 lang）
+  const activeTaskByLangRef = useRef({})
   const [installedDir, setInstalledDir] = useState('')
   const [installedFiles, setInstalledFiles] = useState([])
   const [installedByLang, setInstalledByLang] = useState({})
@@ -229,14 +236,16 @@ export default function ModDetailPage({ mod, onBack, onEdit, scrollToCommentId }
   const defaultLang = availableLangs.find(l => l.value === userLang)?.value || availableLangs[0]?.value
   const [selectedLangs, setSelectedLangs] = useState(defaultLang ? [defaultLang] : [])
 
-  useEffect(() => {
-    const checkInstalled = async () => {
-      try {
-        const db = await getDb()
-        const rows = await db.select(
-          'SELECT category, installed_version, lang_code, manifest FROM installed_workshop_mods WHERE mod_key = $1',
-          [mod.mod_key]
-        )
+  // 重查 SQLite 安装记录刷 installedByLang/isInstalled/installedDir/installedFiles——
+  // 切屏回来走 effect 调它；下载 done 时也调它复用既有已安装态显示（打开目录按钮等），
+  // 避免另写旁路显示导致样式不一致
+  const checkInstalled = useCallback(async () => {
+    try {
+      const db = await getDb()
+      const rows = await db.select(
+        'SELECT category, installed_version, lang_code, manifest FROM installed_workshop_mods WHERE mod_key = $1',
+        [mod.mod_key]
+      )
         let langRows = []
         try {
           langRows = await db.select(
@@ -320,9 +329,12 @@ export default function ModDetailPage({ mod, onBack, onEdit, scrollToCommentId }
       } catch (e) {
         console.warn('[ModDetailPage] 查询安装状态失败:', e)
       }
-    }
+    }, [mod.mod_key, mod.files])
+
+  // 切屏回来 / 首次挂载：重查安装记录刷新已安装态
+  useEffect(() => {
     checkInstalled()
-  }, [mod.mod_key, mod.files])
+  }, [checkInstalled])
 
   const handleApply = async () => {
     if (!user) return
@@ -347,7 +359,12 @@ export default function ModDetailPage({ mod, onBack, onEdit, scrollToCommentId }
   const handleInstall = async (file) => {
     setInstallError('')
     setInstallingLang(file.lang_code)
+    // 清掉该 lang 旧的进度反馈，避免上次失败提示残留
+    setSubscribeProgress(prev => { const n = { ...prev }; delete n[file.lang_code]; return n })
     try {
+      // 改造后：installMod 立即返回 taskId，下载/解压/写库全在 Rust 后台异步执行，
+      // 不再阻塞本组件生命周期——离开本页也照常完成。
+      // 进度通过 subscription-progress 事件实时回传本页安装按钮（与订阅记录页共享同一事件源）。
       const result = await installMod({
         modKey: mod.mod_key,
         category: mod.category,
@@ -356,25 +373,67 @@ export default function ModDetailPage({ mod, onBack, onEdit, scrollToCommentId }
         fileHash: file.file_hash,
         langCode: file.lang_code,
         manifest: file.manifest,
+        displayName: mod.display_name,
+        description: mod.description,
+        translations: mod.translations,
       })
-      setInstalledDir(result.targetDir)
-      setInstalledFiles(result.files || (file.manifest ? JSON.parse(file.manifest) : []))
-      setInstalledByLang(prev => ({
-        ...prev,
-        [file.lang_code]: {
-          lang_code: file.lang_code,
-          installed_version: file.version,
-          file_hash: file.file_hash,
-          manifest: result.files ? JSON.stringify(result.files) : file.manifest,
-        },
-      }))
-      setIsInstalled(true)
+      // 记录 lang→taskId 映射，listen 回调凭 taskId 匹配回 lang 更新进度
+      if (result?.taskId != null) {
+        activeTaskByLangRef.current[file.lang_code] = result.taskId
+        // 立即占位显示"已入队"，避免 emit 首帧到达前按钮态空窗
+        // stage 用 t() 拿汉化文案（workshop.stage.pending），不裸 'pending'
+        setSubscribeProgress(prev => ({
+          ...prev,
+          [file.lang_code]: { percent: 0, stage: t('workshop.stage.pending', { defaultValue: 'pending' }), status: 'pending', error: '' },
+        }))
+      }
+      // 命中去重（deduplicated=true）：旧任务已 done，前端进度不会再来，
+      // 复用 checkInstalled 重查 SQLite 刷已安装态（打开目录按钮等就位），不另写旁路显示
+      if (result?.deduplicated) {
+        checkInstalled()
+      }
     } catch (e) {
       setInstallError(e.message)
     } finally {
       setInstallingLang('')
     }
   }
+
+  // 监听后端 subscription-progress 事件，按 taskId 反查 activeTaskByLang 拿 lang，
+  // 更新本页 subscribeProgress[lang]——与订阅记录页共享同一事件源，不互扰
+  useEffect(() => {
+    let unlistenFn = null
+    listen('subscription-progress', (ev) => {
+      const payload = ev.payload || {}
+      const tid = payload.taskId
+      if (tid == null) return
+      // 反查 lang：本页活跃任务映射里找
+      const lang = Object.entries(activeTaskByLangRef.current).find(([, id]) => id === tid)?.[0]
+      if (!lang) return // 不是本页发起的订阅，忽略
+      const stageKey = `workshop.stage.${payload.stage}`
+      setSubscribeProgress(prev => ({
+        ...prev,
+        [lang]: {
+          percent: payload.percent ?? 0,
+          stage: t(stageKey, { defaultValue: payload.stage }),
+          status: payload.status,
+          error: payload.error || '',
+        },
+      }))
+      // 任务终结：清活跃映射。done 时复用 checkInstalled 重查 SQLite 刷已安装态
+      // （installedByLang/isInstalled/installedDir/installedFiles 全套和切屏回来一致），
+      // 不另写旁路显示避免样式不一致 + 打开目录按钮拿不到 installedDir 点不动
+      if (['done', 'failed', 'cancelled'].includes(payload.status)) {
+        delete activeTaskByLangRef.current[lang]
+        if (payload.status === 'done') {
+          checkInstalled()
+        }
+      }
+    })
+      .then(fn => { unlistenFn = fn })
+      .catch(() => {})
+    return () => { if (unlistenFn) unlistenFn() }
+  }, [t])
 
   const handleUninstall = async () => {
     setUninstallError('')
@@ -386,6 +445,15 @@ export default function ModDetailPage({ mod, onBack, onEdit, scrollToCommentId }
       setInstalledDir('')
       setInstalledByLang({})
       setInstalledFiles([])
+      // 退订后清掉订阅进度占位 + 活跃任务映射，否则按钮段
+      // disabled={... || !!subscribeProgress[lang]} 会因残留占位永久禁用无法重装
+      setSubscribeProgress(prev => {
+        const next = { ...prev }
+        // 清本 mod 所有 lang 的占位（退订是 mod 级，所有语言一并清）
+        Object.keys(next).forEach(l => delete next[l])
+        return next
+      })
+      activeTaskByLangRef.current = {}
     } catch (e) {
       setUninstallError(e.message)
     } finally {
@@ -463,39 +531,39 @@ export default function ModDetailPage({ mod, onBack, onEdit, scrollToCommentId }
           )}
         </div>
         <div className={styles.ratingRow}>
-          <RatingStarsDisplay value={ratingAvg} count={ratingCount} size="medium" />
+          <RatingStarsInteractiveDisplay
+            ratingAvg={ratingAvg}
+            ratingCount={ratingCount}
+            myRating={myRating}
+            canRate={!!user}
+            busy={ratingBusy}
+            onRate={handleRate}
+            size="medium"
+          />
           {user ? (
-            <>
-              <RatingStars
-                value={myRating}
-                size="medium"
-                disabled={ratingBusy}
-                onChange={handleRate}
-              />
-              {myRating > 0 && (
-                <Menu>
-                  <MenuTrigger disableButtonEnhancement>
-                    <Button
-                      size="small"
-                      appearance="subtle"
-                      disabled={ratingBusy}
-                    >
-                      {t('workshop.clearRating')}
-                    </Button>
-                  </MenuTrigger>
-                  <MenuPopover>
-                    <MenuList>
-                      <MenuItem onClick={handleUnrate} disabled={ratingBusy}>
-                        {t('workshop.confirmClearRating')}
-                      </MenuItem>
-                      <MenuItem>
-                        {t('workshop.cancel')}
-                      </MenuItem>
-                    </MenuList>
-                  </MenuPopover>
-                </Menu>
-              )}
-            </>
+            myRating > 0 && (
+              <Menu>
+                <MenuTrigger disableButtonEnhancement>
+                  <Button
+                    size="small"
+                    appearance="subtle"
+                    disabled={ratingBusy}
+                  >
+                    {t('workshop.clearRating')}
+                  </Button>
+                </MenuTrigger>
+                <MenuPopover>
+                  <MenuList>
+                    <MenuItem onClick={handleUnrate} disabled={ratingBusy}>
+                      {t('workshop.confirmClearRating')}
+                    </MenuItem>
+                    <MenuItem>
+                      {t('workshop.cancel')}
+                    </MenuItem>
+                  </MenuList>
+                </MenuPopover>
+              </Menu>
+            )
           ) : (
             <Text size="small" className={styles.meta}>
               {t('workshop.loginToRate')}
@@ -578,7 +646,7 @@ export default function ModDetailPage({ mod, onBack, onEdit, scrollToCommentId }
                           : 'outline'
                         : 'primary'
                   }
-                  disabled={installingLang === f.lang_code}
+                  disabled={installingLang === f.lang_code || !!subscribeProgress[f.lang_code]}
                   onClick={(e) => {
                     e.stopPropagation()
                     handleInstall(f)
@@ -592,6 +660,24 @@ export default function ModDetailPage({ mod, onBack, onEdit, scrollToCommentId }
                         : t('workshop.reinstall')
                       : t('workshop.install')}
                 </Button>
+                {subscribeProgress[f.lang_code] && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', minWidth: '120px' }}>
+                    <Text size="small" className={styles.meta}>
+                      {subscribeProgress[f.lang_code].stage}
+                      {subscribeProgress[f.lang_code].percent > 0 && subscribeProgress[f.lang_code].status !== 'done'
+                        ? ` ${subscribeProgress[f.lang_code].percent}%`
+                        : ''}
+                    </Text>
+                    {['pending', 'downloading', 'extracting', 'recording'].includes(subscribeProgress[f.lang_code].status) && (
+                      <ProgressBar value={(subscribeProgress[f.lang_code].percent || 0) / 100} thickness="thin" />
+                    )}
+                    {subscribeProgress[f.lang_code].status === 'failed' && (
+                      <Text size="small" style={{ color: tokens.colorPaletteRedForeground2 }}>
+                        {subscribeProgress[f.lang_code].error || t('workshop.installFailed', { defaultValue: '安装失败' })}
+                      </Text>
+                    )}
+                  </div>
+                )}
                 {isInstalled && (
                   <>
                     <Button
@@ -645,6 +731,11 @@ export default function ModDetailPage({ mod, onBack, onEdit, scrollToCommentId }
                 <Text size="small" className={styles.meta}>{f.file_hash?.slice(0, 8)}</Text>
               </FileRow>
             )})}
+          </div>
+        )}
+        {installInfo && (
+          <div style={{ padding: '8px', background: tokens.colorPaletteGreenBackground1, borderRadius: '4px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <Text size="small" style={{ color: tokens.colorPaletteGreenForeground1 }}>{installInfo}</Text>
           </div>
         )}
         {installedDir && (

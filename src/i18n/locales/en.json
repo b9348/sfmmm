@@ -20,6 +20,7 @@
     "workshop": "Workshop",
     "likes": "Likes & Ratings",
     "apply": "Applications & Notifications",
+    "subscriptions": "Subscriptions",
     "settings": "Settings",
     "saves": "Saves",
     "importExport": "Import / Export",
@@ -319,6 +320,15 @@
     "confirmUninstall": "Confirm Uninstall",
     "uninstallHint": "Uninstalling will remove the locally installed mod files. This action cannot be undone.",
     "installSuccess": "Install successful! Location: ",
+    "installFailed": "Install failed",
+    "stage": {
+      "pending": "Pending",
+      "downloading": "Downloading",
+      "extracting": "Extracting",
+      "recording": "Recording",
+      "done": "Done",
+      "cancelled": "Cancelled"
+    },
     "openDir": "Open directory",
     "viewFileList": "View file list",
     "noFiles": "No files",
@@ -360,6 +370,8 @@
     "sortLikes": "Most likes",
     "sortRating": "Top rated",
     "loginToRate": "Log in to rate",
+    "rateHint": "Tap a star to rate",
+    "myRatingAvg": "Avg {{avg}} ({{count}})",
     "clearRating": "Clear rating",
     "confirmClearRating": "Clear rating",
     "clearRatingHint": "Are you sure you want to clear your rating?",
@@ -412,5 +424,24 @@
     "ratedCount": "{{count}} rated mods",
     "ratedEmpty": "No ratings yet",
     "ratedEmptyHint": "Go to the workshop and rate a mod"
+  },
+  "subscriptions": {
+    "title": "Subscriptions",
+    "summary": "Running {{running}} · Done {{done}} · Failed {{failed}}",
+    "refresh": "Refresh",
+    "empty": "No subscription records yet",
+    "cancel": "Cancel download",
+    "openDir": "Open folder",
+    "cancelledNote": "Cancelled",
+    "status": {
+      "pending": "Pending",
+      "downloading": "Downloading",
+      "extracting": "Extracting",
+      "recording": "Recording",
+      "done": "Done",
+      "uninstalled": "Uninstalled",
+      "failed": "Failed",
+      "cancelled": "Cancelled"
+    }
   }
 }

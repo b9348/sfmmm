@@ -776,6 +776,9 @@ export function MissionFolder({ config, subfolder, onUninstall }) {
         fileHash: file.file_hash,
         langCode: file.lang_code,
         manifest: file.manifest,
+        displayName: mod.display_name,
+        description: mod.description,
+        translations: mod.translations,
       })
       refresh()
     } catch (e) {

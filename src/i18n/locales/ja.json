@@ -20,6 +20,7 @@
     "workshop": "ワークショップ",
     "likes": "いいねと評価",
     "apply": "申請と通知",
+    "subscriptions": "サブスクリプション",
     "settings": "設定",
     "saves": "セーブデータ",
     "importExport": "インポート / エクスポート",
@@ -319,6 +320,15 @@
     "confirmUninstall": "アンインストール確認",
     "uninstallHint": "アンインストールするとローカルにインストールされたModファイルが削除されます。この操作は取り消せません。",
     "installSuccess": "インストール成功！場所：",
+    "installFailed": "インストール失敗",
+    "stage": {
+      "pending": "待機中",
+      "downloading": "ダウンロード中",
+      "extracting": "解凍中",
+      "recording": "記録中",
+      "done": "完了",
+      "cancelled": "キャンセル済み"
+    },
     "openDir": "ディレクトリを開く",
     "viewFileList": "ファイルリスト",
     "noFiles": "ファイルがありません",
@@ -360,6 +370,8 @@
     "sortLikes": "いいね順",
     "sortRating": "評価が高い順",
     "loginToRate": "ログインして評価する",
+    "rateHint": "星をタップして評価",
+    "myRatingAvg": "平均 {{avg}} ({{count}})",
     "clearRating": "評価をクリア",
     "confirmClearRating": "評価をクリア",
     "clearRatingHint": "評価をクリアしてもよろしいですか？",
@@ -412,5 +424,24 @@
     "ratedCount": "評価したMod {{count}} 件",
     "ratedEmpty": "評価したModはまだありません",
     "ratedEmptyHint": "ワークショップでModを評価しましょう"
+  },
+  "subscriptions": {
+    "title": "サブスクリプション",
+    "summary": "実行中 {{running}} ／ 完了 {{done}} ／ 失敹 {{failed}}",
+    "refresh": "更新",
+    "empty": "サブスクリプション記録はまだありません",
+    "cancel": "ダウンロードをキャンセル",
+    "openDir": "フォルダを開く",
+    "cancelledNote": "キャンセル済み",
+    "status": {
+      "pending": "待機中",
+      "downloading": "ダウンロード中",
+      "extracting": "解凍中",
+      "recording": "記録中",
+      "done": "完了",
+      "uninstalled": "アンインストール済み",
+      "failed": "失敗",
+      "cancelled": "キャンセル済み"
+    }
   }
 }

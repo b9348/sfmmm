@@ -20,6 +20,7 @@
     "workshop": "创意工坊",
     "likes": "点赞与评分",
     "apply": "申请与通知",
+    "subscriptions": "订阅记录",
     "settings": "设置",
     "saves": "存档",
     "importExport": "导入/导出",
@@ -319,6 +320,15 @@
     "confirmUninstall": "确认退订",
     "uninstallHint": "退订将删除本地安装的模组文件，此操作不可撤销。",
     "installSuccess": "安装成功！位置：",
+    "installFailed": "安装失败",
+    "stage": {
+      "pending": "等待中",
+      "downloading": "下载中",
+      "extracting": "解压中",
+      "recording": "记录中",
+      "done": "已完成",
+      "cancelled": "已取消"
+    },
     "openDir": "打开目录",
     "viewFileList": "查看文件列表",
     "noFiles": "暂无文件",
@@ -360,6 +370,8 @@
     "sortLikes": "最多赞",
     "sortRating": "评分最高",
     "loginToRate": "登录后可评分",
+    "rateHint": "点击星级评分",
+    "myRatingAvg": "均分 {{avg}} ({{count}})",
     "clearRating": "清除评分",
     "confirmClearRating": "清除评分",
     "clearRatingHint": "确定要清除你的评分吗？",
@@ -412,5 +424,24 @@
     "ratedCount": "已评分 {{count}} 个模组",
     "ratedEmpty": "还没有评分记录",
     "ratedEmptyHint": "去创意工坊给模组评个分吧"
+  },
+  "subscriptions": {
+    "title": "订阅记录",
+    "summary": "进行中 {{running}} · 已完成 {{done}} · 失败 {{failed}}",
+    "refresh": "刷新",
+    "empty": "还没有订阅记录",
+    "cancel": "取消下载",
+    "openDir": "打开目录",
+    "cancelledNote": "已取消",
+    "status": {
+      "pending": "等待中",
+      "downloading": "下载中",
+      "extracting": "解压中",
+      "recording": "记录中",
+      "done": "已完成",
+      "uninstalled": "已退订",
+      "failed": "失败",
+      "cancelled": "已取消"
+    }
   }
 }
