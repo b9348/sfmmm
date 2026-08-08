@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { getCurrentWindow, PhysicalSize, PhysicalPosition } from '@tauri-apps/api/window'
+import { getDb as getSharedDb } from '../services/dbHelper'
 
 function debounce(fn, delay) {
   let timer
@@ -11,8 +12,7 @@ function debounce(fn, delay) {
 
 async function getDb() {
   try {
-    const { default: Database } = await import('@tauri-apps/plugin-sql')
-    return await Database.load('sqlite:config.db')
+    return await getSharedDb()
   } catch (e) {
     console.warn('[usePersistUI] DB not available:', e)
     return null

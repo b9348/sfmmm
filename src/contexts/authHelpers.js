@@ -1,8 +1,8 @@
-import Database from '@tauri-apps/plugin-sql'
+import { getDb } from '../services/dbHelper'
 
 export async function loadUserFromDb() {
   try {
-    const db = await Database.load('sqlite:config.db')
+    const db = await getDb()
     const rows = await db.select(
       "SELECT `key`, value FROM config WHERE `key` IN ('cloud_user_id', 'cloud_username', 'cloud_r2_enabled', 'cloud_avatar')"
     )
@@ -19,7 +19,7 @@ export async function loadUserFromDb() {
 
 export async function saveUserToDb(user) {
   try {
-    const db = await Database.load('sqlite:config.db')
+    const db = await getDb()
     const upsert = "INSERT OR REPLACE INTO config (id, `key`, value) VALUES ((SELECT id FROM config WHERE `key` = $1), $1, $2)"
     await db.execute(upsert, ['cloud_user_id', String(user.user_id)])
     await db.execute(upsert, ['cloud_username', user.username])
@@ -32,7 +32,7 @@ export async function saveUserToDb(user) {
 
 export async function clearUserFromDb() {
   try {
-    const db = await Database.load('sqlite:config.db')
+    const db = await getDb()
     await db.execute("DELETE FROM config WHERE `key` IN ('cloud_user_id', 'cloud_username', 'cloud_r2_enabled', 'cloud_avatar')")
   } catch (e) {
     console.error('Failed to clear cloud user:', e)

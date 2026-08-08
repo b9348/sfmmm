@@ -169,13 +169,19 @@ const useStyles = makeStyles({
 
 let entryCache = {}
 
+// 列表/计数/哈希均忽略的文件（如 v1 前置附带的作者说明 readme.txt，不展示、不参与记录）
+function isIgnoredListingName(name) {
+  if (!name) return false
+  return name.toLowerCase() === 'readme.txt'
+}
+
 async function listFiles(dir) {
   try {
     // 将 Windows 反斜杠路径转换为正斜杠，以兼容 Tauri FS API
     const normalizedDir = dir.replace(/\\/g, '/')
     const entries = await readDir(normalizedDir)
     const list = await Promise.all(
-      entries.filter(e => !e.name?.startsWith('.'))
+      entries.filter(e => !e.name?.startsWith('.') && !isIgnoredListingName(e.name))
         .map(async (e) => {
           const name = e.name
           // 检测 [ban] 禁用标记：xxx[ban]json 或 xxx[ban]dll
@@ -216,7 +222,7 @@ async function getChildCount(dirPath) {
     // 将 Windows 反斜杠路径转换为正斜杠，以兼容 Tauri FS API
     const normalizedDir = dirPath.replace(/\\/g, '/')
     const entries = await readDir(normalizedDir)
-    const filtered = entries.filter(e => !e.name?.startsWith('.'))
+    const filtered = entries.filter(e => !e.name?.startsWith('.') && !isIgnoredListingName(e.name))
     const total = filtered.length
     // 目录数同样用 stat 跟随链接后判定，避免 junction 被 readDir 漏判
     const dirFlags = await Promise.all(filtered.map(async (e) => {
@@ -787,7 +793,7 @@ export function MissionFolder({ config, subfolder, onUninstall }) {
         </Text>
       </Card>
 
-      {currentDir && (
+      {currentDir && categoryFromSubfolder(subfolder) !== 'dll' && (
         <Text size="small" className={styles.meta} style={{ padding: '0 4px' }}>
           {t('mission.reloadTaskHint')}
         </Text>
@@ -797,7 +803,17 @@ export function MissionFolder({ config, subfolder, onUninstall }) {
         <BepInExPrereqBanner
           gamePath={gamePath}
           category={categoryFromSubfolder(subfolder)}
-          prereqKey={categoryFromSubfolder(subfolder) === 'v1' ? 'v1' : 'bepinex'}
+          prereqKey={{ v1: 'v1', v2: 'v2' }[categoryFromSubfolder(subfolder)] || 'bepinex'}
+          onInstalled={onPrereqInstalled}
+        />
+      )}
+
+      {/* DLL 模组页：额外提供去马赛克补丁检测（文件在游戏根目录） */}
+      {categoryFromSubfolder(subfolder) === 'dll' && (
+        <BepInExPrereqBanner
+          gamePath={gamePath}
+          category="rmmosaic"
+          prereqKey="rmmosaic"
           onInstalled={onPrereqInstalled}
         />
       )}

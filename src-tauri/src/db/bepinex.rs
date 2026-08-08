@@ -8,9 +8,13 @@
 //         （无进程内任务句柄接管）自动重置为 failed，可重新发起安装。
 //
 // 命令：db_install_bepinex / db_get_bepinex_task
+//
+// 支持 .7z（sevenz_rust）与 .zip（zip crate，带 zip slip 防护）两种分发格式：
+// 分发点枚举见前端 src/components/common/prereqPoints.js（bepinex=7z，v1=7z，v2=zip）。
 use std::collections::HashMap;
 use std::fs;
-use std::io::Write;
+use std::io::{Read, Write};
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use once_cell::sync::Lazy;
@@ -20,6 +24,126 @@ use tauri::Emitter;
 use tokio::task::JoinHandle;
 
 use crate::db::subscribe::{config_db_path, open_sqlite, read_game_path};
+
+// ── zip slip 防护（与 subscribe.rs safe_zip_path 同语义）──────
+fn safe_zip_path(path: &str) -> Result<String, String> {
+    if path.is_empty() {
+        return Err("zip 内存在空路径".into());
+    }
+    let norm = path.replace('\\', "/");
+    let stripped = norm.trim_start_matches('/');
+    if stripped.split('/').any(|seg| seg == "..") {
+        return Err(format!("zip 内存在非法相对路径: {path}"));
+    }
+    Ok(stripped.to_string())
+}
+
+/// 将 .zip 安全解压到目标目录（zip slip 防护）。返回 ()，失败返回 Err。
+fn extract_zip_to(target_dir: &str, zip_path: &Path) -> Result<(), String> {
+    let file = fs::File::open(zip_path).map_err(|e| format!("打开 zip 失败: {e}"))?;
+    let mut archive = zip::ZipArchive::new(file).map_err(|e| format!("读取 zip 失败: {e}"))?;
+    let target = PathBuf::from(target_dir);
+
+    for i in 0..archive.len() {
+        let mut entry = archive
+            .by_index(i)
+            .map_err(|e| format!("读取 zip entry 失败: {e}"))?;
+        let safe = safe_zip_path(entry.name())?;
+        let out = target.join(safe.replace('/', std::path::MAIN_SEPARATOR_STR));
+
+        if entry.is_dir() {
+            let _ = fs::create_dir_all(&out);
+            continue;
+        }
+        if let Some(parent) = out.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        let mut dest = fs::File::create(&out).map_err(|e| format!("创建文件失败: {e}"))?;
+        let mut buf = Vec::with_capacity(entry.size() as usize);
+        entry
+            .read_to_end(&mut buf)
+            .map_err(|e| format!("读取 zip 内文件失败: {e}"))?;
+        dest.write_all(&buf)
+            .map_err(|e| format!("写出文件失败: {e}"))?;
+    }
+    Ok(())
+}
+
+/// 把 src 的内容合并到 dst（递归）：目录不存在则创建，存在则合并子项；
+/// 仅同名文件覆盖，绝不删除 dst 下已有的目录/文件。
+fn merge_into(src: &Path, dst: &Path) -> Result<(), String> {
+    if src.is_dir() {
+        fs::create_dir_all(dst).map_err(|e| format!("创建目录失败: {e}"))?;
+        let entries = fs::read_dir(src).map_err(|e| format!("读取目录失败: {e}"))?;
+        for entry in entries.flatten() {
+            merge_into(&entry.path(), &dst.join(entry.file_name()))?;
+        }
+    } else {
+        if let Some(parent) = dst.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        // 覆盖同名文件（重命名优先，跨卷 fallback 复制）
+        fs::rename(src, dst)
+            .or_else(|_| fs::copy(src, dst).map(|_| ()))
+            .map_err(|e| format!("写入文件失败: {e}"))?;
+    }
+    Ok(())
+}
+
+/// 按扩展名分派解压：.zip 走 zip crate，其余（.7z）走 sevenz_rust。
+/// 先解压到临时目录，若归档内容整体被包在一个顶层文件夹里（如 `sfmmm_v2/`，
+/// 常见于压缩工具对"右键压缩该文件夹"的产物），则把该顶层文件夹内容展开到
+/// 目标目录（游戏根目录），避免多套一层目录导致 BepInEx/字体位置错位。
+/// 展开采用合并语义：只覆盖同名文件，不删除目标目录下已有内容
+/// （例如先装 v2 插件、再装 v1，BepInEx/plugins 下两者共存，不会互相删）。
+fn decompress_archive(temp_path: &Path, target_dir: &str) -> Result<(), String> {
+    let ext = temp_path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+
+    // 解压到紧邻目标目录的临时 staging，便于后续统一"展开顶层目录"
+    let staging = PathBuf::from(target_dir).join("__sfmmm_extract_tmp");
+    let _ = fs::remove_dir_all(&staging);
+    fs::create_dir_all(&staging).map_err(|e| format!("创建临时解压目录失败: {e}"))?;
+
+    let res = if ext == "zip" {
+        extract_zip_to(staging.to_str().unwrap_or(target_dir), temp_path)
+    } else {
+        sevenz_rust::decompress_file(temp_path, staging.to_str().unwrap_or(target_dir))
+            .map_err(|e| e.to_string())
+    };
+    if let Err(e) = res {
+        let _ = fs::remove_dir_all(&staging);
+        return Err(e);
+    }
+
+    // 收集 staging 顶层条目
+    let mut top_items: Vec<PathBuf> = Vec::new();
+    if let Ok(entries) = fs::read_dir(&staging) {
+        for entry in entries.flatten() {
+            top_items.push(entry.path());
+        }
+    }
+    let only_dir = top_items.len() == 1 && top_items[0].is_dir();
+
+    // 合并到目标目录
+    let target = PathBuf::from(target_dir);
+    fs::create_dir_all(&target).map_err(|e| format!("创建目标目录失败: {e}"))?;
+
+    if only_dir {
+        // 整个包被一个顶层目录包裹：把该目录内容直接铺到目标目录（合并）
+        let _ = merge_into(&top_items[0], &target);
+    } else {
+        // 平铺结构：合并所有顶层条目到目标目录
+        for item in &top_items {
+            let _ = merge_into(item, &target.join(item.file_name().unwrap_or_default()));
+        }
+    }
+    let _ = fs::remove_dir_all(&staging);
+    Ok(())
+}
 
 // ── 全局任务句柄表（与 subscribe.rs 同款）──────────────────
 static TASK_HANDLES: Lazy<Arc<Mutex<HashMap<i64, JoinHandle<()>>>>> =
@@ -158,7 +282,14 @@ async fn run_bepinex_task(app_handle: tauri::AppHandle, task_id: i64, url: Strin
         }
     };
     let total = response.content_length().unwrap_or(0);
-    let temp_path = std::env::temp_dir().join(format!("sfmmm_bepinex_{}.7z", task_id));
+    // 临时文件扩展名跟随下载源 URL（.zip / .7z），供解压按扩展名分派正确路由
+    let url_ext = reqwest::Url::parse(&url)
+        .ok()
+        .and_then(|u| u.path_segments()?.next_back().map(|s| s.to_string()))
+        .and_then(|name| name.rsplit_once('.').map(|(_, ext)| ext.to_lowercase()))
+        .filter(|ext| ext == "zip" || ext == "7z")
+        .unwrap_or_else(|| "7z".to_string());
+    let temp_path = std::env::temp_dir().join(format!("sfmmm_bepinex_{}.{}", task_id, url_ext));
     let mut file = match fs::File::create(&temp_path) {
         Ok(f) => f,
         Err(e) => {
@@ -191,10 +322,10 @@ async fn run_bepinex_task(app_handle: tauri::AppHandle, task_id: i64, url: Strin
     }
     drop(file);
 
-    // 3) 解压到游戏根目录（.7z 格式，用 sevenz_rust，与原 download_and_extract_7z 一致）
+    // 3) 解压到游戏根目录（.7z 用 sevenz_rust，.zip 用 zip crate，按扩展名分派）
     let _ = update_task_status(&app_handle, task_id, "extracting", 100, "extracting", None);
     emit_progress(&app_handle, task_id, 100, "extracting", "extracting", "");
-    if let Err(e) = sevenz_rust::decompress_file(&temp_path, &target_dir) {
+    if let Err(e) = decompress_archive(&temp_path, &target_dir) {
         fail(&app_handle, task_id, "extracting", &format!("解压失败: {e}")).await;
         let _ = fs::remove_file(&temp_path);
         return;

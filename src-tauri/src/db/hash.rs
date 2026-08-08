@@ -42,10 +42,14 @@ fn basename_key(path: &str) -> String {
 
 /// 递归遍历 local_dir，对每个文件计算 SHA-256，返回 basename(小写)->hash。
 /// 若 local_dir 自身为文件，则只哈希该文件（用于 dll 等单文件场景）。
+/// 忽略 readme.txt（如 v1 前置附带的作者说明，不参与指纹记录/比对）。
 fn compute_local_hashes(local_dir: &str) -> HashMap<String, String> {
     let mut map: HashMap<String, String> = HashMap::new();
     let path = Path::new(local_dir);
     if path.is_file() {
+        if basename_key(local_dir) == "readme.txt" {
+            return map;
+        }
         if let Ok(mut f) = std::fs::File::open(path) {
             let mut buf = Vec::new();
             if f.read_to_end(&mut buf).is_ok() {
@@ -68,6 +72,9 @@ fn compute_local_hashes(local_dir: &str) -> HashMap<String, String> {
             if p.is_dir() {
                 stack.push(p);
             } else if p.is_file() {
+                if basename_key(&p.to_string_lossy()) == "readme.txt" {
+                    continue;
+                }
                 if let Ok(mut f) = std::fs::File::open(&p) {
                     let mut buf = Vec::new();
                     if f.read_to_end(&mut buf).is_ok() {
