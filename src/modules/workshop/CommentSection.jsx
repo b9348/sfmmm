@@ -11,6 +11,7 @@ import { addComment, getComments, getCommentReplies, deleteComment, editComment 
 import { resolvePendingImagesInMarkdown, stripPendingUrls, deleteImageFromImgbed, extractImgbedUrls } from '../../services/imageApi'
 import { useAuth } from '../../contexts/useAuth'
 import { MarkdownContent, MarkdownEditor } from '../../components/common/RichTextEditor'
+import { Lightbox } from '../../components/common/Lightbox'
 import { Pagination, UserLink } from '../../components'
 
 const MAX_COMMENT_LENGTH = 3000
@@ -80,6 +81,9 @@ export default function CommentSection({ modId, scrollToCommentId }) {
   const [commentTotal, setCommentTotal] = useState(0)
   const [page, setPage] = useState(1)
   const [loading, setLoading] = useState(false)
+
+  // 灯箱预览：当前查看大图的图片地址
+  const [lightboxSrc, setLightboxSrc] = useState(null)
 
   // 发表评论
   const [newComment, setNewComment] = useState('')
@@ -552,7 +556,7 @@ export default function CommentSection({ modId, scrollToCommentId }) {
                       />
                     </div>
                   ) : (
-                    <MarkdownContent markdown={c.content} />
+                    <MarkdownContent markdown={c.content} onImageClick={setLightboxSrc} />
                   )}
                 </div>
 
@@ -612,7 +616,7 @@ export default function CommentSection({ modId, scrollToCommentId }) {
                               />
                             </div>
                           ) : (
-                            <MarkdownContent markdown={r.content} />
+                            <MarkdownContent markdown={r.content} onImageClick={setLightboxSrc} />
                           )}
                         </div>
                         <div className={styles.actions}>
@@ -683,7 +687,7 @@ export default function CommentSection({ modId, scrollToCommentId }) {
                           <Text className={styles.commentTime}>{r.created_at}</Text>
                         </div>
                         <div className={styles.commentContent}>
-                          <MarkdownContent markdown={r.content} />
+                          <MarkdownContent markdown={r.content} onImageClick={setLightboxSrc} />
                         </div>
                       </Card>
                     ))}
@@ -745,6 +749,9 @@ export default function CommentSection({ modId, scrollToCommentId }) {
           <Pagination page={page} totalPages={totalPages} onChange={(p) => fetchComments(p)} />
         </>
       )}
+
+      {/* 图片灯箱预览 */}
+      <Lightbox src={lightboxSrc} onClose={() => setLightboxSrc(null)} />
     </div>
   )
 }

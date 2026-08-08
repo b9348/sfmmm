@@ -472,14 +472,24 @@ export function MarkdownEditor({ value, onChange, placeholder, maxLength, disabl
   )
 }
 
-export function MarkdownContent({ markdown }) {
+export function MarkdownContent({ markdown, onImageClick }) {
   const styles = useContentStyles()
 
   if (!markdown) return null
 
+  // 事件委托：捕获内容区域内的图片点击，回调图片地址（用于灯箱预览等）
+  const handleClick = (e) => {
+    if (!onImageClick) return
+    const target = e.target
+    if (target && target.tagName === 'IMG') {
+      onImageClick(target.getAttribute('src') || '')
+    }
+  }
+
   return (
     <div
       className={styles.content}
+      onClick={handleClick}
       dangerouslySetInnerHTML={{ __html: marked(markdown) }}
     />
   )
