@@ -124,6 +124,7 @@
     "updateFailed": "更新失败：{{msg}}",
     "groupCount": "共 {{count}} 项",
     "cloudflareDownload": "cloudflare 下载点",
+    "builtinDownloadPoint": "内置下载点",
     "installingBepInEx": "正在安装 BepInEx...",
     "downloadingBepInEx": "正在下载 BepInEx",
     "extractingBepInEx": "正在解压 BepInEx...",

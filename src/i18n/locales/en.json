@@ -124,6 +124,7 @@
     "updateFailed": "Update failed: {{msg}}",
     "groupCount": "{{count}} items",
     "cloudflareDownload": "Cloudflare Download",
+    "builtinDownloadPoint": "Built-in Download Point",
     "installingBepInEx": "Installing BepInEx...",
     "downloadingBepInEx": "Downloading BepInEx",
     "extractingBepInEx": "Extracting BepInEx...",

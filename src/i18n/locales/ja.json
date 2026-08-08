@@ -124,6 +124,7 @@
     "updateFailed": "更新失敗：{{msg}}",
     "groupCount": "全 {{count}} 件",
     "cloudflareDownload": "Cloudflare ダウンロード",
+    "builtinDownloadPoint": "内蔵ダウンロードポイント",
     "installingBepInEx": "BepInEx をインストール中...",
     "downloadingBepInEx": "BepInEx をダウンロード中",
     "extractingBepInEx": "BepInEx を展開中...",

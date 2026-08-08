@@ -793,8 +793,13 @@ export function MissionFolder({ config, subfolder, onUninstall }) {
         </Text>
       )}
 
-      {categoryFromSubfolder(subfolder) === 'dll' && (
-        <BepInExPrereqBanner gamePath={gamePath} category="dll" onInstalled={onPrereqInstalled} />
+      {['dll', 'v1', 'v2'].includes(categoryFromSubfolder(subfolder)) && (
+        <BepInExPrereqBanner
+          gamePath={gamePath}
+          category={categoryFromSubfolder(subfolder)}
+          prereqKey={categoryFromSubfolder(subfolder) === 'v1' ? 'v1' : 'bepinex'}
+          onInstalled={onPrereqInstalled}
+        />
       )}
 
       <AsyncView loading={loading} loadingLabel={t('app.loading')}>

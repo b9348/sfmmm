@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "sfmmm",
-  "version": "0.1.73",
+  "version": "0.1.74",
   "identifier": "com.sfmmm.app",
   "build": {
     "frontendDist": "../dist",
@@ -23,6 +23,13 @@
     ],
     "security": {
       "csp": null
+    }
+  },
+  "plugins": {
+    "sql": {
+      "preload": [
+        "sqlite:config.db"
+      ]
     }
   },
   "bundle": {

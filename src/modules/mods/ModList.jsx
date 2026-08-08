@@ -25,7 +25,7 @@ import { useTranslation } from 'react-i18next'
 import { useInstalledMods } from '../../hooks/useInstalledMods'
 import { LANG_LABELS } from '../../i18n/languages'
 import { RatingStarsDisplay } from '../../components/common/RatingStars'
-import { BEPINEX_URL } from '../../components/common/BepInExPrereqBanner'
+import { BEPINEX_URL } from '../../components/common/prereqPoints'
 
 const useStyles = makeStyles({
   root: {
@@ -437,7 +437,7 @@ export function ModList({ config, onUninstall }) {
               onClick={installBepInEx}
               disabled={installingBepInEx || loading}
             >
-              {installingBepInEx ? t('mods.installingBepInEx') : t('mods.cloudflareDownload')}
+              {installingBepInEx ? t('mods.installingBepInEx') : t('mods.builtinDownloadPoint')}
             </Button>
           </div>
           <Text size="small" className={styles.emptyDetails}>

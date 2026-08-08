@@ -224,9 +224,9 @@ pub async fn db_install_bepinex(
     let existing: Option<i64> = conn
         .query_row(
             "SELECT id FROM bepinex_tasks
-             WHERE status IN ('pending', 'downloading', 'extracting')
+             WHERE url = ? AND status IN ('pending', 'downloading', 'extracting')
              ORDER BY id DESC LIMIT 1",
-            [],
+            rusqlite::params![url],
             |r| r.get(0),
         )
         .ok();

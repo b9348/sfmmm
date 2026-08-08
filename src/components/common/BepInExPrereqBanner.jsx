@@ -4,9 +4,10 @@ import { makeStyles, tokens, Text, Button, Card, Spinner, ProgressBar } from '@f
 import { ArrowClockwise24Regular, ArrowDownload24Regular, Warning24Regular } from '@fluentui/react-icons'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
+import { stat } from '@tauri-apps/plugin-fs'
+import { PREREQ_DOWNLOAD_POINTS, V1_PREREQ_MARKER } from './prereqPoints'
 
-// BepInEx 官方分发点（业务 URL：变更时所有引用方同步更新）
-export const BEPINEX_URL = 'https://img.b9349.dpdns.org/file/sfm/BepInEx6/BepInEx6.7z'
+export { PREREQ_DOWNLOAD_POINTS, BEPINEX_URL, V1_PREREQ_URL } from './prereqPoints'
 
 const useStyles = makeStyles({
   prereqBanner: {
@@ -38,19 +39,22 @@ const useStyles = makeStyles({
   },
 })
 
-// BepInEx 前置检测与一键安装共用组件。
-// 用于任何以 BepInEx 作为前置的模组/任务页（DLL 模组页、自定义任务 v1/v2 等）：
-// 挂载时调用 scan_mods 检测 BepInEx 是否已装；未装则显示警示 banner 与一键安装按钮，
-// 安装成功后通过 onInstalled 回调通知父级刷新目录。
+// 前置检测与一键安装共用组件。
+// 用于任何以前置作为先决条件的模组/任务页（DLL 模组页、自定义任务 v1/v2 等）：
+// - prereqKey='bepinex'：调用 scan_mods 检测 BepInEx 是否已装；
+// - prereqKey='v1'：检测游戏根目录 BepInEx/plugins/SFM_custom_mission.dll 是否存在。
+// 未装则显示警示 banner 与一键安装按钮（下载点来自 PREREQ_DOWNLOAD_POINTS 枚举，
+// 名为"内置下载点"），安装成功后通过 onInstalled 回调通知父级刷新目录。
 // category 复用创意工坊详情页的 workshop.category_* 语言键（dll/v1/v2 等）来显示分类名。
 //
 // 下载改为 Rust 后台任务（db_install_bepinex，与订阅记录同模式）：
 // 进度经全局事件 "bepinex-progress" 广播，本页按 taskId 匹配刷新；
 // 离开页面/切换标签下载照常执行，回来自动恢复进行中的进度。
-export function BepInExPrereqBanner({ gamePath, onInstalled, category = 'dll' }) {
+export function BepInExPrereqBanner({ gamePath, onInstalled, category = 'dll', prereqKey = 'bepinex' }) {
   const { t } = useTranslation()
   const styles = useStyles()
   const categoryLabel = t(`workshop.category_${category}`, { defaultValue: category })
+  const downloadPoint = PREREQ_DOWNLOAD_POINTS[prereqKey]?.[0] || PREREQ_DOWNLOAD_POINTS.bepinex[0]
   const [missing, setMissing] = useState(null) // null=检测中, true=缺, false=已装
   const [error, setError] = useState('')
   const [installing, setInstalling] = useState(false)
@@ -61,12 +65,23 @@ export function BepInExPrereqBanner({ gamePath, onInstalled, category = 'dll' })
   const check = useCallback(async () => {
     if (!gamePath) return
     try {
-      const res = await invoke('scan_mods', { gamePath })
-      setMissing(res.bepinExInstalled !== true)
+      if (prereqKey === 'v1') {
+        // v1 前置安装产物：BepInEx/plugins/SFM_custom_mission.dll
+        const marker = `${gamePath.replace(/\/+$/, '')}/${V1_PREREQ_MARKER}`
+        try {
+          await stat(marker)
+          setMissing(false)
+        } catch {
+          setMissing(true)
+        }
+      } else {
+        const res = await invoke('scan_mods', { gamePath })
+        setMissing(res.bepinExInstalled !== true)
+      }
     } catch (e) {
       setError(String(e))
     }
-  }, [gamePath])
+  }, [gamePath, prereqKey])
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -103,6 +118,8 @@ export function BepInExPrereqBanner({ gamePath, onInstalled, category = 'dll' })
     invoke('db_get_bepinex_task')
       .then((task) => {
         if (cancelled || !task) return
+        // 只接管与当前前置下载点匹配的任务，避免 v1 页误接管 BepInEx 安装进度
+        if (task.url !== downloadPoint.url) return
         const running = ['pending', 'downloading', 'extracting'].includes(task.status)
         if (running) {
           taskIdRef.current = task.id
@@ -115,7 +132,7 @@ export function BepInExPrereqBanner({ gamePath, onInstalled, category = 'dll' })
       })
       .catch(() => {})
     return () => { cancelled = true }
-  }, [])
+  }, [downloadPoint.url])
 
   const install = useCallback(async () => {
     setInstalling(true)
@@ -123,7 +140,7 @@ export function BepInExPrereqBanner({ gamePath, onInstalled, category = 'dll' })
     setStage('downloading')
     setError('')
     try {
-      const result = await invoke('db_install_bepinex', { url: BEPINEX_URL })
+      const result = await invoke('db_install_bepinex', { url: downloadPoint.url })
       // 命中进行中任务时返回 deduplicated=true，同样接管其进度
       taskIdRef.current = result.taskId
     } catch (e) {
@@ -131,7 +148,7 @@ export function BepInExPrereqBanner({ gamePath, onInstalled, category = 'dll' })
       setInstalling(false)
       setStage('')
     }
-  }, [])
+  }, [downloadPoint.url])
 
   // 已安装则不渲染
   if (missing === false) return null
@@ -163,7 +180,7 @@ export function BepInExPrereqBanner({ gamePath, onInstalled, category = 'dll' })
           onClick={install}
           disabled={installing}
         >
-          {installing ? t('mods.installingBepInEx') : t('mods.cloudflareDownload')}
+          {installing ? t('mods.installingBepInEx') : t(downloadPoint.name)}
         </Button>
       </div>
       <Text size="small" className={styles.prereqText}>
