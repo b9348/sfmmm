@@ -1101,6 +1101,7 @@ pub fn run() {
             db::installer::db_prepare_update,
             db::installer::db_get_update_status,
             db::installer::db_apply_update,
+            db::installer::db_clear_update,
             db::subscribe::db_subscribe_mod,
             db::subscribe::db_list_subscription_tasks,
             db::subscribe::db_cancel_subscription,

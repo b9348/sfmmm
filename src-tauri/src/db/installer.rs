@@ -327,6 +327,22 @@ pub async fn db_get_update_status(
     }
 }
 
+/// 清理过期的已就绪更新（残留）：删除 ready 任务记录与已下载的安装包。
+/// 场景：旧版本下载完成后任务/安装包残留，即使当前已是最新版本仍一直提示
+/// "立即重启并更新"。由前端在恢复 ready 状态并与最新版本比对后调用。
+#[tauri::command(rename_all = "snake_case")]
+pub async fn db_clear_update(app_handle: tauri::AppHandle) -> Result<serde_json::Value, String> {
+    let conn = open_sqlite(&app_handle)?;
+    conn.execute("DELETE FROM update_tasks WHERE status = 'ready'", [])
+        .map_err(|e| format!("清理更新任务记录失败: {e}"))?;
+    if let Ok(p) = installer_path(&app_handle) {
+        if p.exists() {
+            let _ = fs::remove_file(&p);
+        }
+    }
+    Ok(serde_json::json!({ "cleared": true }))
+}
+
 /// 启动已下载的安装包并退出当前应用，安装完成后自动重启
 #[tauri::command]
 pub async fn db_apply_update(app_handle: tauri::AppHandle) -> Result<String, String> {
@@ -352,10 +368,13 @@ pub async fn db_apply_update(app_handle: tauri::AppHandle) -> Result<String, Str
          \"{}\" /S /UPDATE\r\n\r\n\
          rem 启动更新后的应用\r\n\
          start \"\" \"{}\"\r\n\r\n\
+         rem 删除更新包，避免残留导致下次启动仍提示可更新\r\n\
+         del \"{}\" > nul 2>&1\r\n\r\n\
          rem 删除自身\r\n\
          del \"{}\" > nul 2>&1\r\n",
         path.display(),
         current_exe.display(),
+        path.display(),
         bat_path.display(),
     );
     std::fs::write(&bat_path, &bat_content)

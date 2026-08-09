@@ -25,7 +25,7 @@ import { open as openUrl } from '@tauri-apps/plugin-shell'
 import { getConfig, setConfig } from '../../services/dbHelper'
 import { Acknowledgments } from './Acknowledgments'
 import i18n from '../../i18n'
-import { checkVersion, prepareUpdate, applyUpdate, getUpdateStatus } from '../../services/updateApi'
+import { checkVersion, prepareUpdate, applyUpdate, getUpdateStatus, compareVersions } from '../../services/updateApi'
 import APP_VERSION from '../../version.js'
 
 const useStyles = makeStyles({
@@ -198,6 +198,37 @@ export function GameSettings({ config, onConfigChange, appUpdateInfo }) {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // 已就绪的下载任务可能是旧版本残留（已安装过同版本/更新成功后的遗留）：
+  // 恢复 ready 状态时与服务器最新版本比对，最新版并未比当前版本新则视为过期残留，
+  // 调用 db_clear_update 清理任务与安装包，避免版本号一致时仍一直提示"立即重启并更新"
+  useEffect(() => {
+    let cancelled = false
+    const validate = async () => {
+      const st = await getUpdateStatus()
+      if (cancelled || !st || st.status !== 'ready') return
+      const latest = updateInfo?.latestVersion
+      // 最新版本未知（启动检测未返回/服务器不可达）时保守保留，等 updateInfo 到达后重跑
+      if (!latest) return
+      // 确实存在更新的版本：保留"立即重启并更新"
+      if (compareVersions(latest, APP_VERSION) > 0) return
+      // 过期残留：清理并退出"重启并更新"状态
+      try {
+        await invoke('db_clear_update')
+      } catch (e) {
+        console.warn('[Update] 清理过期更新任务失败:', e)
+        return
+      }
+      if (cancelled) return
+      setPrepared(false)
+      setPendingUpdate(false)
+      saveConfig({ pending_update: 'false' })
+    }
+    validate()
+    return () => { cancelled = true }
+    // updateInfo 依赖：App 启动检测结果异步到达后重跑，避免挂载时最新版尚未就绪而漏判
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [updateInfo])
 
   const handleCheckUpdate = async () => {
     setChecking(true)
