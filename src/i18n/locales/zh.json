@@ -28,7 +28,10 @@
     "profile": "个人资料",
     "collapse": "折叠侧边栏",
     "expand": "展开侧边栏",
-    "logout": "退出登录"
+    "logout": "退出登录",
+    "launchGame": "启动游戏",
+    "launchGameNoPath": "尚未设置游戏路径，请先在设置页配置游戏目录。",
+    "launchGameFailed": "启动游戏失败："
   },
   "profile": {
     "title": "个人资料",

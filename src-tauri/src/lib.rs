@@ -487,6 +487,41 @@ fn open_folder(path: String, selected_items: Option<Vec<String>>) -> Result<(), 
     Ok(())
 }
 
+/// 启动游戏：运行游戏根目录下的 SecretFlasherManaka.exe，不打开任何页面。
+/// 工作目录设为游戏目录，保证游戏能按相对路径找到资源文件。
+#[tauri::command]
+fn launch_game(game_path: String) -> Result<(), String> {
+    let game_dir = PathBuf::from(&game_path);
+    let exe_path = game_dir.join("SecretFlasherManaka.exe");
+
+    if !exe_path.is_file() {
+        return Err(format!("未找到游戏可执行文件: {}", exe_path.display()));
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        // CREATE_NO_WINDOW：防止游戏（若为控制台子系统程序）弹出黑框窗口，
+        // GUI 程序不受该标志影响，窗口照常显示。
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        std::process::Command::new(&exe_path)
+            .current_dir(&game_dir)
+            .creation_flags(CREATE_NO_WINDOW)
+            .spawn()
+            .map_err(|e| format!("启动游戏失败: {}", e))?;
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        std::process::Command::new(&exe_path)
+            .current_dir(&game_dir)
+            .spawn()
+            .map_err(|e| format!("启动游戏失败: {}", e))?;
+    }
+
+    Ok(())
+}
+
 #[derive(Clone, Serialize)]
 struct DownloadProgress {
     percent: u32,
@@ -1045,7 +1080,7 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_http::init())
         .invoke_handler(tauri::generate_handler![
-            open_folder, scan_mods, toggle_mod_enabled, batch_toggle_mod_enabled, http_request, download_and_extract_7z,
+            open_folder, launch_game, scan_mods, toggle_mod_enabled, batch_toggle_mod_enabled, http_request, download_and_extract_7z,
             db::db_login, db::db_register, db::db_update_profile,
             db::db_list_mods, db::db_list_my_mods, db::db_list_liked_mods, db::db_list_rated_mods,
             db::db_get_mod_detail, db::db_get_mod_for_edit,

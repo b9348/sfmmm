@@ -164,7 +164,6 @@ fn safe_zip_path(path: &str) -> Result<String, String> {
 // ── 递归解压（含嵌套 .zip，复刻前端 extractAll 语义）────────
 struct ExtractOutcome {
     files: Vec<String>,     // 相对 target_dir 的部署清单（manifest 用）
-    open_files: Vec<String>,// composite 类推窄后给前端 open_folder 的相对路径
     target_dir: String,     // composite 可能收窄
 }
 
@@ -242,30 +241,17 @@ fn extract_zip_recursive(
 
     // composite 类：从首个文件推断顶层目录，收窄 target_dir 供 open_folder
     let mut final_target = target_dir.to_string();
-    let mut open_files = files.clone();
     if category == "composite" && !files.is_empty() {
         let first = &files[0];
         let segs: Vec<&str> = first.split('/').collect();
         if segs.len() > 1 {
             let top_dir_segs = &segs[..segs.len() - 1];
             final_target = format!("{}\\{}", base, top_dir_segs.join("\\"));
-            open_files = files
-                .iter()
-                .map(|f| {
-                    let s: Vec<&str> = f.split('/').collect();
-                    if s.len() > top_dir_segs.len() {
-                        s[top_dir_segs.len()..].join("\\")
-                    } else {
-                        f.replace('/', "\\")
-                    }
-                })
-                .collect();
         }
     }
 
     Ok(ExtractOutcome {
         files,
-        open_files,
         target_dir: final_target,
     })
 }
@@ -370,7 +356,6 @@ async fn run_subscribe_task(
     app_handle: tauri::AppHandle,
     task_id: i64,
     mod_key: String,
-    mod_id: i64,
     category: String,
     lang_code: String,
     version: String,
@@ -559,11 +544,6 @@ async fn backfill_cloud_hashes(
 
 // ── Tauri 命令 ─────────────────────────────────────────────
 
-#[derive(Serialize)]
-struct SubscribeResponse {
-    task_id: i64,
-}
-
 /// 创建订阅下载任务并立即返回 task_id；下载在后台异步执行，不阻塞前端。
 #[tauri::command(rename_all = "snake_case")]
 pub async fn db_subscribe_mod(
@@ -664,7 +644,6 @@ pub async fn db_subscribe_mod(
             app,
             task_id,
             mod_key,
-            mod_id.unwrap_or(0),
             category,
             lang_code,
             version,

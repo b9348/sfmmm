@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
+import { invoke } from '@tauri-apps/api/core'
 import APP_VERSION from '../../version.js'
 import {
   makeStyles,
@@ -26,9 +27,11 @@ import {
   DocumentFolder24Regular,
   Heart24Regular,
   MoreHorizontal20Regular,
+  Play24Regular,
 } from '@fluentui/react-icons'
 import { useAuth } from '../../contexts/useAuth'
 import { useNotification } from '../../contexts/NotificationContext'
+import { getConfig } from '../../services/dbHelper'
 import { LoginDialog, ProfileDialog, UserLink } from '../../components'
 
 const useStyles = makeStyles({
@@ -181,6 +184,13 @@ const useStyles = makeStyles({
     width: '24px',
     height: '24px',
   },
+  launchTab: {
+    color: tokens.colorBrandForeground1,
+    fontWeight: '600',
+    '&:hover': {
+      backgroundColor: tokens.colorBrandBackgroundHover,
+    },
+  },
   footer: {
     padding: '8px',
     borderTop: `1px solid ${tokens.colorNeutralStroke2}`,
@@ -249,6 +259,19 @@ export function TabNavigation({ value, onChange, isCollapsed, onToggleCollapse, 
 
   const handleLogout = () => {
     logout()
+  }
+
+  const handleLaunchGame = async () => {
+    try {
+      const gamePath = await getConfig('game_path')
+      if (!gamePath) {
+        alert(t('nav.launchGameNoPath'))
+        return
+      }
+      await invoke('launch_game', { gamePath })
+    } catch (e) {
+      alert(t('nav.launchGameFailed') + '\n' + (e?.message || e))
+    }
   }
 
   return (
@@ -388,6 +411,29 @@ export function TabNavigation({ value, onChange, isCollapsed, onToggleCollapse, 
             </Tooltip>
           )
         })}
+
+        {/* 启动游戏：只执行动作，不切换页面 */}
+        <Tooltip
+          content={t('nav.launchGame')}
+          relationship="label"
+          positioning={isCollapsed ? 'after' : undefined}
+        >
+          <button
+            className={`${styles.tab} ${styles.launchTab} ${
+              isCollapsed ? styles.tabCollapsed : ''
+            }`}
+            onClick={handleLaunchGame}
+          >
+            <span className={styles.tabIcon}><Play24Regular /></span>
+            <span
+              className={`${styles.tabLabel} ${
+                isCollapsed ? styles.tabLabelHidden : ''
+              }`}
+            >
+              {t('nav.launchGame')}
+            </span>
+          </button>
+        </Tooltip>
       </div>
 
       {/* Footer */}

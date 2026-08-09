@@ -23,7 +23,7 @@ use serde::Serialize;
 use tauri::Emitter;
 use tokio::task::JoinHandle;
 
-use crate::db::subscribe::{config_db_path, open_sqlite, read_game_path};
+use crate::db::subscribe::{open_sqlite, read_game_path};
 
 // ── zip slip 防护（与 subscribe.rs safe_zip_path 同语义）──────
 fn safe_zip_path(path: &str) -> Result<String, String> {

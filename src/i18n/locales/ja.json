@@ -28,7 +28,10 @@
     "profile": "プロフィール",
     "collapse": "サイドバーを折りたたむ",
     "expand": "サイドバーを展開",
-    "logout": "ログアウト"
+    "logout": "ログアウト",
+    "launchGame": "ゲームを起動",
+    "launchGameNoPath": "ゲームパスが設定されていません。先に設定ページでゲームフォルダを設定してください。",
+    "launchGameFailed": "ゲームの起動に失敗しました："
   },
   "profile": {
     "title": "プロフィール",

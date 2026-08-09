@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import {
   Card, Text, Button, SearchBox,
   Spinner, makeStyles,
-  Select,
+  Select, tokens,
 } from '@fluentui/react-components'
 import {
   ArrowClockwise24Regular,
@@ -28,6 +28,9 @@ const useStyles = makeStyles({
   },
   toolbarCard: {
     padding: '8px',
+    position: 'sticky',
+    top: 0,
+    zIndex: 100,
   },
   toolbarRow: {
     display: 'flex',
@@ -43,6 +46,14 @@ const useStyles = makeStyles({
     display: 'grid',
     gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
     gap: '12px',
+  },
+  detailOverlay: {
+    position: 'fixed',
+    zIndex: 1000,
+    backgroundColor: tokens.colorNeutralBackground2,
+    overflow: 'hidden',
+    display: 'flex',
+    flexDirection: 'column',
   },
   })
 
@@ -72,6 +83,8 @@ export function BrowseMods({ initialModId, initialCommentId, onConsumeNavTarget 
   const [showCreatePage, setShowCreatePage] = useState(false)
   const [itemsPerRow, setItemsPerRow] = useState(3)
   const initialFetch = useRef(false)
+  const rootRef = useRef(null)
+  const [overlayRect, setOverlayRect] = useState(null)
 
   // 从 URL hash 恢复详情页（Ctrl+R 刷新后）或从导航参数进入
   useEffect(() => {
@@ -179,6 +192,57 @@ export function BrowseMods({ initialModId, initialCommentId, onConsumeNavTarget 
     }
   }, [fetchMods, page])
 
+  // 详情页以覆盖层形式渲染在列表上方，列表保持挂载：
+  // 返回时不会重载数据，滚动位置与图片缓存都得以保留。
+  const getContentEl = useCallback(() => {
+    let el = rootRef.current
+    while (el) {
+      const style = window.getComputedStyle(el)
+      if (style.overflowY === 'auto' || style.overflowY === 'scroll') return el
+      el = el.parentElement
+    }
+    return null
+  }, [])
+
+  useEffect(() => {
+    if (!detailMod) {
+      setOverlayRect(null)
+      return
+    }
+    const content = getContentEl()
+    if (!content) return
+    const compute = () => {
+      const r = content.getBoundingClientRect()
+      setOverlayRect({
+        top: r.top,
+        left: r.left,
+        right: window.innerWidth - r.right,
+        bottom: window.innerHeight - r.bottom,
+      })
+    }
+    compute()
+    const ro = new ResizeObserver(compute)
+    ro.observe(content)
+    window.addEventListener('resize', compute)
+    return () => {
+      ro.disconnect()
+      window.removeEventListener('resize', compute)
+    }
+  }, [detailMod, getContentEl])
+
+  const handleDetailBack = useCallback(() => {
+    if (modStackRef.current.length > 0) {
+      const prevMod = modStackRef.current.pop()
+      window.location.hash = `#/mod/${prevMod.id}`
+      setDetailMod(prevMod)
+      setDetailCommentId(null)
+    } else {
+      setDetailMod(null)
+      setDetailCommentId(null)
+      window.location.hash = ''
+    }
+  }, [])
+
   const handleSearch = (value) => {
     setSearch(value)
   }
@@ -232,29 +296,14 @@ export function BrowseMods({ initialModId, initialCommentId, onConsumeNavTarget 
 
   if (editingMod) return <EditModPage mod={editingMod} onClose={() => setEditingMod(null)} onUpdated={() => { setEditingMod(null); fetchMods() }} />
 
-  if (detailMod) {
-    return <ModDetailPage key={detailMod.id} mod={detailMod} onBack={() => {
-      if (modStackRef.current.length > 0) {
-        const prevMod = modStackRef.current.pop()
-        window.location.hash = `#/mod/${prevMod.id}`
-        setDetailMod(prevMod)
-        setDetailCommentId(null)
-      } else {
-        setDetailMod(null)
-        setDetailCommentId(null)
-        window.location.hash = ''
-      }
-    }} onEdit={handleEdit} scrollToCommentId={detailCommentId} />
-  }
-
-  if (detailLoading) {
+  if (detailLoading && !detailMod) {
     return <Spinner size="large" label={t('workshop.loading')} style={{ marginTop: '40px' }} />
   }
 
   const totalPages = Math.ceil(total / 20)
 
   return (
-    <div className={styles.root}>
+    <div className={styles.root} ref={rootRef}>
       <Card className={styles.toolbarCard}>
         <div className={styles.toolbarRow}>
           <SearchBox
@@ -343,6 +392,15 @@ export function BrowseMods({ initialModId, initialCommentId, onConsumeNavTarget 
       ]} />
 
       <LoginDialog open={loginOpen} onClose={() => setLoginOpen(false)} onSuccess={handleLoginSuccess} />
+
+      {detailMod && overlayRect && (
+        <div
+          className={styles.detailOverlay}
+          style={{ top: overlayRect.top, left: overlayRect.left, right: overlayRect.right, bottom: overlayRect.bottom }}
+        >
+          <ModDetailPage key={detailMod.id} mod={detailMod} onBack={handleDetailBack} onEdit={handleEdit} scrollToCommentId={detailCommentId} />
+        </div>
+      )}
     </div>
   )
 }

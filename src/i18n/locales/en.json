@@ -28,7 +28,10 @@
     "profile": "Profile",
     "collapse": "Collapse sidebar",
     "expand": "Expand sidebar",
-    "logout": "Log out"
+    "logout": "Log out",
+    "launchGame": "Launch Game",
+    "launchGameNoPath": "Game path not set. Please configure the game directory in Settings first.",
+    "launchGameFailed": "Failed to launch game: "
   },
   "profile": {
     "title": "Profile",
