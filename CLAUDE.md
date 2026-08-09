@@ -32,7 +32,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 │  │  toggle_mod_enabled                            │
 │  ├─ HTTP: http_request, test_network              │
 │  ├─ MySQL后端: db_login, db_list_mods, ...        │
-│  └─ 更新: db_check_updates, db_install_update     │
+│  └─ 更新: db_check_updates, db_fetch_latest,      │
+│     db_prepare_update, db_get_update_status       │
 └──────────────────────┬──────────────────────────────┘
                        ↕ Tauri IPC
 ┌──────────────────────┴──────────────────────────────┐
@@ -40,8 +41,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 │                                                      │
 │  src-tauri/src/lib.rs                                │
 │  ├─ 注册插件: dialog, fs, shell, http, process, log │
-│  ├─ tauri_plugin_sql: 3 个 migration                 │
-│  │   (config, mods, installed_workshop_mods 表)      │
+│  ├─ tauri_plugin_sql: 14 个 migration                │
+│  │   (config/mods/installed_workshop_mods/...        │
 │  ├─ 本地 Tauri 命令:                                 │
 │  │   open_folder, scan_mods, toggle_mod_enabled      │
 │  ├─ HTTP 网络命令: http_request, test_network        │
@@ -54,7 +55,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 │  │   update, delete, save_mod_file                   │
 │  ├─ 评论系统: add_comment, get_comments,             │
 │  │   get_replies, delete_comment                     │
-│  ├─ 更新系统: check_updates, install_update          │
+│  ├─ 更新系统: check_updates, fetch_latest,           │
+│  │   prepare_update, get_update_status, apply_update │
 │  └─ 图床配置: get_imgbed_config                      │
 └──────────────────────────────────────────────────────┘
 ```
@@ -78,7 +80,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   - `useInstalledMods` — 读取 SQLite 中已安装的工坊模组列表，调用 Rust `db_check_updates` 检测更新
 - **服务层** (`src/services/`):
   - `workshopApi.js` — 封装所有 `invoke('db_*')` 调用（登录、注册、模组 CRUD、评论、文件上传）
-  - `updateApi.js` — 从服务器检测新版本、调用 `invoke('db_install_update')` 静默安装
+  - `updateApi.js` — 检测新版本 (`checkVersion`)；`prepareUpdate` 创建 Rust 后台下载任务（离开设置页不中断），`getUpdateStatus` 查询/恢复下载状态，`applyUpdate` 应用更新
   - `installMod.js` — 从图床下载 zip 包、解压到游戏目录、写入安装记录
 
 ### Rust 后端结构
@@ -86,12 +88,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `src-tauri/src/main.rs` — 标准 Tauri 入口，调用 `app_lib::run()`
 - `src-tauri/src/lib.rs`:
   - 声明 `mod db` 引入 `db.rs`
-  - 定义 3 个 SQLite migration（`config`、`mods`、`installed_workshop_mods` 表）
+  - 定义 14 个 SQLite migration（config/mods/installed_workshop_mods/subscription_tasks/bepinex_tasks/update_tasks 等表）
   - 注册插件: dialog, fs, shell, http, process, log
   - 注册本地 Tauri 命令: `open_folder`, `scan_mods`, `toggle_mod_enabled`, `http_request`, `test_network`
   - 注册 MySQL 后端命令: 所有 `db::db_*` 函数
   - 通过 `manage()` 注入 MySQL 连接池 `DbState`
-- `src-tauri/src/db.rs`:
+- `src-tauri/src/db.rs`（及 `src-tauri/src/db/` 子模块）:
   - 使用 `mysql` crate 通过 `DB_URL` 环境变量连接远程 MySQL
   - 密码使用 SHA-256 哈希存储
   - 所有函数都是异步 Tauri 命令，使用 `tokio::task::spawn_blocking` 执行同步 MySQL 查询
@@ -109,7 +111,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | key | TEXT UNIQUE | 配置键名 |
 | value | TEXT | 配置值 |
 
-常用 key: `game_path`, `exe_path`, `initialized`, `selected_tab`, `sidebar_collapsed`, `window_*`, `cloud_user_id`, `cloud_username`
+常用 key: `game_path`, `exe_path`, `initialized`, `selected_tab`, `sidebar_collapsed`, `window_*`, `cloud_user_id`, `cloud_username`, `pending_update`
 
 **表 `mods`** — 本地模组记录（当前部分使用中）
 
@@ -123,6 +125,19 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | installed_version | TEXT | 已安装版本 |
 | file_hash | TEXT | 文件哈希 |
 | installed_at | TEXT | 安装时间 |
+
+**表 `update_tasks`** — 应用自更新安装包下载后台任务（与 `subscription_tasks`/`bepinex_tasks` 同款持久化，Rust 后台执行、可跨页面/重启查询恢复）
+| 列 | 类型 | 说明 |
+|---|---|---|
+| id | INTEGER PK AUTOINCREMENT | |
+| url | TEXT | 安装包下载地址 |
+| status | TEXT | pending / downloading / ready / failed |
+| percent | INTEGER | 进度 0-100 |
+| stage | TEXT | 阶段（downloading / done / interrupted） |
+| error | TEXT | 失败原因 |
+| created_at / updated_at / finished_at | TEXT | 时间戳 |
+
+更新下载进度通过全局事件 `update-progress` 广播（与 `subscription-progress`、`bepinex-progress` 同模式），设置页挂载时调用 `db_get_update_status` 恢复状态。
 
 ### 远程 MySQL
 通过 `DB_URL` 环境变量连接，Rust `mysql` crate 直连。包含 `users`、`mods`、`mod_translations`、`mod_files`、`mod_comments` 等表。schema 在服务端维护，不在代码仓库中。

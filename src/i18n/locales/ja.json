@@ -182,6 +182,7 @@
     "updateLater": "あとで",
     "updateOnNextStart": "次回起動時に更新が適用されます",
     "checkFailed": "更新の確認に失敗しました：{{msg}}",
+    "downloadFailed": "更新のダウンロードに失敗しました：{{msg}}",
     "alreadyLatest": "現在最新バージョンです",
     "currentVersion": "現在のバージョン：v{{version}}。「更新を確認」をクリックしてサーバーから最新バージョンを取得します。",
     "language": "表示言語",

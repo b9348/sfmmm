@@ -182,6 +182,7 @@
     "updateLater": "稍后",
     "updateOnNextStart": "下次启动时将会更新",
     "checkFailed": "检测失败：{{msg}}",
+    "downloadFailed": "下载更新失败：{{msg}}",
     "alreadyLatest": "当前已是最新版本",
     "currentVersion": "当前版本：v{{version}}，点击\"检测更新\"从服务器获取最新版本",
     "language": "界面语言",

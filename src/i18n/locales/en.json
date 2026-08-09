@@ -182,6 +182,7 @@
     "updateLater": "Later",
     "updateOnNextStart": "Update will be applied on next launch",
     "checkFailed": "Update check failed: {{msg}}",
+    "downloadFailed": "Update download failed: {{msg}}",
     "alreadyLatest": "You're up to date",
     "currentVersion": "Current version: v{{version}}. Click \"Check update\" to check for the latest version from the server.",
     "language": "Interface Language",

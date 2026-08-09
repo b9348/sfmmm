@@ -1018,6 +1018,25 @@ pub fn run() {
             );",
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 14,
+            description: "create_update_tasks",
+            // 应用自更新安装包下载的后台任务表：与 subscription_tasks / bepinex_tasks
+            // 同款持久化，让 Rust 后台下载不依赖前端生命周期，离开设置页/重启后
+            // 通过 db_get_update_status 查询恢复进度/错误/已就绪。
+            sql: "CREATE TABLE IF NOT EXISTS update_tasks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                url TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'pending',
+                percent INTEGER DEFAULT 0,
+                stage TEXT DEFAULT '',
+                error TEXT DEFAULT '',
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                finished_at TEXT DEFAULT ''
+            );",
+            kind: MigrationKind::Up,
+        },
     ];
 
     tauri::Builder::default()
@@ -1045,6 +1064,7 @@ pub fn run() {
             db::hash::db_preflight_mod,
             db::hash::db_set_mod_file_hashes,
             db::installer::db_prepare_update,
+            db::installer::db_get_update_status,
             db::installer::db_apply_update,
             db::subscribe::db_subscribe_mod,
             db::subscribe::db_list_subscription_tasks,

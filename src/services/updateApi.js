@@ -2,7 +2,7 @@
  * 更新检查与自动安装
  */
 
-import { invoke, Channel } from '@tauri-apps/api/core'
+import { invoke } from '@tauri-apps/api/core'
 
 // 版本清单固定 URL（图床公开文件，CI 发版时删旧传新维护；无需认证）
 // 构建时通过环境变量注入，例如：VITE_LATEST_URL=https://img.b9349.dpdns.org/file/sfm/installer/latest.json
@@ -73,15 +73,22 @@ export async function checkVersion(currentVersion) {
 }
 
 /**
- * 下载更新安装包到本地（不立即安装），带进度回调
+ * 创建更新安装包下载后台任务并立即返回（下载在 Rust 后台执行，
+ * 离开设置页/切换标签不中断，进度由全局事件 "update-progress" 广播，
+ * 状态用 getUpdateStatus() 查询恢复）。
  * @param {string} url - 安装包下载地址
- * @param {function} onProgress - 进度回调 ({ percent: number, stage: string }) => void
+ * @returns {Promise<{taskId: number}>}
  */
-export async function prepareUpdate(url, onProgress) {
-  const channel = new Channel((msg) => {
-    onProgress?.(msg)
-  })
-  return await invoke('db_prepare_update', { url, onProgress: channel })
+export async function prepareUpdate(url) {
+  return await invoke('db_prepare_update', { url })
+}
+
+/**
+ * 查询最近一次更新下载任务状态（设置页挂载时恢复进度/错误/已就绪）
+ * @returns {Promise<{id, status, percent, stage, error} | null>}
+ */
+export async function getUpdateStatus() {
+  return await invoke('db_get_update_status')
 }
 
 /**

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   Card,
@@ -19,12 +19,13 @@ import {
 } from '@fluentui/react-icons'
 import { makeStyles, tokens } from '@fluentui/react-components'
 import { invoke } from '@tauri-apps/api/core'
+import { listen } from '@tauri-apps/api/event'
 import { open as openDialog } from '@tauri-apps/plugin-dialog'
 import { open as openUrl } from '@tauri-apps/plugin-shell'
 import { getConfig, setConfig } from '../../services/dbHelper'
 import { Acknowledgments } from './Acknowledgments'
 import i18n from '../../i18n'
-import { checkVersion, prepareUpdate, applyUpdate } from '../../services/updateApi'
+import { checkVersion, prepareUpdate, applyUpdate, getUpdateStatus } from '../../services/updateApi'
 import APP_VERSION from '../../version.js'
 
 const useStyles = makeStyles({
@@ -79,9 +80,12 @@ export function GameSettings({ config, onConfigChange, appUpdateInfo }) {
   const [downloading, setDownloading] = useState(false)
   const [downloadProgress, setDownloadProgress] = useState(0)
   const [downloadStage, setDownloadStage] = useState('')
+  const [downloadError, setDownloadError] = useState('')
   const [prepared, setPrepared] = useState(false)
   const [pendingUpdate, setPendingUpdate] = useState(false)
   const [updateInfo, setUpdateInfo] = useState(null)
+  // 当前后台下载任务 id：进度事件按 taskId 匹配（与订阅下载同模式）
+  const taskIdRef = useRef(null)
 
   const browseGameFolder = async () => {
     const selected = await openDialog({
@@ -133,10 +137,73 @@ export function GameSettings({ config, onConfigChange, appUpdateInfo }) {
     }
   }, [appUpdateInfo])
 
+  // 离开设置页后更新下载仍由 Rust 后台任务执行（与订阅下载同模式）：
+  // 挂载时查询持久化状态恢复 UI；下载期间监听全局 "update-progress" 事件刷新进度。
+  // 恢复以 DB 为准（同订阅记录页 refresh() 语义）：只要任务状态是 ready 就切
+  // "重启并更新"，不依赖 pending_update 等前端杂项标志——该标志只负责"下次启动
+  // 自动应用"，由 App.jsx 启动流程消费，二者互不干扰。
+  useEffect(() => {
+    let cancelled = false
+    let unlistenFn = null
+
+    const restore = async () => {
+      try {
+        const st = await getUpdateStatus()
+        if (cancelled || !st) return
+        if (st.status === 'downloading' || st.status === 'pending') {
+          setDownloading(true)
+          setDownloadProgress(st.percent ?? 0)
+          setDownloadStage('downloading')
+        } else if (st.status === 'ready') {
+          setPrepared(true)
+        } else if (st.status === 'failed') {
+          setDownloadError(st.error || t('settings.downloadFailed'))
+        }
+      } catch (e) {
+        console.warn('[Update] 恢复下载状态失败:', e)
+      }
+    }
+    restore()
+
+    listen('update-progress', (ev) => {
+      const payload = ev.payload || {}
+      const tid = payload.taskId
+      // 事件对应的任务不是当前已知任务（换新任务/恢复的历史任务）：先重查 DB 同步，
+      // 再按事件增量更新（订阅记录页"事件任务不在列表 → refresh()"同款策略）
+      if (taskIdRef.current !== null && tid !== taskIdRef.current) {
+        restore()
+        return
+      }
+      if (payload.status === 'ready') {
+        setDownloading(false)
+        setDownloadProgress(100)
+        setDownloadStage('')
+        setDownloadError('')
+        setPrepared(true)
+        setPendingUpdate(false)
+        saveConfig({ pending_update: 'false' })
+      } else if (payload.status === 'failed') {
+        setDownloading(false)
+        setDownloadStage('')
+        setDownloadError(payload.error || t('settings.downloadFailed'))
+      } else {
+        setDownloadProgress(payload.percent ?? 0)
+        setDownloadStage(payload.stage || 'downloading')
+      }
+    }).then(fn => { unlistenFn = fn }).catch(e => console.warn('[Update] 监听进度事件失败:', e))
+
+    return () => {
+      cancelled = true
+      unlistenFn?.()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   const handleCheckUpdate = async () => {
     setChecking(true)
     setUpdateInfo(null)
     setPrepared(false)
+    setDownloadError('')
     try {
       const info = await checkVersion(APP_VERSION)
       setUpdateInfo(info)
@@ -153,20 +220,17 @@ export function GameSettings({ config, onConfigChange, appUpdateInfo }) {
     setDownloading(true)
     setDownloadProgress(0)
     setDownloadStage('downloading')
+    setDownloadError('')
     try {
-      await prepareUpdate(updateInfo.updateUrl, (msg) => {
-        setDownloadProgress(msg.percent)
-        setDownloadStage(msg.stage)
-      })
-      setPrepared(true)
-      setPendingUpdate(false)
-      await saveConfig({ pending_update: 'false' })
+      // 创建后台下载任务后立即返回；下载在 Rust 执行，进度由 update-progress 事件回传，
+      // 离开设置页也不中断，重进页面通过 getUpdateStatus() 恢复
+      const res = await prepareUpdate(updateInfo.updateUrl)
+      taskIdRef.current = res?.taskId ?? null
     } catch (e) {
-      console.error('[Update] 下载更新失败:', e)
-      setUpdateInfo(prev => ({ ...prev, error: e.message }))
-    } finally {
+      console.error('[Update] 创建下载任务失败:', e)
       setDownloading(false)
       setDownloadStage('')
+      setDownloadError(e.message || t('settings.downloadFailed'))
     }
   }
 
@@ -278,6 +342,9 @@ export function GameSettings({ config, onConfigChange, appUpdateInfo }) {
                   <span className={styles.currentTag}>v{APP_VERSION}</span>
                   <Text>→</Text>
                   <span className={styles.newTag}>v{updateInfo.latestVersion}</span>
+                  {downloadError && (
+                    <Text size="small" className={styles.noUpdate}>{downloadError}</Text>
+                  )}
                   <Button
                     size="small"
                     appearance="primary"
