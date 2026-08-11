@@ -98,7 +98,7 @@ function LoginPage() {
   )
 }
 
-export function LikeRecords() {
+export function LikeRecords({ panel, visible = true }) {
   const styles = useStyles()
   const { t } = useTranslation()
   const { isLoggedIn, user } = useAuth()
@@ -181,22 +181,36 @@ export function LikeRecords() {
     }
   }, [user])
 
-  // 打开标签页默认只读 SQLite 缓存，避免每次查远程库
+  // 读 SQLite 缓存（缓存为空时查一次远程库填充）
+  const reloadFromCache = useCallback(async () => {
+    const [likedCached, ratedCached] = await Promise.all([
+      loadLikedModsFromCache(),
+      loadRatedModsFromCache(),
+    ])
+    setLikedMods(likedCached)
+    setRatedMods(ratedCached)
+    // 缓存为空时（首次使用）查一次库填充
+    if (likedCached.length === 0) refreshLiked()
+    if (ratedCached.length === 0) refreshRated()
+  }, [refreshLiked, refreshRated])
+
+  // 首次挂载：只读 SQLite 缓存，避免每次查远程库
   useEffect(() => {
     if (!isLoggedIn || initialFetch.current) return
     initialFetch.current = true
-    ;(async () => {
-      const [likedCached, ratedCached] = await Promise.all([
-        loadLikedModsFromCache(),
-        loadRatedModsFromCache(),
-      ])
-      setLikedMods(likedCached)
-      setRatedMods(ratedCached)
-      // 缓存为空时（首次使用）查一次库填充
-      if (likedCached.length === 0) refreshLiked()
-      if (ratedCached.length === 0) refreshRated()
-    })()
-  }, [isLoggedIn, refreshLiked, refreshRated])
+    reloadFromCache()
+  }, [isLoggedIn, reloadFromCache])
+
+  // 常驻挂载下，从隐藏回到可见（再次进入该 tab）时重读缓存，保持与旧版重挂载一致的新鲜度；
+  // 首次展示（预加载目标）不重复拉取，直接呈现预加载结果
+  const wasShown = useRef(false)
+  useEffect(() => {
+    if (!visible || !isLoggedIn) return
+    if (wasShown.current) {
+      reloadFromCache()
+    }
+    wasShown.current = true
+  }, [visible, isLoggedIn, reloadFromCache])
 
   // 点进详情直接查库，获取最新信息（不写缓存）
   const handleDetail = async (mod, panel) => {
@@ -235,83 +249,87 @@ export function LikeRecords() {
 
   return (
     <div className={styles.root}>
-      {/* 左栏：我的点赞 */}
-      <div className={styles.panel}>
-        <div className={styles.sectionHeader}>
-          <Text size="small" weight="semibold">{t('likes.likedTitle')}</Text>
-          <Text size="small" className={styles.meta} style={{ flex: 1 }}>
-            {t('likes.count', { count: likedMods.length })}
-          </Text>
-          <Button size="small" icon={<ArrowClockwise24Regular />} onClick={refreshLiked} disabled={likedLoading}>
-            {t('workshop.refresh')}
-          </Button>
-        </div>
-        <div className={styles.content}>
-          <AsyncView loading={likedLoading} error={likedError} onRetry={refreshLiked} loadingLabel={t('workshop.loading')}>
-            {likedMods.length === 0 ? (
-              <EmptyState
-                icon={<Heart24Regular style={{ fontSize: '32px' }} />}
-                title={t('likes.empty')}
-                description={t('likes.emptyHint')}
-              />
-            ) : (
-              <div className={styles.list} style={{ gridTemplateColumns: `repeat(${itemsPerRow}, 1fr)` }}>
-                {likedMods.map(mod => (
-                  <ModCard key={mod.id} mod={mod} onClick={() => handleDetail(mod, 'liked')} />
-                ))}
-              </div>
-            )}
-          </AsyncView>
-        </div>
-      </div>
-
-      {/* 右栏：我的评分 */}
-      <div className={styles.panel}>
-        <div className={styles.sectionHeader}>
-          <Text size="small" weight="semibold">{t('likes.ratedTitle')}</Text>
-          <Text size="small" className={styles.meta} style={{ flex: 1 }}>
-            {t('likes.ratedCount', { count: ratedMods.length })}
-          </Text>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <Text size="small">{t('workshop.itemsPerRow')}</Text>
-            <Button
-              size="small"
-              icon={<Subtract20Regular />}
-              appearance="subtle"
-              onClick={() => handleItemsPerRowChange(-1)}
-              disabled={itemsPerRow <= 1 || likedLoading || ratedLoading}
-            />
-            <Text size="small" style={{ minWidth: '20px', textAlign: 'center' }}>{itemsPerRow}</Text>
-            <Button
-              size="small"
-              icon={<Add20Regular />}
-              appearance="subtle"
-              onClick={() => handleItemsPerRowChange(1)}
-              disabled={itemsPerRow >= 10 || likedLoading || ratedLoading}
-            />
+      {/* 左栏：我的点赞（panel='rated' 单栏评分时隐藏） */}
+      {panel !== 'rated' && (
+        <div className={styles.panel}>
+          <div className={styles.sectionHeader}>
+            <Text size="small" weight="semibold">{t('likes.likedTitle')}</Text>
+            <Text size="small" className={styles.meta} style={{ flex: 1 }}>
+              {t('likes.count', { count: likedMods.length })}
+            </Text>
+            <Button size="small" icon={<ArrowClockwise24Regular />} onClick={refreshLiked} disabled={likedLoading}>
+              {t('workshop.refresh')}
+            </Button>
           </div>
-          <Button size="small" icon={<ArrowClockwise24Regular />} onClick={refreshRated} disabled={ratedLoading}>
-            {t('workshop.refresh')}
-          </Button>
+          <div className={styles.content}>
+            <AsyncView loading={likedLoading} error={likedError} onRetry={refreshLiked} loadingLabel={t('workshop.loading')}>
+              {likedMods.length === 0 ? (
+                <EmptyState
+                  icon={<Heart24Regular style={{ fontSize: '32px' }} />}
+                  title={t('likes.empty')}
+                  description={t('likes.emptyHint')}
+                />
+              ) : (
+                <div className={styles.list} style={{ gridTemplateColumns: `repeat(${itemsPerRow}, 1fr)` }}>
+                  {likedMods.map(mod => (
+                    <ModCard key={mod.id} mod={mod} onClick={() => handleDetail(mod, 'liked')} />
+                  ))}
+                </div>
+              )}
+            </AsyncView>
+          </div>
         </div>
-        <div className={styles.content}>
-          <AsyncView loading={ratedLoading} error={ratedError} onRetry={refreshRated} loadingLabel={t('workshop.loading')}>
-            {ratedMods.length === 0 ? (
-              <EmptyState
-                icon={<Star24Regular style={{ fontSize: '32px' }} />}
-                title={t('likes.ratedEmpty')}
-                description={t('likes.ratedEmptyHint')}
+      )}
+
+      {/* 右栏：我的评分（panel='liked' 单栏点赞时隐藏） */}
+      {panel !== 'liked' && (
+        <div className={styles.panel}>
+          <div className={styles.sectionHeader}>
+            <Text size="small" weight="semibold">{t('likes.ratedTitle')}</Text>
+            <Text size="small" className={styles.meta} style={{ flex: 1 }}>
+              {t('likes.ratedCount', { count: ratedMods.length })}
+            </Text>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <Text size="small">{t('workshop.itemsPerRow')}</Text>
+              <Button
+                size="small"
+                icon={<Subtract20Regular />}
+                appearance="subtle"
+                onClick={() => handleItemsPerRowChange(-1)}
+                disabled={itemsPerRow <= 1 || likedLoading || ratedLoading}
               />
-            ) : (
-              <div className={styles.list} style={{ gridTemplateColumns: `repeat(${itemsPerRow}, 1fr)` }}>
-                {ratedMods.map(mod => (
-                  <ModCard key={mod.id} mod={mod} onClick={() => handleDetail(mod, 'rated')} />
-                ))}
-              </div>
-            )}
-          </AsyncView>
+              <Text size="small" style={{ minWidth: '20px', textAlign: 'center' }}>{itemsPerRow}</Text>
+              <Button
+                size="small"
+                icon={<Add20Regular />}
+                appearance="subtle"
+                onClick={() => handleItemsPerRowChange(1)}
+                disabled={itemsPerRow >= 10 || likedLoading || ratedLoading}
+              />
+            </div>
+            <Button size="small" icon={<ArrowClockwise24Regular />} onClick={refreshRated} disabled={ratedLoading}>
+              {t('workshop.refresh')}
+            </Button>
+          </div>
+          <div className={styles.content}>
+            <AsyncView loading={ratedLoading} error={ratedError} onRetry={refreshRated} loadingLabel={t('workshop.loading')}>
+              {ratedMods.length === 0 ? (
+                <EmptyState
+                  icon={<Star24Regular style={{ fontSize: '32px' }} />}
+                  title={t('likes.ratedEmpty')}
+                  description={t('likes.ratedEmptyHint')}
+                />
+              ) : (
+                <div className={styles.list} style={{ gridTemplateColumns: `repeat(${itemsPerRow}, 1fr)` }}>
+                  {ratedMods.map(mod => (
+                    <ModCard key={mod.id} mod={mod} onClick={() => handleDetail(mod, 'rated')} />
+                  ))}
+                </div>
+              )}
+            </AsyncView>
+          </div>
         </div>
-      </div>
+      )}
     </div>
   )
 }

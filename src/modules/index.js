@@ -1,4 +1,6 @@
 export { ModList } from './mods'
+export { LocalMods } from './localmods'
+export { NotifyPage } from './notify'
 export { SaveManagement } from './saves'
 export { ImportExport } from './importExport'
 export { GameSettings } from './settings'

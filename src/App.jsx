@@ -2,7 +2,7 @@ import { useState, useEffect, useReducer } from 'react'
 import { FluentProvider, webLightTheme, Dialog, DialogSurface, DialogBody, DialogTitle, DialogContent, DialogActions, DialogTrigger, Button, Text } from '@fluentui/react-components'
 import { makeStyles, tokens } from '@fluentui/react-components'
 import { TabNavigation, WelcomeScreen, TitleBar } from './components'
-import { SaveManagement, ImportExport, GameSettings, Workshop, MissionFolder, ApplicationsPage, LikeRecords } from './modules'
+import { SaveManagement, ImportExport, GameSettings, Workshop, LocalMods, NotifyPage } from './modules'
 import { AuthProvider } from './contexts/AuthContext.jsx'
 import { UserNavProvider } from './contexts/UserNavProvider.jsx'
 import { NotificationProvider } from './contexts/NotificationContext'
@@ -141,9 +141,20 @@ function App() {
           }
         }
 
-        const validTabs = ['mods', 'v1', 'v2', 'saves', 'import-export', 'workshop', 'likes', 'apply', 'settings']
-        if (configMap.selected_tab && validTabs.includes(configMap.selected_tab)) {
-          setSelectedTab(configMap.selected_tab)
+        // 旧版本把 模组/v1/v2 作为独立 tab 持久化；新版本统一收纳到 localmods
+        const LEGACY_LOCAL_TABS = { mods: 'localmods', v1: 'localmods', v2: 'localmods' }
+        // 旧版本 点赞/申请 独立 tab → 新版本统一收纳到 notify
+        const LEGACY_NOTIFY_TABS = { likes: 'notify', apply: 'notify' }
+        const validTabs = ['localmods', 'saves', 'import-export', 'workshop', 'notify', 'settings']
+        let restoredTab = configMap.selected_tab
+        if (LEGACY_LOCAL_TABS[restoredTab]) restoredTab = LEGACY_LOCAL_TABS[restoredTab]
+        if (LEGACY_NOTIFY_TABS[restoredTab]) restoredTab = LEGACY_NOTIFY_TABS[restoredTab]
+        if (restoredTab && validTabs.includes(restoredTab)) {
+          setSelectedTab(restoredTab)
+          // 旧值映射后回写持久化，避免每次启动都走映射
+          if (configMap.selected_tab !== restoredTab) {
+            setConfig('selected_tab', restoredTab).catch(() => {})
+          }
         }
 
         if (configMap.initialized === 'true' || (configMap.game_path && configMap.exe_path)) {
@@ -245,21 +256,19 @@ function App() {
              onToggleCollapse={toggleSidebar}
              updateInfo={updateInfo}
              onNavigateToSettings={() => handleTabChange('settings')}
-           />
+           >
             <main className={styles.tabContent}>
-              {selectedTab === 'mods' && <MissionFolder key={`mods-${state.config?.game_path || ''}-${modListKey}`} config={state.config} subfolder="BepInEx/plugins" onUninstall={handleUninstallMod} />}
-              {selectedTab === 'v1' && <MissionFolder key={`v1-${state.config?.game_path || ''}`} config={state.config} subfolder="CustomMissions" onUninstall={handleUninstallMod} />}
-              {selectedTab === 'v2' && <MissionFolder key={`v2-${state.config?.game_path || ''}`} config={state.config} subfolder="CustomMissions2" onUninstall={handleUninstallMod} />}
+              {selectedTab === 'localmods' && <LocalMods key={`localmods-${state.config?.game_path || ''}-${modListKey}`} config={state.config} onUninstall={handleUninstallMod} />}
               {selectedTab === 'saves' && <SaveManagement config={state.config} />}
               {selectedTab === 'import-export' && <ImportExport config={state.config} />}
               {selectedTab === 'workshop' && <Workshop initialModId={navTarget?.modId} initialCommentId={navTarget?.commentId} onConsumeNavTarget={() => setNavTarget(null)} />}
-              {selectedTab === 'likes' && <LikeRecords />}
-              {selectedTab === 'apply' && <ApplicationsPage onNavigate={(modId, commentId) => {
+              {selectedTab === 'notify' && <NotifyPage onNavigate={(modId, commentId) => {
                 setNavTarget({ modId, commentId })
                 handleTabChange('workshop')
               }} />}
               {selectedTab === 'settings' && <GameSettings config={state.config} onConfigChange={handleConfigChange} appUpdateInfo={updateInfo} />}
             </main>
+          </TabNavigation>
           </div>
         </div>
         </NotificationProvider>

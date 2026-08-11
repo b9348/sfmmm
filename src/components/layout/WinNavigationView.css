@@ -1,0 +1,631 @@
+/* WinNavigationView — React 版 WinUI NavigationView 样式
+   主题变量还原自 winuionweb（WinUI on Web）的 theme.css */
+
+.winnv-shell {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  background: var(--winnv-app-bg, #F3F3F3);
+  color: var(--winnv-text-primary, rgba(0, 0, 0, 0.89));
+  --winnv-fast-duration: 0.167s;
+  --winnv-normal-duration: 0.200s;
+  --winnv-fast-out-slow-in: cubic-bezier(0, 0, 0, 1);
+}
+
+.winnv-shell.is-left {
+  flex-direction: row;
+}
+
+.winnv-shell.is-top {
+  flex-direction: column;
+}
+
+.winnv-shell.is-overlay-left {
+  position: relative;
+}
+
+/* ---------- 左侧面板 ---------- */
+.winnv-left-panel {
+  position: relative;
+  box-sizing: border-box;
+  width: var(--winnv-open-pane-length, 320px);
+  display: flex;
+  flex-direction: column;
+  padding: 4px 4px;
+  flex-shrink: 0;
+  overflow: hidden;
+  transition: width var(--winnv-normal-duration) var(--winnv-fast-out-slow-in),
+    margin-right var(--winnv-normal-duration) var(--winnv-fast-out-slow-in),
+    clip-path var(--winnv-normal-duration) var(--winnv-fast-out-slow-in);
+}
+
+/* 折叠态（Left 折叠 / 覆盖模式收起）：对齐 WinUI 源码——
+   保持面板宽度，用 clip-path 从右往左裁剪到紧凑宽度。
+   面板内部布局（图标位置）完全不动，只裁掉右侧内容。 */
+.winnv-shell:not(.is-overlay-left) > .winnv-left-panel.is-compact {
+  width: var(--winnv-open-pane-length, 320px);
+  margin-right: calc(var(--winnv-compact-pane-length, 48px) - var(--winnv-open-pane-length, 320px));
+  clip-path: inset(0 calc(var(--winnv-open-pane-length, 320px) - var(--winnv-compact-pane-length, 48px)) 0 0);
+}
+
+.winnv-shell.is-overlay-left > .winnv-left-panel.is-compact {
+  width: var(--winnv-open-pane-length, 320px);
+  clip-path: inset(0 calc(var(--winnv-open-pane-length, 320px) - var(--winnv-compact-pane-length, 48px)) 0 0);
+  box-shadow: none;
+  border-radius: 0;
+}
+
+.winnv-shell.is-overlay-left > .winnv-left-panel {
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  z-index: 20;
+  background: var(--winnv-pane-fill, var(--winnv-host-nav-pane-bg, rgba(255, 255, 255, 0.78)));
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.16);
+  border-radius: 0 8px 8px 0;
+}
+
+.winnv-shell.is-left-compact > .winnv-left-panel {
+  background: transparent;
+  box-shadow: none;
+}
+
+.winnv-shell.is-left-compact > .winnv-content {
+  margin-left: var(--winnv-compact-pane-length, 48px);
+}
+
+.winnv-shell.is-left-minimal > .winnv-left-panel {
+  background: transparent;
+  box-shadow: none;
+  border-radius: 0;
+}
+
+.winnv-shell.is-left-minimal > .winnv-content {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  flex: none;
+  border-radius: 0;
+}
+
+/* 内容区 */
+.winnv-content {
+  position: relative;
+  isolation: isolate;
+  box-sizing: border-box;
+  width: 100%;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--winnv-layer-default, rgba(255, 255, 255, 0.50));
+}
+
+.winnv-shell.is-left > .winnv-content {
+  border-radius: 8px 0 0 0;
+  border-top: 1px solid var(--winnv-card-stroke, rgba(0, 0, 0, 0.06));
+  border-left: 1px solid var(--winnv-card-stroke, rgba(0, 0, 0, 0.06));
+}
+
+.winnv-shell.is-top > .winnv-content {
+  border-top: 1px solid var(--winnv-card-stroke, rgba(0, 0, 0, 0.06));
+  border-radius: 0;
+}
+
+.winnv-content-inner {
+  box-sizing: border-box;
+  width: 100%;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ---------- 顶部栏（Top 模式） ---------- */
+.winnv-top-bar {
+  position: relative;
+  box-sizing: border-box;
+  width: calc(100% - 8px);
+  height: 48px;
+  margin: 0 4px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.winnv-top-pane-title {
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 600;
+  color: var(--winnv-text-primary, rgba(0, 0, 0, 0.89));
+  padding: 0 8px;
+  white-space: nowrap;
+}
+
+.winnv-top-menu {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* ---------- 返回 / 汉堡按钮 ---------- */
+.winnv-back-button,
+.winnv-hamburger {
+  padding: 0;
+  border: 0;
+  color: var(--winnv-text-primary, rgba(0, 0, 0, 0.89));
+  font: inherit;
+  width: 40px;
+  height: 36px;
+  margin: 2px 0;
+  border-radius: 4px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  background: transparent;
+  transition: background var(--winnv-fast-duration) var(--winnv-fast-out-slow-in);
+}
+
+.winnv-back-button:hover,
+.winnv-hamburger:hover {
+  background: var(--winnv-subtle-secondary, rgba(0, 0, 0, 0.0373));
+}
+
+.winnv-back-button:active,
+.winnv-hamburger:active {
+  background: var(--winnv-subtle-tertiary, rgba(0, 0, 0, 0.0241));
+}
+
+.winnv-back-button:disabled {
+  color: var(--winnv-text-disabled, rgba(0, 0, 0, 0.36));
+  cursor: default;
+  background: transparent;
+}
+
+.winnv-back-button .winnv-icon,
+.winnv-hamburger .winnv-icon {
+  width: 16px;
+  height: 16px;
+  font-size: 16px;
+  line-height: 16px;
+}
+
+.winnv-hamburger.has-pane-title {
+  width: auto;
+  min-width: calc(var(--winnv-open-pane-length, 320px) - 8px);
+  max-width: calc(var(--winnv-open-pane-length, 320px) - 8px);
+  justify-content: flex-start;
+  overflow: hidden;
+}
+
+.winnv-hamburger.has-pane-title > .winnv-icon {
+  margin: 0 12px;
+  flex-shrink: 0;
+}
+
+/* ---------- 面板标题 ---------- */
+.winnv-pane-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 600;
+  color: var(--winnv-text-primary, rgba(0, 0, 0, 0.89));
+}
+
+/* ---------- 指示条 ---------- */
+.winnv-indicator-track {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  pointer-events: none;
+  overflow: visible;
+  z-index: 3;
+}
+
+.winnv-indicator {
+  position: absolute;
+  left: 4px;
+  top: 0;
+  width: 3px;
+  height: 16px;
+  border-radius: 2px;
+  background: var(--winnv-accent, #0067C0);
+  pointer-events: none;
+  z-index: 10;
+  transition: top 200ms var(--winnv-fast-out-slow-in), opacity var(--winnv-fast-duration) var(--winnv-fast-out-slow-in);
+}
+
+/* 布局过渡（折叠/展开、分组收展）期间蓝标进入跟随模式：
+   禁用蓝标自身过渡，位置由 JS 逐帧跟随目标条目，
+   与条目动画同步移动，形成 WinUI 风格的推动感 */
+.winnv-indicator.is-following {
+  transition: none;
+}
+
+/* ---------- 菜单 ---------- */
+.winnv-menu {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  position: relative;
+  box-sizing: border-box;
+  width: calc(var(--winnv-open-pane-length, 320px) - 8px);
+}
+
+/* 左侧面板内容区：纵向 flex 撑满，菜单区 flex:1 撑开，
+   footer（含设置项）被推到面板底部，与源码 ScrollViewer flex:1 等效 */
+.winnv-pane-surface {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  position: relative;
+}
+
+.winnv-pane-surface > .winnv-menu {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.winnv-left-panel.is-closed-compact .winnv-menu {
+  width: calc(var(--winnv-compact-pane-length, 48px) - 8px);
+}
+
+/* ---------- 菜单条目 ---------- */
+.winnv-item {
+  position: relative;
+  box-sizing: border-box;
+  height: 36px;
+  margin: 2px 0;
+  padding: 0 12px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  background: transparent;
+  transition: background var(--winnv-fast-duration) var(--winnv-fast-out-slow-in);
+  white-space: nowrap;
+  user-select: none;
+  color: var(--winnv-text-primary, rgba(0, 0, 0, 0.89));
+}
+
+.winnv-item:not(.is-disabled):hover {
+  background: var(--winnv-subtle-secondary, rgba(0, 0, 0, 0.0373));
+}
+
+.winnv-item:not(.is-disabled):active {
+  background: var(--winnv-subtle-tertiary, rgba(0, 0, 0, 0.0241));
+}
+
+.winnv-item.is-selected {
+  background: var(--winnv-subtle-secondary, rgba(0, 0, 0, 0.0373));
+}
+
+.winnv-item.is-selected:not(.is-disabled):hover {
+  background: var(--winnv-subtle-tertiary, rgba(0, 0, 0, 0.0241));
+}
+
+.winnv-item.is-disabled {
+  color: var(--winnv-text-disabled, rgba(0, 0, 0, 0.36));
+  cursor: default;
+}
+
+.winnv-item.is-disabled.is-selected {
+  background: var(--winnv-subtle-secondary, rgba(0, 0, 0, 0.0373));
+}
+
+.winnv-item .winnv-icon {
+  margin-right: 16px;
+  min-width: 16px;
+  width: 16px;
+  text-align: center;
+  font-size: 16px;
+  line-height: 1;
+  position: relative;
+}
+
+/* React 节点图标（如 Fluent UI 图标）：限制 SVG 尺寸与字形一致 */
+.winnv-icon-node {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.winnv-icon-node svg {
+  width: 16px;
+  height: 16px;
+}
+
+.winnv-back-button .winnv-icon-node,
+.winnv-hamburger .winnv-icon-node {
+  width: 16px;
+  height: 16px;
+  min-width: 16px;
+}
+
+/* 内置按钮传入 React 图标节点时，SVG 同样限制为 16px（对齐字形尺寸） */
+.winnv-back-button .winnv-icon svg,
+.winnv-hamburger .winnv-icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+.winnv-group-chevron.winnv-icon-node svg {
+  width: 10px;
+  height: 10px;
+}
+
+.winnv-item.winnv-settings-item .winnv-icon-node svg {
+  width: 14px;
+  height: 14px;
+}
+
+.winnv-item .winnv-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.winnv-item .winnv-infobadge {
+  margin-left: auto;
+  padding: 0 6px;
+  min-width: 16px;
+  height: 16px;
+  border-radius: 8px;
+  background: var(--winnv-accent, #0067C0);
+  color: #FFFFFF;
+  font-size: 10px;
+  line-height: 16px;
+  font-weight: 600;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+/* 紧凑模式：只显示图标 */
+.winnv-left-panel.is-closed-compact .winnv-item {
+  width: calc(var(--winnv-compact-pane-length, 48px) - 8px);
+  min-width: calc(var(--winnv-compact-pane-length, 48px) - 8px);
+  max-width: calc(var(--winnv-compact-pane-length, 48px) - 8px);
+  overflow: hidden;
+  padding: 0 12px;
+}
+
+.winnv-left-panel.is-closed-compact .winnv-item .winnv-label {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.winnv-left-panel.is-closed-compact .winnv-item > .winnv-infobadge {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  margin: 0;
+}
+
+/* ---------- 分组标题 ---------- */
+.winnv-item-header {
+  box-sizing: border-box;
+  height: 40px;
+  min-height: 40px;
+  padding: 0 16px;
+  display: flex;
+  align-items: center;
+  color: var(--winnv-text-secondary, rgba(0, 0, 0, 0.62));
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 600;
+  user-select: none;
+}
+
+.winnv-left-panel.is-closed-compact .winnv-item-header {
+  height: 0;
+  min-height: 0;
+  padding: 0;
+  opacity: 0;
+  overflow: hidden;
+}
+
+.winnv-item-separator {
+  height: 1px;
+  margin: 3px 0 4px;
+  background: var(--winnv-stroke-divider, rgba(0, 0, 0, 0.06));
+}
+
+/* ---------- 分组折叠 ---------- */
+.winnv-group-header {
+  position: relative;
+}
+
+.winnv-group-header .winnv-group-chevron {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  min-width: 40px;
+  height: 36px;
+  margin-left: auto;
+  margin-right: -14px;
+  font-size: 8px;
+  transition: transform 200ms var(--winnv-fast-out-slow-in);
+  transform: rotate(0deg);
+}
+
+.winnv-group-header .winnv-group-chevron.chevron-open {
+  transform: rotate(180deg);
+}
+
+.winnv-left-panel.is-closed-compact .winnv-group-chevron {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.winnv-group-children {
+  display: grid;
+  grid-template-rows: 0fr;
+  overflow: hidden;
+  transition: grid-template-rows var(--winnv-normal-duration) var(--winnv-fast-out-slow-in);
+}
+
+.winnv-group.is-expanded > .winnv-group-children {
+  grid-template-rows: 1fr;
+}
+
+.winnv-group-children-inner {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.winnv-group-child {
+  padding-left: 44px;
+}
+
+.winnv-group-child .winnv-icon {
+  margin-right: 16px;
+}
+
+.winnv-left-panel .winnv-group.is-child-selected > .winnv-group-header {
+  background: transparent;
+}
+
+/* ---------- 面板顶部/底部自定义插槽 ---------- */
+/* 固定最小高度 + flex 居中：折叠态用户区内容变矮时容器高度不塌陷，
+   items 位置保持不变（对齐源码 .win-nav-pane-header min-height:32px） */
+.winnv-pane-header {
+  flex-shrink: 0;
+  box-sizing: border-box;
+  width: calc(var(--winnv-open-pane-length, 320px) - 8px);
+  /* 高度与展开态用户区一致，折叠态内容变矮时容器不塌陷，items 零位移 */
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  padding: 4px 0;
+}
+
+/* pane-header 内以 item 样式渲染的入口（如未登录「登录/注册」）撑满整行，
+   与 menu 内 items 的可交互宽度一致；折叠态仍被紧凑规则的 max-width 钳制 */
+.winnv-pane-header .winnv-item {
+  width: 100%;
+}
+
+.winnv-pane-footer {
+  flex-shrink: 0;
+  padding: 4px 0;
+}
+
+.winnv-left-panel.is-closed-compact .winnv-pane-header {
+  width: calc(var(--winnv-compact-pane-length, 48px) - 8px);
+}
+
+/* ---------- 底部菜单 ---------- */
+.winnv-footer {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  flex-shrink: 0;
+  position: relative;
+  z-index: 2;
+  margin-top: auto;
+  background: var(--winnv-app-bg, #F3F3F3);
+}
+
+.winnv-item.winnv-settings-item .winnv-icon {
+  font-size: 14px;
+}
+
+/* 设置齿轮选中动画（对齐源码 animated-icon-gear）：
+   按下 → rewind 转至 -20deg；松开/选中 → spin 转到 360deg。
+   transform-origin: center 保证围绕图标圆心旋转（字形/节点图标一致） */
+.winnv-settings-item .animated-icon-gear {
+  transition: transform 0.1s ease;
+  transform-origin: center;
+}
+
+.winnv-settings-item .animated-icon-gear.gear-rewind {
+  animation: winnv-gear-rewind 0.15s cubic-bezier(0.167, 0.167, 1, 1) forwards;
+}
+
+.winnv-settings-item .animated-icon-gear.gear-spin {
+  animation: winnv-gear-spin 0.65s cubic-bezier(0, 0, 0, 1) forwards;
+}
+
+@keyframes winnv-gear-rewind {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(-20deg); }
+}
+
+@keyframes winnv-gear-spin {
+  from { transform: rotate(-20deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* ---------- 页面标题 ---------- */
+.winnv-page-header {
+  min-height: 40px;
+  margin: 44px 0 0 56px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  font-size: 28px;
+  line-height: 36px;
+  font-weight: 600;
+  color: var(--winnv-text-primary, rgba(0, 0, 0, 0.89));
+}
+
+.winnv-shell.is-left-minimal .winnv-page-header {
+  margin-left: 40px;
+}
+
+/* ---------- 深色主题 ---------- */
+@media (prefers-color-scheme: dark) {
+  .winnv-shell {
+    --winnv-app-bg: #202020;
+    --winnv-layer-default: rgba(58, 58, 58, 0.30);
+    --winnv-card-stroke: rgba(0, 0, 0, 0.10);
+    --winnv-text-primary: #FFFFFF;
+    --winnv-text-secondary: rgba(255, 255, 255, 0.77);
+    --winnv-text-disabled: rgba(255, 255, 255, 0.36);
+    --winnv-subtle-secondary: rgba(255, 255, 255, 0.0605);
+    --winnv-subtle-tertiary: rgba(255, 255, 255, 0.0419);
+    --winnv-accent: #4CC2FF;
+    --winnv-stroke-divider: rgba(255, 255, 255, 0.08);
+    --winnv-pane-fill: rgba(32, 32, 32, 0.78);
+    background: #202020;
+  }
+
+  .winnv-footer {
+    background: #202020;
+  }
+
+  .winnv-item .winnv-infobadge {
+    color: #000000;
+  }
+}

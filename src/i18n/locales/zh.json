@@ -18,7 +18,7 @@
     "v1": "v1",
     "v2": "v2",
     "workshop": "创意工坊",
-    "likes": "点赞与评分",
+    "likes": "点赞",
     "apply": "申请与通知",
     "subscriptions": "订阅记录",
     "settings": "设置",
@@ -31,7 +31,13 @@
     "logout": "退出登录",
     "launchGame": "启动游戏",
     "launchGameNoPath": "尚未设置游戏路径，请先在设置页配置游戏目录。",
-    "launchGameFailed": "启动游戏失败："
+    "launchGameFailed": "启动游戏失败：",
+    "loginRegister": "登录/注册",
+    "localmods": "本地模组",
+    "notify": "通知",
+    "rates": "评分",
+    "apps": "申请",
+    "replies": "回复"
   },
   "profile": {
     "title": "个人资料",
@@ -210,6 +216,7 @@
     "downloads": "下载 {{count}}",
     "prevPage": "上一页",
     "nextPage": "下一页",
+    "pageInput": "页码",
     "register": "注册账号",
     "login": "登录",
     "loginHint": "登录后可管理你的模组",

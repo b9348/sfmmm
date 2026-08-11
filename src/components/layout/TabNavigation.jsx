@@ -3,10 +3,6 @@ import { useTranslation } from 'react-i18next'
 import { invoke } from '@tauri-apps/api/core'
 import APP_VERSION from '../../version.js'
 import {
-  makeStyles,
-  tokens,
-  Button,
-  Tooltip,
   Menu,
   MenuTrigger,
   MenuList,
@@ -18,243 +14,110 @@ import {
   BoxMultiple24Regular,
   Settings24Regular,
   Cloud24Regular,
-  PanelLeftContract24Regular,
-  PanelLeftExpand24Regular,
   Person24Regular,
   SignOut24Regular,
   PersonAccounts24Regular,
   Folder24Regular,
   DocumentFolder24Regular,
   Heart24Regular,
-  MoreHorizontal20Regular,
+  Star24Regular,
+  Comment24Regular,
+  AlertOn24Regular,
+  ArrowSync24Regular,
+  ChevronDown24Regular,
   Play24Regular,
+  Navigation24Regular,
 } from '@fluentui/react-icons'
 import { useAuth } from '../../contexts/useAuth'
+import { useUserNav } from '../../contexts/useUserNav'
 import { useNotification } from '../../contexts/NotificationContext'
 import { getConfig } from '../../services/dbHelper'
-import { LoginDialog, ProfileDialog, UserLink } from '../../components'
+import { getAvatarUrl } from '../../utils/avatars'
+import { LoginDialog, ProfileDialog } from '../../components'
+import { WinNavigationView } from './WinNavigationView'
 
-const useStyles = makeStyles({
-  sidebar: {
-    display: 'flex',
-    flexDirection: 'column',
-    height: '100%',
-    backgroundColor: tokens.colorNeutralBackground2,
-    borderRight: `1px solid ${tokens.colorNeutralStroke2}`,
-    transition: 'width 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
-    overflow: 'hidden',
-  },
-  sidebarExpanded: {
-    width: '220px',
-  },
-  sidebarCollapsed: {
-    width: '48px',
-  },
-  header: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'flex-start',
-    padding: '8px',
-    borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
-    minHeight: '44px',
-  },
-  headerCollapsed: {
-    justifyContent: 'flex-start',
-    padding: '8px 4px',
-  },
-  collapseButton: {
-    minWidth: '32px',
-    width: '32px',
-    height: '32px',
-    padding: '0',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  userSection: {
-    display: 'flex',
-    flexDirection: 'column',
-    padding: '12px 8px',
-    borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
-    gap: '8px',
-  },
-  userSectionCollapsed: {
-    padding: '12px 8px',
-    alignItems: 'flex-start',
-  },
-  userInfoCollapsed: {
-    padding: '6px 8px',
-    justifyContent: 'flex-start',
-  },
-  userRow: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '4px',
-    minWidth: 0,
-  },
-  userRowCollapsed: {
-    flexDirection: 'column',
-    alignItems: 'flex-start',
-    gap: '6px',
-  },
-  userLinkWrap: {
-    flex: 1,
-    minWidth: 0,
-    display: 'flex',
-  },
-  authButtons: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '6px',
-  },
-  authButtonsRow: {
-    display: 'flex',
-    gap: '6px',
-  },
-  authButton: {
-    flex: 1,
-    justifyContent: 'center',
-  },
-  tabList: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '2px',
-    padding: '8px 4px',
-    flex: 1,
-    overflow: 'auto',
-    overflowX: 'hidden',
-  },
-  tab: {
-    justifyContent: 'flex-start',
-    gap: '12px',
-    padding: '8px 10px',
-    borderRadius: '6px',
-    cursor: 'pointer',
-    display: 'flex',
-    alignItems: 'center',
-    color: tokens.colorNeutralForeground1,
-    backgroundColor: 'transparent',
-    border: 'none',
-    position: 'relative',
-    transition: 'background-color 0.2s ease, color 0.2s ease',
-    whiteSpace: 'nowrap',
-    '&:hover': {
-      backgroundColor: tokens.colorNeutralBackgroundHover,
-    },
-  },
-  tabCollapsed: {
-    justifyContent: 'flex-start',
-    padding: '8px 10px',
-    gap: '0',
-    minHeight: '44px',
-  },
-  tabSelected: {
-    backgroundColor: tokens.colorNeutralBackgroundSelected,
-    color: tokens.colorBrandForeground1,
-    fontWeight: '600',
-    '&::before': {
-      content: '""',
-      position: 'absolute',
-      left: 0,
-      top: '6px',
-      bottom: '6px',
-      width: '3px',
-      backgroundColor: tokens.colorBrandForeground1,
-      borderRadius: '0 2px 2px 0',
-    },
-    '&:hover': {
-      backgroundColor: tokens.colorNeutralBackgroundSelected,
-    },
-  },
-  tabLabel: {
-    fontSize: '13px',
-    opacity: 1,
-    transition: 'opacity 0.2s ease',
-  },
-  tabLabelHidden: {
-    opacity: 0,
-    width: 0,
-    overflow: 'hidden',
-  },
-  tabIcon: {
-    display: 'inline-flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexShrink: 0,
-    width: '24px',
-    height: '24px',
-  },
-  launchTab: {
-    color: tokens.colorBrandForeground1,
-    fontWeight: '600',
-    '&:hover': {
-      backgroundColor: tokens.colorBrandBackgroundHover,
-    },
-  },
-  footer: {
-    padding: '8px',
-    borderTop: `1px solid ${tokens.colorNeutralStroke2}`,
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '4px',
-  },
-  footerCollapsed: {
-    padding: '8px 4px',
-    alignItems: 'center',
-  },
-  version: {
-    fontSize: '11px',
-    color: tokens.colorNeutralForeground3,
-    textAlign: 'center',
-  },
-  versionRow: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: '6px',
-    cursor: 'pointer',
-    padding: '2px 0',
-    borderRadius: '4px',
-    transition: 'background-color 0.2s ease',
-    '&:hover': {
-      backgroundColor: tokens.colorNeutralBackgroundHover,
-    },
-  },
-  badge: {
-    backgroundColor: tokens.colorPaletteRedBackground3,
-    color: tokens.colorNeutralForegroundOnBrand,
-    fontSize: '10px',
-    fontWeight: '600',
-    padding: '0 6px',
-    borderRadius: '8px',
-    lineHeight: '16px',
-  },
-})
+// 启动游戏的特殊条目值：只触发动作，不切换标签页
+const LAUNCH_VALUE = '__launch'
 
-export function TabNavigation({ value, onChange, isCollapsed, onToggleCollapse, updateInfo, onNavigateToSettings }) {
-  const styles = useStyles()
+/**
+ * 侧边导航（TabNavigation）——基于 WinUI NavigationView 风格组件实现。
+ * 保留原有全部功能：登录/注册、用户菜单、标签切换、启动游戏、版本与更新徽章。
+ */
+export function TabNavigation({ value, onChange, isCollapsed, onToggleCollapse, updateInfo, onNavigateToSettings, children }) {
   const { t } = useTranslation()
   const { user, isLoggedIn, logout } = useAuth()
-  const { unreadCount, refreshUnread } = useNotification()
+  const { openUser } = useUserNav()
+  const { unread, refreshUnread } = useNotification()
   const [authOpen, setAuthOpen] = useState(false)
   const [profileOpen, setProfileOpen] = useState(false)
   const [isRegister, setIsRegister] = useState(false)
+  // 当前选中的 workshop 子项值（如 workshop:my），用于让 active 蓝标定位到子菜单
+  const [subValue, setSubValue] = useState(null)
   // 启动时查询一次未读通知数
   useEffect(() => {
     if (!isLoggedIn) { refreshUnread(null); return }
     refreshUnread(user.user_id)
   }, [isLoggedIn, user?.user_id, refreshUnread])
 
-  const tabs = [
-    { value: 'mods', label: t('nav.mods'), icon: BoxMultiple24Regular },
-    { value: 'v1', label: 'v1', icon: Folder24Regular },
-    { value: 'v2', label: 'v2', icon: DocumentFolder24Regular },
-    // { value: 'saves', label: '存档', icon: Save24Regular },
-    // { value: 'import-export', label: '导入/导出', icon: ArrowSwap24Regular },
-    { value: 'workshop', label: t('nav.workshop'), icon: Cloud24Regular },
-    { value: 'likes', label: t('nav.likes'), icon: Heart24Regular },
-    { value: 'apply', label: t('nav.apply'), icon: PersonAccounts24Regular },
-    { value: 'settings', label: t('nav.settings'), icon: Settings24Regular },
+  const menuItems = [
+    {
+      value: 'localmods',
+      label: t('nav.localmods'),
+      icon: <BoxMultiple24Regular />,
+      // 子菜单收纳本地模组三个 tab（mods/v1/v2），
+      // 与 LocalMods 页面 hash 路由 #/localmods/<tab> 对齐
+      children: [
+        { value: 'localmods:mods', label: t('nav.mods'), icon: <BoxMultiple24Regular /> },
+        { value: 'localmods:v1', label: t('nav.v1'), icon: <Folder24Regular /> },
+        { value: 'localmods:v2', label: t('nav.v2'), icon: <DocumentFolder24Regular /> },
+      ],
+    },
+    // { value: 'saves', label: '存档', icon: <Save24Regular /> },
+    // { value: 'import-export', label: '导入/导出', icon: <ArrowSwap24Regular /> },
+    {
+      value: 'workshop',
+      label: t('nav.workshop'),
+      icon: <Cloud24Regular />,
+      // 子菜单对应创意工坊页面顶部 3 个 tab（browse/my/records），
+      // 图标与 Workshop 页面 TabList 保持一致
+      children: [
+        { value: 'workshop:browse', label: t('workshop.cloud'), icon: <Cloud24Regular /> },
+        { value: 'workshop:my', label: t('workshop.mine'), icon: <Person24Regular /> },
+        { value: 'workshop:records', label: t('nav.subscriptions'), icon: <ArrowSync24Regular /> },
+      ],
+    },
+    {
+      value: 'notify',
+      label: t('nav.notify'),
+      icon: <AlertOn24Regular />,
+      // 一级 badge = 四个二级 badge 总和；点赞/评分无未读概念
+      badge: (unread.applications + unread.notifications) > 0
+        ? (unread.applications + unread.notifications > 99 ? '99+' : unread.applications + unread.notifications)
+        : undefined,
+      // 子菜单对应通知页顶部 4 个 tab（replies/apps/likes/rates），
+      // 图标与 NotifyPage 页面 TabList 保持一致
+      children: [
+        {
+          value: 'notify:replies',
+          label: t('nav.replies'),
+          icon: <Comment24Regular />,
+          badge: unread.notifications > 0 ? (unread.notifications > 99 ? '99+' : unread.notifications) : undefined,
+        },
+        {
+          value: 'notify:apps',
+          label: t('nav.apps'),
+          icon: <PersonAccounts24Regular />,
+          badge: unread.applications > 0 ? (unread.applications > 99 ? '99+' : unread.applications) : undefined,
+        },
+        { value: 'notify:likes', label: t('nav.likes'), icon: <Heart24Regular /> },
+        { value: 'notify:rates', label: t('nav.rates'), icon: <Star24Regular /> },
+      ],
+    },
+  ]
+
+  // 底部菜单：启动游戏紧跟设置，底部顺序为 启动游戏 → 设置 → 版本号
+  const footerMenuItems = [
+    { value: LAUNCH_VALUE, label: t('nav.launchGame'), icon: <Play24Regular /> },
   ]
 
   const handleLogout = () => {
@@ -274,186 +137,151 @@ export function TabNavigation({ value, onChange, isCollapsed, onToggleCollapse, 
     }
   }
 
-  return (
-    <div
-      className={`${styles.sidebar} ${
-        isCollapsed ? styles.sidebarCollapsed : styles.sidebarExpanded
-      }`}
-    >
-      {/* Header with collapse button — always top-right */}
-      <div className={`${styles.header} ${isCollapsed ? styles.headerCollapsed : ''}`}>
-        <Tooltip
-          content={isCollapsed ? t('nav.expand') : t('nav.collapse')}
-          relationship="label"
-        >
-          <Button
-            appearance="subtle"
-            className={styles.collapseButton}
-            onClick={onToggleCollapse}
-            icon={isCollapsed ? <PanelLeftExpand24Regular /> : <PanelLeftContract24Regular />}
-          />
-        </Tooltip>
-      </div>
+  // 菜单选择：启动游戏只执行动作；workshop:* / localmods:* / notify:* 子项切换对应页面内部 tab；
+  // 其余切换标签页
+  const handleSelect = (selected) => {
+    if (selected === LAUNCH_VALUE) {
+      handleLaunchGame()
+      return
+    }
+    // 分组子项值形如 <group>:<tab>（含冒号），如 workshop:my、localmods:v1、notify:replies；
+    // 组头本身（workshop / localmods / notify，无冒号）走普通切页分支
+    const sepIdx = selected.indexOf(':')
+    if (sepIdx > 0) {
+      const groupPrefix = selected.slice(0, sepIdx)
+      if (['workshop', 'localmods', 'notify'].includes(groupPrefix)) {
+        // 与对应页面的 hash 路由 #/<group>/<tab> 对齐，切换内部 tab；
+        // 同时记录子项值，使组件蓝标定位到二级菜单项
+        setSubValue(selected)
+        const sub = selected.slice(sepIdx + 1)
+        window.location.hash = `#/${groupPrefix}/${sub}`
+        onChange(groupPrefix)
+        return
+      }
+    }
+    setSubValue(null)
+    onChange(selected)
+  }
 
-      {/* User Section */}
-      <div
-        className={`${styles.userSection} ${
-          isCollapsed ? styles.userSectionCollapsed : ''
-        }`}
-      >
-        {isLoggedIn ? (
-          <div className={`${styles.userRow} ${isCollapsed ? styles.userRowCollapsed : ''}`}>
-            {/* 头像/用户名 → 打开本人个人页面 */}
-            <Tooltip content={t('userProfile.viewProfile')} relationship="label">
-              <div className={styles.userLinkWrap}>
-                <UserLink
-                  userId={user?.user_id}
-                  username={user?.username || ''}
-                  avatar={user?.avatar}
-                  size={isCollapsed ? 28 : 32}
-                  showName={!isCollapsed}
-                  secondary={!isCollapsed ? user?.email : null}
-                  nameSize={200}
-                  nameBold
-                />
-              </div>
-            </Tooltip>
-            {/* 账号操作 → 独立「更多」菜单（折叠态同样可用） */}
-            <Menu>
-              <MenuTrigger disableButtonEnhancement>
-                <Button
-                  appearance="subtle"
-                  size="small"
-                  icon={<MoreHorizontal20Regular />}
-                  aria-label={t('nav.account')}
-                />
-              </MenuTrigger>
-              <MenuPopover>
-                <MenuList>
-                  <MenuItem icon={<Person24Regular />} onClick={() => setProfileOpen(true)}>{t('nav.profile')}</MenuItem>
-                  <Divider />
-                  <MenuItem icon={<SignOut24Regular />} onClick={handleLogout}>
-                    {t('nav.logout')}
-                  </MenuItem>
-                </MenuList>
-              </MenuPopover>
-            </Menu>
-          </div>
-        ) : (
-          <div
-            className={`${styles.authButtons} ${
-              isCollapsed ? styles.userInfoCollapsed : ''
-            }`}
-          >
-            {isCollapsed ? (
-              <Tooltip content={t('workshop.login')} relationship="label">
-                <Button
-                  appearance="subtle"
-                  className={styles.collapseButton}
-                  onClick={() => { setAuthOpen(true) }}
-                  icon={<Person24Regular />}
-                />
-              </Tooltip>
-            ) : (
-              <div className={styles.authButtonsRow}>
-                <Button
-                  appearance="secondary"
-                  size="small"
-                  className={styles.authButton}
-                  onClick={() => { setAuthOpen(true) }}
-                >
-                  {t('workshop.login')}
-                </Button>
-                <Button
-                  appearance="primary"
-                  size="small"
-                  className={styles.authButton}
-                  onClick={() => { setIsRegister(true); setAuthOpen(true) }}
-                >
-                  {t('workshop.register')}
-                </Button>
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-
-      {/* Tab List */}
-      <div className={styles.tabList}>
-        {tabs.map((tab) => {
-          const Icon = tab.icon
-          const isSelected = value === tab.value
-          return (
-            <Tooltip
-              key={tab.value}
-              content={tab.label}
-              relationship="label"
-              positioning={isCollapsed ? 'after' : undefined}
-            >
-              <button
-                className={`${styles.tab} ${isSelected ? styles.tabSelected : ''} ${
-                  isCollapsed ? styles.tabCollapsed : ''
-                }`}
-                onClick={() => onChange(tab.value)}
-              >
-                <span className={styles.tabIcon}><Icon /></span>
-                <span
-                  className={`${styles.tabLabel} ${
-                    isCollapsed ? styles.tabLabelHidden : ''
-                  }`}
-                >
-                  {tab.label}
-                </span>
-                {tab.value === 'apply' && unreadCount > 0 && (
-                  <span className={styles.badge}>{unreadCount > 99 ? '99+' : unreadCount}</span>
-                )}
-              </button>
-            </Tooltip>
-          )
-        })}
-
-        {/* 启动游戏：只执行动作，不切换页面 */}
-        <Tooltip
-          content={t('nav.launchGame')}
-          relationship="label"
-          positioning={isCollapsed ? 'after' : undefined}
-        >
-          <button
-            className={`${styles.tab} ${styles.launchTab} ${
-              isCollapsed ? styles.tabCollapsed : ''
-            }`}
-            onClick={handleLaunchGame}
-          >
-            <span className={styles.tabIcon}><Play24Regular /></span>
-            <span
-              className={`${styles.tabLabel} ${
-                isCollapsed ? styles.tabLabelHidden : ''
-              }`}
-            >
-              {t('nav.launchGame')}
-            </span>
-          </button>
-        </Tooltip>
-      </div>
-
-      {/* Footer */}
-      <div className={`${styles.footer} ${isCollapsed ? styles.footerCollapsed : ''}`}>
+  // 面板头部：登录态用户名条目（点击弹出账号选项菜单，同「清除评分」弹出框逻辑）
+  const paneHeader = isLoggedIn ? (
+    <Menu>
+      <MenuTrigger disableButtonEnhancement>
         <div
-          className={styles.versionRow}
-          onClick={() => onNavigateToSettings?.()}
-          title={updateInfo?.hasUpdate ? t('app.updateFound', { version: updateInfo.latestVersion }) : ''}
+          role="button"
+          tabIndex={0}
+          className="winnv-item"
+          title={isCollapsed ? (user?.username || '') : undefined}
         >
-          <span className={styles.version}>v{APP_VERSION}</span>
-          {updateInfo?.hasUpdate && (
-            <span className={styles.badge}>NEW</span>
+          {getAvatarUrl(user?.avatar) ? (
+            <span className="winnv-icon winnv-icon-node">
+              <img
+                src={getAvatarUrl(user?.avatar)}
+                alt={user?.username || ''}
+                style={{ width: 16, height: 16, borderRadius: '50%', objectFit: 'cover', display: 'block' }}
+              />
+            </span>
+          ) : (
+            <span className="winnv-icon winnv-icon-node"><Person24Regular /></span>
           )}
+          <span className="winnv-label">{user?.username || ''}</span>
         </div>
-      </div>
-
-      {/* Auth Dialog */}
-      <LoginDialog open={authOpen} onClose={() => { setAuthOpen(false); setIsRegister(false) }} onSuccess={() => { setAuthOpen(false); setIsRegister(false) }} defaultIsRegister={isRegister} />
-      {/* Profile Dialog */}
-      <ProfileDialog open={profileOpen} onClose={() => setProfileOpen(false)} />
+      </MenuTrigger>
+      <MenuPopover>
+        <MenuList>
+          {/* 查看个人主页：打开 UserProfileDialog（含自己发布的 MOD 列表） */}
+          <MenuItem
+            icon={<PersonAccounts24Regular />}
+            onClick={() => openUser({ userId: user?.user_id, username: user?.username, avatar: user?.avatar })}
+          >
+            {t('userProfile.viewProfile')}
+          </MenuItem>
+          <MenuItem icon={<Person24Regular />} onClick={() => setProfileOpen(true)}>{t('nav.profile')}</MenuItem>
+          <Divider />
+          <MenuItem icon={<SignOut24Regular />} onClick={handleLogout}>
+            {t('nav.logout')}
+          </MenuItem>
+        </MenuList>
+      </MenuPopover>
+    </Menu>
+  ) : (
+    <div
+      role="button"
+      tabIndex={0}
+      className="winnv-item"
+      title={isCollapsed ? t('nav.loginRegister') : undefined}
+      onClick={() => { setAuthOpen(true) }}
+    >
+      <span className="winnv-icon winnv-icon-node"><Person24Regular /></span>
+      <span className="winnv-label">{t('nav.loginRegister')}</span>
     </div>
+  )
+
+  // 面板底部：版本号 + 更新徽章
+  const paneFooter = (
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: '6px',
+        cursor: 'pointer',
+        padding: '4px 0',
+        borderRadius: '4px',
+        fontSize: '11px',
+        color: 'var(--winnv-text-secondary, rgba(0, 0, 0, 0.62))',
+      }}
+      onClick={() => onNavigateToSettings?.()}
+      title={updateInfo?.hasUpdate ? t('app.updateFound', { version: updateInfo.latestVersion }) : ''}
+    >
+      <span>v{APP_VERSION}</span>
+      {updateInfo?.hasUpdate && (
+        <span
+          style={{
+            backgroundColor: '#C42B1C',
+            color: '#FFFFFF',
+            fontSize: '10px',
+            fontWeight: 600,
+            padding: '0 6px',
+            borderRadius: '8px',
+            lineHeight: '16px',
+          }}
+        >
+          NEW
+        </span>
+      )}
+    </div>
+  )
+
+  return (
+    <WinNavigationView
+      menuItems={menuItems}
+      footerMenuItems={footerMenuItems}
+      selectedValue={['workshop', 'localmods', 'notify'].includes(value) && subValue ? subValue : value}
+      onSelect={handleSelect}
+      paneTitle={!isCollapsed ? 'SFMMM' : ''}
+      displayMode="Left"
+      isPaneOpen={!isCollapsed}
+      onTogglePane={onToggleCollapse}
+      openPaneLength={220}
+      compactPaneLength={48}
+      isSettingsVisible
+      settingsLabel={t('nav.settings')}
+      onSettings={() => onChange('settings')}
+      isBackButtonVisible={false}
+      paneHeader={paneHeader}
+      paneFooter={paneFooter}
+      icons={{
+        hamburger: <Navigation24Regular />,
+        settings: <Settings24Regular />,
+        chevron: <ChevronDown24Regular />,
+      }}
+    >
+      {/* 页面内容区（由 App.jsx 传入） */}
+      {children}
+      {/* 对话框 */}
+      <LoginDialog open={authOpen} onClose={() => { setAuthOpen(false); setIsRegister(false) }} onSuccess={() => { setAuthOpen(false); setIsRegister(false) }} defaultIsRegister={isRegister} />
+      <ProfileDialog open={profileOpen} onClose={() => setProfileOpen(false)} />
+    </WinNavigationView>
   )
 }

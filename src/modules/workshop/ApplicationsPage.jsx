@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   Text, Button, Spinner, Card, Badge,
@@ -94,7 +94,7 @@ const useStyles = makeStyles({
   },
 })
 
-export default function ApplicationsPage({ onNavigate }) {
+export default function ApplicationsPage({ onNavigate, panel, visible = true }) {
   const { t } = useTranslation()
   const styles = useStyles()
   const { user, isLoggedIn } = useAuth()
@@ -178,6 +178,19 @@ export default function ApplicationsPage({ onNavigate }) {
     }
   }, [isLoggedIn, user, refreshUnread])
 
+  // 常驻挂载下，从隐藏回到可见（再次进入该 tab）时重新拉取，避免列表/未读状态过期；
+  // 首次展示（预加载目标）不重复拉取，直接呈现预加载结果
+  const wasShown = useRef(false)
+  useEffect(() => {
+    if (!visible || !isLoggedIn || !user) return
+    if (wasShown.current) {
+      fetchPendingApps()
+      fetchNotifs()
+      refreshUnread(user.user_id)
+    }
+    wasShown.current = true
+  }, [visible, isLoggedIn, user, fetchPendingApps, fetchNotifs, refreshUnread])
+
   const handleApprove = async (appId) => {
     try {
       await handleApplication({ author_id: user.user_id, app_id: appId, action: 'approve' })
@@ -222,144 +235,148 @@ export default function ApplicationsPage({ onNavigate }) {
 
   return (
     <div className={styles.root}>
-      {/* Section 1: Pending applications */}
-      <div className={styles.panel}>
-        <div className={styles.sectionHeader}>
-          <Text className={styles.sectionTitle}>{t('workshop.pendingApps')}</Text>
-        </div>
-        <div className={styles.content}>
-          {loadingApps && (
-            <EmptyState>
-              <Spinner size="small" />
-            </EmptyState>
-          )}
+      {/* Section 1: Pending applications（panel='notifs' 时隐藏） */}
+      {panel !== 'notifs' && (
+        <div className={styles.panel}>
+          <div className={styles.sectionHeader}>
+            <Text className={styles.sectionTitle}>{t('workshop.pendingApps')}</Text>
+          </div>
+          <div className={styles.content}>
+            {loadingApps && (
+              <EmptyState>
+                <Spinner size="small" />
+              </EmptyState>
+            )}
 
-          {!loadingApps && apps.length === 0 && (
-            <EmptyState description={t('workshop.noPendingApps')} />
-          )}
+            {!loadingApps && apps.length === 0 && (
+              <EmptyState description={t('workshop.noPendingApps')} />
+            )}
 
-          {!loadingApps && apps.map((app) => (
-            <Card key={app.id} className={styles.card}>
-              <div className={styles.cardContent}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
-                  <span className={styles.scopeBadge}>{SCOPE_LABELS[app.scope] || app.scope}</span>
-                  {app.target_lang && <Badge appearance="outline" size="small">{app.target_lang}</Badge>}
-                </div>
-                <Text weight="semibold" size="small">{app.mod_key || app.mod_name}</Text>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <Text size="small" className={styles.metaText}>{t('workshop.applicant')}:</Text>
-                  <UserLink
-                    userId={app.applicant_id}
-                    username={app.applicant_name}
-                    avatar={app.applicant_avatar}
-                    size={16}
-                    nameSize={100}
-                  />
-                </div>
-                {app.reason && (
-                  <Text size="small" className={styles.metaText}>
-                    {t('workshop.reason')}: {app.reason}
-                  </Text>
-                )}
-                <Text size="small" className={styles.metaText}>{app.created_at}</Text>
-                <div className={styles.actionRow}>
-                  <Button
-                    size="small"
-                    appearance="primary"
-                    icon={<Checkmark24Regular />}
-                    onClick={() => handleApprove(app.id)}
-                  >
-                    {t('workshop.approve')}
-                  </Button>
-                  <Button
-                    size="small"
-                    appearance="outline"
-                    icon={<Delete24Regular />}
-                    onClick={() => handleDeny(app.id)}
-                  >
-                    {t('workshop.deny')}
-                  </Button>
-                </div>
-              </div>
-            </Card>
-          ))}
-
-          <Pagination page={appPage} totalPages={totalAppPages} onChange={(p) => setAppPage(p)} />
-        </div>
-      </div>
-
-      {/* Section 2: 评论/回复/点赞通知 */}
-      <div className={styles.panel}>
-        <div className={styles.sectionHeader}>
-          <Text className={styles.sectionTitle}>{t('workshop.notifications')}</Text>
-          <Button size="small" appearance="outline" icon={<ArrowUndo24Regular />} onClick={handleMarkAllRead}>
-            {t('workshop.markAllRead')}
-          </Button>
-        </div>
-        <div className={styles.content}>
-          {loadingNotifs && (
-            <EmptyState>
-              <Spinner size="small" />
-            </EmptyState>
-          )}
-
-          {!loadingNotifs && notifs.length === 0 && (
-            <EmptyState description={t('workshop.noNotifications')} />
-          )}
-
-          {!loadingNotifs && notifs.map((n) => (
-            <Card key={n.id} className={styles.card} onClick={async () => {
-              if (!n.is_read) {
-                try {
-                  await markRead({ user_id: user.user_id, target_type: 'notification', ids: [n.id] })
-                  setNotifs(prev => prev.map(item => item.id === n.id ? { ...item, is_read: true } : item))
-                  refreshUnread(user.user_id)
-                } catch (e) { console.error('markRead failed', e) }
-              }
-              onNavigate?.(n.mod_id, n.comment_id)
-            }}>
-              <div className={styles.cardContent}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
-                  <Badge appearance="outline" size="small">
-                    {n.type === 'new_like' ? t('workshop.notifLike') : n.type === 'new_comment' ? t('workshop.notifComment') : t('workshop.notifReply')}
-                  </Badge>
-                  {!n.is_read && (
-                    <Badge appearance="filled" size="small" color="brand">
-                      未读
-                    </Badge>
-                  )}
-                </div>
-                <Text weight="semibold" size="small">{n.mod_key || n.mod_name}</Text>
-                {n.type === 'new_like' ? (
-                  <Text size="small" className={styles.metaText}>
-                    {t('workshop.notifLikeHint')}
-                  </Text>
-                ) : (
-                  <Text size="small" className={styles.truncate} title={n.content}>
-                    {truncateText(n.content)}
-                  </Text>
-                )}
-                {n.author_name ? (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '4px' }}>
+            {!loadingApps && apps.map((app) => (
+              <Card key={app.id} className={styles.card}>
+                <div className={styles.cardContent}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                    <span className={styles.scopeBadge}>{SCOPE_LABELS[app.scope] || app.scope}</span>
+                    {app.target_lang && <Badge appearance="outline" size="small">{app.target_lang}</Badge>}
+                  </div>
+                  <Text weight="semibold" size="small">{app.mod_key || app.mod_name}</Text>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <Text size="small" className={styles.metaText}>{t('workshop.applicant')}:</Text>
                     <UserLink
-                      userId={n.author_id}
-                      username={n.author_name}
-                      avatar={n.author_avatar}
-                      size={14}
+                      userId={app.applicant_id}
+                      username={app.applicant_name}
+                      avatar={app.applicant_avatar}
+                      size={16}
                       nameSize={100}
                     />
-                    <Text size="small" className={styles.metaText}>· {n.created_at}</Text>
                   </div>
-                ) : n.created_at && (
-                  <Text size="small" className={styles.metaText}>{n.created_at}</Text>
-                )}
-              </div>
-            </Card>
-          ))}
+                  {app.reason && (
+                    <Text size="small" className={styles.metaText}>
+                      {t('workshop.reason')}: {app.reason}
+                    </Text>
+                  )}
+                  <Text size="small" className={styles.metaText}>{app.created_at}</Text>
+                  <div className={styles.actionRow}>
+                    <Button
+                      size="small"
+                      appearance="primary"
+                      icon={<Checkmark24Regular />}
+                      onClick={() => handleApprove(app.id)}
+                    >
+                      {t('workshop.approve')}
+                    </Button>
+                    <Button
+                      size="small"
+                      appearance="outline"
+                      icon={<Delete24Regular />}
+                      onClick={() => handleDeny(app.id)}
+                    >
+                      {t('workshop.deny')}
+                    </Button>
+                  </div>
+                </div>
+              </Card>
+            ))}
 
-          <Pagination page={notifPage} totalPages={totalNotifPages} onChange={(p) => setNotifPage(p)} />
+            <Pagination page={appPage} totalPages={totalAppPages} onChange={(p) => setAppPage(p)} />
+          </div>
         </div>
-      </div>
+      )}
+
+      {/* Section 2: 评论/回复/点赞通知（panel='apps' 时隐藏） */}
+      {panel !== 'apps' && (
+        <div className={styles.panel}>
+          <div className={styles.sectionHeader}>
+            <Text className={styles.sectionTitle}>{t('workshop.notifications')}</Text>
+            <Button size="small" appearance="outline" icon={<ArrowUndo24Regular />} onClick={handleMarkAllRead}>
+              {t('workshop.markAllRead')}
+            </Button>
+          </div>
+          <div className={styles.content}>
+            {loadingNotifs && (
+              <EmptyState>
+                <Spinner size="small" />
+              </EmptyState>
+            )}
+
+            {!loadingNotifs && notifs.length === 0 && (
+              <EmptyState description={t('workshop.noNotifications')} />
+            )}
+
+            {!loadingNotifs && notifs.map((n) => (
+              <Card key={n.id} className={styles.card} onClick={async () => {
+                if (!n.is_read) {
+                  try {
+                    await markRead({ user_id: user.user_id, target_type: 'notification', ids: [n.id] })
+                    setNotifs(prev => prev.map(item => item.id === n.id ? { ...item, is_read: true } : item))
+                    refreshUnread(user.user_id)
+                  } catch (e) { console.error('markRead failed', e) }
+                }
+                onNavigate?.(n.mod_id, n.comment_id)
+              }}>
+                <div className={styles.cardContent}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
+                    <Badge appearance="outline" size="small">
+                      {n.type === 'new_like' ? t('workshop.notifLike') : n.type === 'new_comment' ? t('workshop.notifComment') : t('workshop.notifReply')}
+                    </Badge>
+                    {!n.is_read && (
+                      <Badge appearance="filled" size="small" color="brand">
+                        未读
+                      </Badge>
+                    )}
+                  </div>
+                  <Text weight="semibold" size="small">{n.mod_key || n.mod_name}</Text>
+                  {n.type === 'new_like' ? (
+                    <Text size="small" className={styles.metaText}>
+                      {t('workshop.notifLikeHint')}
+                    </Text>
+                  ) : (
+                    <Text size="small" className={styles.truncate} title={n.content}>
+                      {truncateText(n.content)}
+                    </Text>
+                  )}
+                  {n.author_name ? (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '4px' }}>
+                      <UserLink
+                        userId={n.author_id}
+                        username={n.author_name}
+                        avatar={n.author_avatar}
+                        size={14}
+                        nameSize={100}
+                      />
+                      <Text size="small" className={styles.metaText}>· {n.created_at}</Text>
+                    </div>
+                  ) : n.created_at && (
+                    <Text size="small" className={styles.metaText}>{n.created_at}</Text>
+                  )}
+                </div>
+              </Card>
+            ))}
+
+            <Pagination page={notifPage} totalPages={totalNotifPages} onChange={(p) => setNotifPage(p)} />
+          </div>
+        </div>
+      )}
     </div>
   )
 }

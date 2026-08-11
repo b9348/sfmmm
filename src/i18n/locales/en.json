@@ -18,7 +18,7 @@
     "v1": "v1",
     "v2": "v2",
     "workshop": "Workshop",
-    "likes": "Likes & Ratings",
+    "likes": "Likes",
     "apply": "Applications & Notifications",
     "subscriptions": "Subscriptions",
     "settings": "Settings",
@@ -31,7 +31,13 @@
     "logout": "Log out",
     "launchGame": "Launch Game",
     "launchGameNoPath": "Game path not set. Please configure the game directory in Settings first.",
-    "launchGameFailed": "Failed to launch game: "
+    "launchGameFailed": "Failed to launch game: ",
+    "loginRegister": "Login / Register",
+    "localmods": "Local Mods",
+    "notify": "Notifications",
+    "rates": "Ratings",
+    "apps": "Applications",
+    "replies": "Replies"
   },
   "profile": {
     "title": "Profile",
@@ -210,6 +216,7 @@
     "downloads": "Downloads {{count}}",
     "prevPage": "Previous",
     "nextPage": "Next",
+    "pageInput": "Page number",
     "register": "Register",
     "login": "Login",
     "loginHint": "Login to manage your mods",

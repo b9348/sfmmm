@@ -15,6 +15,7 @@ import { useTranslation } from 'react-i18next'
 import { listMods, getModDetail, getModForEdit, getDeviceId } from '../../services/workshopApi'
 import ModDetailPage from './ModDetailPage'
 import { useAuth } from '../../contexts/useAuth'
+import { usePagePrefetch } from '../../hooks/usePagePrefetch'
 import { EditModPage, CreateModPage } from './MyMods'
 import { getConfig, setConfig } from '../../services/dbHelper'
 import { Pagination, AsyncView, LoginDialog, FloatingActions, EmptyState } from '../../components'
@@ -120,19 +121,79 @@ export function BrowseMods({ initialModId, initialCommentId, onConsumeNavTarget 
       })
   }, [initialModId, initialCommentId, user])
 
-  const fetchMods = useCallback(async (p, keyword = search, cat = categoryFilter, sort = sortBy) => {
+  // 详情预取缓存：hover 卡片时预请求，点击命中缓存秒开详情
+  const detailCacheRef = useRef(new Map()) // mod.id -> Promise<mod> | mod（请求完成后替换为结果）
+  const fetchDetail = useCallback((modId) => {
+    const cached = detailCacheRef.current.get(modId)
+    if (cached) return Promise.resolve(cached)
+    const promise = getModDetail(modId, 'zh', user?.user_id, deviceIdRef.current)
+      .then(data => {
+        const full = data?.data?.mod
+        if (full) detailCacheRef.current.set(modId, full)
+        return full || null
+      })
+      .catch(() => null)
+    detailCacheRef.current.set(modId, promise)
+    return promise
+  }, [user])
+  const prefetchDetail = useCallback((mod) => {
+    if (mod?.id) fetchDetail(mod.id)
+  }, [fetchDetail])
+
+  // hover 预取防抖：停留 700ms 才预请求；鼠标按下则立即预请求（不等 hover 时长）
+  const hoverTimerRef = useRef(null)
+  const clearHoverTimer = useCallback(() => {
+    if (hoverTimerRef.current) {
+      clearTimeout(hoverTimerRef.current)
+      hoverTimerRef.current = null
+    }
+  }, [])
+  const handleCardMouseEnter = useCallback((mod) => {
+    clearHoverTimer()
+    hoverTimerRef.current = setTimeout(() => prefetchDetail(mod), 700)
+  }, [clearHoverTimer, prefetchDetail])
+  const handleCardMouseLeave = useCallback(() => {
+    clearHoverTimer()
+  }, [clearHoverTimer])
+  const handleCardMouseDown = useCallback((mod) => {
+    clearHoverTimer()
+    prefetchDetail(mod)
+  }, [clearHoverTimer, prefetchDetail])
+  // 卸载时清理 hover 定时器
+  useEffect(() => clearHoverTimer, [clearHoverTimer])
+
+  // 分页预请求：当前页就绪后自动预请求下一页，翻页命中缓存免等待
+  const { fetchPage, fetchFresh, prefetch, peek, clearCache } = usePagePrefetch(async (p, keyword, cat, sort) => {
+    const data = await listMods({
+      lang: 'zh',
+      search: keyword,
+      page: p,
+      limit: 20,
+      sort_by: sort,
+      device_id: deviceIdRef.current,
+      category: cat,
+    })
+    return { mods: data.mods || [], total: data.total || 0, page: data.page || 1 }
+  })
+
+  const fetchMods = useCallback(async (p, keyword = search, cat = categoryFilter, sort = sortBy, opts = {}) => {
+    const { force = false } = opts
+    // 命中预请求缓存：免 loading 直接渲染，并继续预请求下一页维持预取链
+    if (!force) {
+      const cached = peek(p, keyword, cat, sort)
+      if (cached) {
+        setMods(cached.mods)
+        setTotal(cached.total)
+        setPage(cached.page)
+        setError('')
+        prefetch(p + 1, keyword, cat, sort)
+        return
+      }
+    }
     setLoading(true)
     setError('')
     try {
-      const data = await listMods({
-        lang: 'zh',
-        search: keyword,
-        page: p,
-        limit: 20,
-        sort_by: sort,
-        device_id: deviceIdRef.current,
-        category: cat,
-      })
+      const data = force ? await fetchFresh(p, keyword, cat, sort) : await fetchPage(p, keyword, cat, sort)
       setMods(data.mods || [])
       setTotal(data.total || 0)
       setPage(data.page || 1)
@@ -142,7 +203,7 @@ export function BrowseMods({ initialModId, initialCommentId, onConsumeNavTarget 
     } finally {
       setLoading(false)
     }
-  }, [search, sortBy, categoryFilter])
+  }, [search, sortBy, categoryFilter, peek, fetchPage, fetchFresh, prefetch])
 
   useEffect(() => {
     sessionStorage.setItem('workshop_browse_page', String(page))
@@ -317,7 +378,7 @@ export function BrowseMods({ initialModId, initialCommentId, onConsumeNavTarget 
           <Button size="small" icon={<Search24Regular />} onClick={handleSearchSubmit} disabled={loading}>
             {t('workshop.search')}
           </Button>
-          <Button size="small" icon={<ArrowClockwise24Regular />} onClick={() => fetchMods(1)} disabled={loading}>
+          <Button size="small" icon={<ArrowClockwise24Regular />} onClick={() => fetchMods(1, search, categoryFilter, sortBy, { force: true })} disabled={loading}>
             {t('workshop.refresh')}
           </Button>
           <div style={{ flex: 1 }} />
@@ -370,24 +431,30 @@ export function BrowseMods({ initialModId, initialCommentId, onConsumeNavTarget 
           <>
             <div className={styles.grid} style={{ gridTemplateColumns: `repeat(${itemsPerRow}, 1fr)` }}>
               {mods.map(mod => (
-                <ModCard key={mod.id} mod={mod} onClick={() => {
-                  if (detailMod) modStackRef.current.push(detailMod)
-                  window.location.hash = `#/mod/${mod.id}`
-                  setDetailMod(mod)
-                  getModDetail(mod.id, 'zh', user?.user_id, deviceIdRef.current)
-                    .then(data => { if (data.data?.mod) setDetailMod(data.data.mod) })
-                    .catch(() => {})
-                }} />
+                <ModCard
+                  key={mod.id}
+                  mod={mod}
+                  onMouseEnter={() => handleCardMouseEnter(mod)}
+                  onMouseLeave={handleCardMouseLeave}
+                  onMouseDown={() => handleCardMouseDown(mod)}
+                  onClick={() => {
+                    if (detailMod) modStackRef.current.push(detailMod)
+                    window.location.hash = `#/mod/${mod.id}`
+                    setDetailMod(mod)
+                    // 命中 hover/按下预取缓存时秒开详情；未命中则发起请求
+                    fetchDetail(mod.id).then(full => { if (full) setDetailMod(full) })
+                  }}
+                />
               ))}
             </div>
 
-            <Pagination page={page} totalPages={totalPages} onChange={(p) => fetchMods(p)} />
+            <Pagination page={page} totalPages={totalPages} onChange={(p) => fetchMods(p)} floating />
           </>
         )}
       </AsyncView>
 
       <FloatingActions items={[
-        { key: 'refresh', icon: <ArrowClockwise24Regular />, onClick: () => fetchMods(page), disabled: loading, label: t('workshop.refresh') },
+        { key: 'refresh', icon: <ArrowClockwise24Regular />, onClick: () => fetchMods(page, search, categoryFilter, sortBy, { force: true }), disabled: loading, label: t('workshop.refresh') },
         { key: 'publish', icon: <Add24Regular />, appearance: 'primary', onClick: handlePublishClick, label: t('workshop.publishMod') },
       ]} />
 

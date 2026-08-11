@@ -18,7 +18,7 @@
     "v1": "v1",
     "v2": "v2",
     "workshop": "ワークショップ",
-    "likes": "いいねと評価",
+    "likes": "いいね",
     "apply": "申請と通知",
     "subscriptions": "サブスクリプション",
     "settings": "設定",
@@ -31,7 +31,13 @@
     "logout": "ログアウト",
     "launchGame": "ゲームを起動",
     "launchGameNoPath": "ゲームパスが設定されていません。先に設定ページでゲームフォルダを設定してください。",
-    "launchGameFailed": "ゲームの起動に失敗しました："
+    "launchGameFailed": "ゲームの起動に失敗しました：",
+    "loginRegister": "ログイン / 登録",
+    "localmods": "ローカルMOD",
+    "notify": "通知",
+    "rates": "評価",
+    "apps": "申請",
+    "replies": "返信"
   },
   "profile": {
     "title": "プロフィール",
@@ -210,6 +216,7 @@
     "downloads": "ダウンロード {{count}}",
     "prevPage": "前へ",
     "nextPage": "次へ",
+    "pageInput": "ページ番号",
     "register": "アカウント登録",
     "login": "ログイン",
     "loginHint": "ログインして Mod を管理",

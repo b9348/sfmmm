@@ -64,6 +64,17 @@ export function Workshop({ initialModId, initialCommentId, onConsumeNavTarget })
     setSubTab('browse')
   }, [initialModId])
 
+  // 侧边栏「创意工坊」子菜单点击会设置 hash（#/workshop/<tab>），
+  // 监听 hashchange 同步内部 tab，保证已在本页时也能切换。
+  useEffect(() => {
+    const onHashChange = () => {
+      const tab = getInitialTab()
+      setSubTab((prev) => (tab !== prev ? tab : prev))
+    }
+    window.addEventListener('hashchange', onHashChange)
+    return () => window.removeEventListener('hashchange', onHashChange)
+  }, [])
+
   return (
     <div className={styles.root}>
       <TabList

@@ -1,4 +1,5 @@
 import { useEffect, useCallback, useState, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import { makeStyles, tokens, Button, Tooltip } from '@fluentui/react-components'
 import { Dismiss24Regular, ArrowMaximize24Regular, ZoomIn24Regular, ZoomOut24Regular, ArrowCounterclockwise24Regular } from '@fluentui/react-icons'
 import { useTranslation } from 'react-i18next'
@@ -172,7 +173,9 @@ export function Lightbox({ src, alt = '', onClose }) {
   const transform = `translate(${offset.x}px, ${offset.y}px) scale(${scale})`
   const percent = Math.round(scale * 100)
 
-  return (
+  // 通过 Portal 挂到 body：避免被 .winnv-content / .winnv-shell 的
+  // isolation: isolate 层叠上下文困住，导致左下角底部菜单盖住灯箱
+  return createPortal(
     <div
       className={styles.overlay}
       role="dialog"
@@ -216,6 +219,7 @@ export function Lightbox({ src, alt = '', onClose }) {
           <Button className={styles.controlBtn} appearance="subtle" icon={<ArrowMaximize24Regular />} onClick={(e) => { e.stopPropagation(); window.open(src, '_blank') }} />
         </Tooltip>
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }

@@ -50,13 +50,20 @@ const useStyles = makeStyles({
   },
 })
 
-export function ModCard({ mod, onClick }) {
+export function ModCard({ mod, onClick, onMouseEnter, onMouseLeave, onMouseDown }) {
   const { t } = useTranslation()
   const styles = useStyles()
   const cat = CATEGORIES.find(c => c.value === mod.category)
 
   return (
-    <Card className={styles.card} appearance="outline" onClick={onClick}>
+    <Card
+      className={styles.card}
+      appearance="outline"
+      onClick={onClick}
+      onMouseEnter={onMouseEnter}
+      onMouseLeave={onMouseLeave}
+      onMouseDown={onMouseDown}
+    >
       <CardHeader
         header={
           <Text size="small" className={styles.meta} truncate>{mod.mod_key}</Text>
