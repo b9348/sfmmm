@@ -116,6 +116,10 @@ pub async fn db_list_applications(
         }
         if let Some(s) = status {
             if !s.is_empty() {
+                let allowed = ["pending", "approved", "denied"];
+                if !allowed.contains(&s.as_str()) {
+                    return Ok(ApiResponse::err("Invalid status value"));
+                }
                 where_clauses.push("a.status = ?".into());
                 params.push(mysql::Value::Bytes(s.into_bytes()));
             }
