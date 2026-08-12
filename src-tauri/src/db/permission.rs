@@ -1,7 +1,7 @@
 use mysql::prelude::*;
 use mysql::*;
 
-use crate::db::{val_to_i64, val_to_string, with_conn, ApiResponse, DbState};
+use crate::db::{decrypt_str, encrypt_str, val_to_i64, val_to_string, with_conn, ApiResponse, DbState};
 
 #[tauri::command(rename_all = "snake_case")]
 pub async fn db_set_mod_permissions(
@@ -74,7 +74,7 @@ pub async fn db_submit_application(
             return Ok(ApiResponse::err("You already have a pending application for this scope"));
         }
 
-        let reason_str = reason.unwrap_or_default();
+        let reason_str = encrypt_str(&reason.unwrap_or_default())?;
         conn.exec_drop(
             "INSERT INTO edit_applications (mod_id, applicant_id, scope, target_lang, reason, status) VALUES (?, ?, ?, ?, ?, 'pending')",
             (mod_id, user_id, &scope, &target_lang, &reason_str),
@@ -156,13 +156,13 @@ pub async fn db_list_applications(
             serde_json::json!({
                 "id": val_to_i64(&r[0]),
                 "mod_id": val_to_i64(&r[1]),
-                "mod_key": val_to_string(r[2].clone()),
+                "mod_key": decrypt_str(&val_to_string(r[2].clone())),
                 "applicant_id": val_to_i64(&r[3]),
-                "applicant_name": val_to_string(r[4].clone()),
+                "applicant_name": decrypt_str(&val_to_string(r[4].clone())),
                 "applicant_avatar": val_to_string(r[5].clone()),
                 "scope": val_to_string(r[6].clone()),
                 "target_lang": val_to_string(r[7].clone()),
-                "reason": val_to_string(r[8].clone()),
+                "reason": decrypt_str(&val_to_string(r[8].clone())),
                 "status": val_to_string(r[9].clone()),
                 "created_at": val_to_string(r[10].clone()),
             })

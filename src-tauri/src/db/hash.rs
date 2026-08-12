@@ -7,7 +7,7 @@ use std::collections::{BTreeSet, HashMap};
 use std::io::Read;
 use std::path::Path;
 use serde_json;
-use crate::db::{with_conn, with_conn_pool, ApiResponse, DbState, ManagedPool};
+use crate::db::{encrypt_det, with_conn, with_conn_pool, ApiResponse, DbState, ManagedPool};
 
 // ── 预检 / 惰性补全辅助 ──────────────────────────────────────
 
@@ -102,7 +102,7 @@ pub(crate) async fn fetch_cloud_file_hashes(
     mod_key: &str,
     lang_code: &str,
 ) -> Result<Option<String>, String> {
-    let mk = mod_key.to_string();
+    let mk = encrypt_det(mod_key)?;
     let lc = lang_code.to_string();
     with_conn_pool(&pool, move |conn: &mut PooledConn| -> Result<Option<String>, String> {
         ensure_mod_files_file_hashes_column(conn)?;
@@ -257,7 +257,7 @@ pub async fn db_set_mod_file_hashes(
         Err(e) => return Err(format!("序列化失败: {e}")),
     };
 
-    let mk = mod_key.clone();
+    let mk = encrypt_det(&mod_key)?;
     let lc = lang_code.clone();
     let (updated,) = with_conn(state.inner(), move |conn: &mut PooledConn| -> Result<(u64,), String> {
         ensure_mod_files_file_hashes_column(conn)?;

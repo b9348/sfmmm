@@ -11,7 +11,7 @@ use tauri::Manager;
 use tauri_plugin_sql::{Builder, Migration, MigrationKind};
 use futures_util::StreamExt;
 
-mod db;
+pub mod db;
 mod webview_check;
 
 #[derive(Serialize)]

@@ -1,7 +1,7 @@
 use mysql::prelude::*;
 use mysql::*;
 
-use crate::db::{val_to_i64, val_to_string, with_conn, ApiResponse, DbState};
+use crate::db::{decrypt_str, encrypt_str, val_to_i64, val_to_string, with_conn, ApiResponse, DbState};
 
 #[tauri::command(rename_all = "snake_case")]
 pub async fn db_add_comment(
@@ -37,9 +37,10 @@ pub async fn db_add_comment(
             }
         }
 
+        let enc_content = encrypt_str(&content)?;
         conn.exec_drop(
             "INSERT INTO mod_comments (mod_id, author_id, parent_id, content) VALUES (?, ?, ?, ?)",
-            (mod_id, author_id, parent_id, &content),
+            (mod_id, author_id, parent_id, &enc_content),
         ).map_err(|e| e.to_string())?;
 
         let new_id = conn.last_insert_id();
@@ -114,9 +115,9 @@ pub async fn db_get_comments(
             let replies: Vec<serde_json::Value> = reply_rows.into_iter().map(|rr| {
                 serde_json::json!({
                     "id": val_to_i64(&rr[0]),
-                    "content": val_to_string(rr[1].clone()),
+                    "content": decrypt_str(&val_to_string(rr[1].clone())),
                     "created_at": val_to_string(rr[2].clone()),
-                    "author_name": val_to_string(rr[3].clone()),
+                    "author_name": decrypt_str(&val_to_string(rr[3].clone())),
                     "author_avatar": val_to_string(rr[4].clone()),
                     "author_id": val_to_i64(&rr[5]),
                 })
@@ -124,9 +125,9 @@ pub async fn db_get_comments(
 
             Ok(serde_json::json!({
                 "id": cid,
-                "content": val_to_string(r[1].clone()),
+                "content": decrypt_str(&val_to_string(r[1].clone())),
                 "created_at": val_to_string(r[2].clone()),
-                "author_name": val_to_string(r[3].clone()),
+                "author_name": decrypt_str(&val_to_string(r[3].clone())),
                 "author_avatar": val_to_string(r[4].clone()),
                 "author_id": val_to_i64(&r[5]),
                 "replies": replies,
@@ -188,9 +189,9 @@ pub async fn db_get_replies(
         let replies: Vec<serde_json::Value> = rows.into_iter().map(|r| {
             serde_json::json!({
                 "id": val_to_i64(&r[0]),
-                "content": val_to_string(r[1].clone()),
+                "content": decrypt_str(&val_to_string(r[1].clone())),
                 "created_at": val_to_string(r[2].clone()),
-                "author_name": val_to_string(r[3].clone()),
+                "author_name": decrypt_str(&val_to_string(r[3].clone())),
                 "author_avatar": val_to_string(r[4].clone()),
                 "author_id": val_to_i64(&r[5]),
             })
@@ -233,9 +234,10 @@ pub async fn db_edit_comment(
 
         match owner {
             Some((aid,)) if aid == author_id => {
+                let enc_content = encrypt_str(&content)?;
                 conn.exec_drop(
                     "UPDATE mod_comments SET content = ? WHERE id = ?",
-                    (&content, comment_id),
+                    (&enc_content, comment_id),
                 ).map_err(|e| e.to_string())?;
                 Ok(ApiResponse::ok_val(serde_json::json!({
                     "comment_id": comment_id,

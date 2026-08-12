@@ -11,6 +11,7 @@ pub mod installer;
 pub mod subscribe;
 pub mod bepinex;
 pub mod gh;
+pub mod crypto;
 
 mod user;
 mod mod_ops;
@@ -33,6 +34,7 @@ pub use permission::*;
 pub use notification::*;
 pub use update::*;
 pub use image::*;
+pub use crypto::*;
 
 const DB_POOL_MIN: usize = 0;
 const DB_POOL_MAX: usize = 1;

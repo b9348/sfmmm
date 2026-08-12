@@ -1,7 +1,7 @@
 use mysql::prelude::*;
 use mysql::*;
 
-use crate::db::{get_user_permissions, val_to_i64, val_to_string, with_conn, ApiResponse, DbState};
+use crate::db::{decrypt_str, encrypt_det, encrypt_str, get_user_permissions, val_to_i64, val_to_string, with_conn, ApiResponse, DbState};
 
 struct ModBatchData {
     files_by_mod: std::collections::HashMap<u64, Vec<serde_json::Value>>,
@@ -36,12 +36,12 @@ impl ModBatchData {
             let fj = serde_json::json!({
                 "lang_code": val_to_string(vals[1].clone()),
                 "file_url": val_to_string(vals[2].clone()),
-                "file_name": val_to_string(vals[3].clone()),
+                "file_name": decrypt_str(&val_to_string(vals[3].clone())),
                 "file_size": val_to_i64(&vals[4]),
                 "file_hash": match vals[5].clone() { Value::Bytes(b) if !b.is_empty() => Some(String::from_utf8_lossy(&b).to_string()), _ => None },
                 "version": val_to_string(vals[6].clone()),
                 "created_at": val_to_string(vals[7].clone()),
-                "manifest": val_to_string(vals[8].clone()),
+                "manifest": decrypt_str(&val_to_string(vals[8].clone())),
             });
             files_by_mod.entry(mid).or_default().push(fj);
         }).map_err(|e| e.to_string())?;
@@ -56,11 +56,11 @@ impl ModBatchData {
             let entry = trans_by_mod.entry(mid).or_insert_with(|| serde_json::json!({}));
             if let Some(obj) = entry.as_object_mut() {
                 obj.insert(val_to_string(vals[1].clone()), serde_json::json!({
-                    "name": val_to_string(vals[2].clone()),
-                    "description": val_to_string(vals[3].clone()),
-                    "instructions": val_to_string(vals[4].clone()),
+                    "name": decrypt_str(&val_to_string(vals[2].clone())),
+                    "description": decrypt_str(&val_to_string(vals[3].clone())),
+                    "instructions": decrypt_str(&val_to_string(vals[4].clone())),
                     "instructions_format": val_to_string(vals[5].clone()),
-                    "changelog": val_to_string(vals[6].clone()),
+                    "changelog": decrypt_str(&val_to_string(vals[6].clone())),
                     "version": val_to_string(vals[7].clone()),
                 }));
             }
@@ -143,11 +143,12 @@ pub async fn db_list_mods(
 
         let mut conditions: Vec<String> = Vec::new();
         let mut params: Vec<Value> = Vec::new();
-        if let Some(ref s) = search {
-            let p = format!("%{}%", s);
-            conditions.push("(m.mod_id LIKE ? OR m.id IN (SELECT mod_id FROM mod_translations WHERE name LIKE ? OR description LIKE ? OR lang_code LIKE ?))".into());
-            params.extend(vec![p.clone().into(), p.clone().into(), p.clone().into(), p.into()]);
-        }
+        // 名称/描述/mod_key 已加密（enc1:...），无法在 SQL 中 LIKE；
+        // 搜索时不加 needle 的 SQL 条件（仅 category 过滤），由下方 Rust 端解密后统一匹配
+        let rust_search = search
+            .clone()
+            .filter(|s| !s.trim().is_empty())
+            .map(|s| s.trim().to_lowercase());
         if let Some(ref c) = category {
             conditions.push("m.category = ?".into());
             params.push(c.clone().into());
@@ -158,9 +159,15 @@ pub async fn db_list_mods(
             format!("WHERE {}", conditions.join(" AND "))
         };
 
-        let count_sql = format!("SELECT COUNT(DISTINCT m.id) FROM mods m {}", where_sql);
-        let total: i64 = conn.exec_first(&count_sql, params.clone()).map_err(|e| e.to_string())?
-            .unwrap_or(0i64);
+        let search_mode = rust_search.is_some();
+        let total: i64 = if search_mode {
+            // 搜索时名称/描述为密文，总数需在 Rust 解密过滤后统计
+            0
+        } else {
+            let count_sql = format!("SELECT COUNT(DISTINCT m.id) FROM mods m {}", where_sql);
+            conn.exec_first(&count_sql, params.clone()).map_err(|e| e.to_string())?
+                .unwrap_or(0i64)
+        };
 
         let query_sql = format!(
             "SELECT m.id, m.mod_id, COALESCE(mt_t.version, mt_en.version) as version, m.category, m.download_count, m.like_count,
@@ -177,14 +184,17 @@ pub async fn db_list_mods(
              LEFT JOIN mod_translations mt_t ON m.id = mt_t.mod_id AND mt_t.lang_code = ?
              LEFT JOIN mod_translations mt_en ON m.id = mt_en.mod_id AND mt_en.lang_code = 'en'
              {}
-             {} LIMIT ? OFFSET ?",
-            where_sql, order_sql
+             {} {}",
+            where_sql, order_sql,
+            if search_mode { "" } else { "LIMIT ? OFFSET ?" }
         );
 
         let mut all_params: Vec<Value> = vec![lang.clone().into(), lang.clone().into()];
         all_params.append(&mut params);
-        all_params.push((limit as i64).into());
-        all_params.push((offset as i64).into());
+        if !search_mode {
+            all_params.push((limit as i64).into());
+            all_params.push((offset as i64).into());
+        }
 
         let mut mod_rows: Vec<Vec<Value>> = Vec::new();
         conn.exec_map(&query_sql, all_params, |row: Row| {
@@ -192,23 +202,44 @@ pub async fn db_list_mods(
             mod_rows.push(vals);
         }).map_err(|e| e.to_string())?;
 
-        let mod_ids: Vec<u64> = mod_rows.iter().map(|r| val_to_i64(&r[0]) as u64).collect();
+        // 搜索时名称/描述/mod_key 为密文，解密后在 Rust 端过滤（大小写不敏感，近似原 LIKE 语义），再分页。
+        // 注：候选集为全部模组（当前规模数百级），全量解密可接受；数据量增长后可改为分批解密+ID 分页。
+        if let Some(ref needle) = rust_search {
+            mod_rows.retain(|r| {
+                let key = decrypt_str(&val_to_string(r[1].clone())).to_lowercase();
+                let name = decrypt_str(&val_to_string(r[9].clone())).to_lowercase();
+                let desc = decrypt_str(&val_to_string(r[10].clone())).to_lowercase();
+                key.contains(needle.as_str()) || name.contains(needle.as_str()) || desc.contains(needle.as_str())
+            });
+        }
+        let total: i64 = if search_mode {
+            mod_rows.len() as i64
+        } else {
+            total
+        };
+        let page_rows: Vec<Vec<Value>> = if search_mode {
+            mod_rows.into_iter().skip(offset as usize).take(limit as usize).collect()
+        } else {
+            mod_rows
+        };
+
+        let mod_ids: Vec<u64> = page_rows.iter().map(|r| val_to_i64(&r[0]) as u64).collect();
         let mut batch = ModBatchData::collect(conn, &mod_ids, device_id)?;
 
-        let items: Vec<serde_json::Value> = mod_rows.into_iter().map(|r| {
+        let items: Vec<serde_json::Value> = page_rows.into_iter().map(|r| {
             let mid = val_to_i64(&r[0]) as u64;
             let (like_count, is_liked) = batch.likes_by_mod.get(&mid).copied().unwrap_or((0, false));
             let (rating_avg, rating_count) = batch.ratings_by_mod.get(&mid).copied().unwrap_or((0.0, 0));
             serde_json::json!({
                 "id": mid,
-                "mod_key": val_to_string(r[1].clone()),
-                "display_name": val_to_string(r[9].clone()),
-                "description": val_to_string(r[10].clone()),
-                "instructions": val_to_string(r[11].clone()),
+                "mod_key": decrypt_str(&val_to_string(r[1].clone())),
+                "display_name": decrypt_str(&val_to_string(r[9].clone())),
+                "description": decrypt_str(&val_to_string(r[10].clone())),
+                "instructions": decrypt_str(&val_to_string(r[11].clone())),
                 "instructions_format": val_to_string(r[12].clone()),
-                "changelog": val_to_string(r[13].clone()),
+                "changelog": decrypt_str(&val_to_string(r[13].clone())),
                 "category": val_to_string(r[3].clone()),
-                "author_name": val_to_string(r[8].clone()),
+                "author_name": decrypt_str(&val_to_string(r[8].clone())),
                 "author_avatar": val_to_string(r[15].clone()),
                 "author_id": val_to_i64(&r[16]),
                 "download_count": val_to_i64(&r[4]),
@@ -285,11 +316,11 @@ pub async fn db_list_my_mods(
             let (rating_avg, rating_count) = batch.ratings_by_mod.get(&mid).copied().unwrap_or((0.0, 0));
             serde_json::json!({
                 "id": mid,
-                "mod_key": val_to_string(r[1].clone()),
-                "display_name": val_to_string(r[9].clone()),
-                "description": val_to_string(r[10].clone()),
+                "mod_key": decrypt_str(&val_to_string(r[1].clone())),
+                "display_name": decrypt_str(&val_to_string(r[9].clone())),
+                "description": decrypt_str(&val_to_string(r[10].clone())),
                 "category": val_to_string(r[3].clone()),
-                "author_name": val_to_string(r[8].clone()),
+                "author_name": decrypt_str(&val_to_string(r[8].clone())),
                 "author_avatar": val_to_string(r[15].clone()),
                 "author_id": val_to_i64(&r[16]),
                 "download_count": val_to_i64(&r[4]),
@@ -368,14 +399,14 @@ pub async fn db_list_liked_mods(
             let (rating_avg, rating_count) = batch.ratings_by_mod.get(&mid).copied().unwrap_or((0.0, 0));
             serde_json::json!({
                 "id": mid,
-                "mod_key": val_to_string(r[1].clone()),
-                "display_name": val_to_string(r[9].clone()),
-                "description": val_to_string(r[10].clone()),
-                "instructions": val_to_string(r[11].clone()),
+                "mod_key": decrypt_str(&val_to_string(r[1].clone())),
+                "display_name": decrypt_str(&val_to_string(r[9].clone())),
+                "description": decrypt_str(&val_to_string(r[10].clone())),
+                "instructions": decrypt_str(&val_to_string(r[11].clone())),
                 "instructions_format": val_to_string(r[12].clone()),
-                "changelog": val_to_string(r[13].clone()),
+                "changelog": decrypt_str(&val_to_string(r[13].clone())),
                 "category": val_to_string(r[3].clone()),
-                "author_name": val_to_string(r[8].clone()),
+                "author_name": decrypt_str(&val_to_string(r[8].clone())),
                 "author_avatar": val_to_string(r[15].clone()),
                 "author_id": val_to_i64(&r[16]),
                 "download_count": val_to_i64(&r[4]),
@@ -456,14 +487,14 @@ pub async fn db_list_rated_mods(
             let my_rating = crate::db::rating::val_to_f64(&r[17]);
             serde_json::json!({
                 "id": mid,
-                "mod_key": val_to_string(r[1].clone()),
-                "display_name": val_to_string(r[9].clone()),
-                "description": val_to_string(r[10].clone()),
-                "instructions": val_to_string(r[11].clone()),
+                "mod_key": decrypt_str(&val_to_string(r[1].clone())),
+                "display_name": decrypt_str(&val_to_string(r[9].clone())),
+                "description": decrypt_str(&val_to_string(r[10].clone())),
+                "instructions": decrypt_str(&val_to_string(r[11].clone())),
                 "instructions_format": val_to_string(r[12].clone()),
-                "changelog": val_to_string(r[13].clone()),
+                "changelog": decrypt_str(&val_to_string(r[13].clone())),
                 "category": val_to_string(r[3].clone()),
-                "author_name": val_to_string(r[8].clone()),
+                "author_name": decrypt_str(&val_to_string(r[8].clone())),
                 "author_avatar": val_to_string(r[15].clone()),
                 "author_id": val_to_i64(&r[16]),
                 "download_count": val_to_i64(&r[4]),
@@ -512,7 +543,10 @@ pub async fn db_get_mod_detail(
              LEFT JOIN mod_translations mt_t ON m.id = mt_t.mod_id AND mt_t.lang_code = ?
              LEFT JOIN mod_translations mt_en ON m.id = mt_en.mod_id AND mt_en.lang_code = 'en'
              WHERE (m.id = ? OR m.mod_id = ?)",
-            (lang.clone(), lang.clone(), id, mod_key.clone().unwrap_or_default()),
+            (lang.clone(), lang.clone(), id, match &mod_key {
+                Some(k) => encrypt_det(k)?,
+                None => String::new(),
+            }),
         ).map_err(|e| e.to_string())?;
 
         match row {
@@ -528,12 +562,12 @@ pub async fn db_get_mod_detail(
                         files.push(serde_json::json!({
                             "lang_code": val_to_string(r[0].clone()),
                             "file_url": val_to_string(r[1].clone()),
-                            "file_name": val_to_string(r[2].clone()),
+                            "file_name": decrypt_str(&val_to_string(r[2].clone())),
                             "file_size": val_to_i64(&r[3]),
                             "file_hash": match r[4].clone() { Value::Bytes(b) if !b.is_empty() => Some(String::from_utf8_lossy(&b).to_string()), _ => None },
                             "version": val_to_string(r[5].clone()),
                             "created_at": val_to_string(r[6].clone()),
-                            "manifest": val_to_string(r[7].clone()),
+                            "manifest": decrypt_str(&val_to_string(r[7].clone())),
                         }));
                     }
                 ).map_err(|e| e.to_string())?;
@@ -546,11 +580,11 @@ pub async fn db_get_mod_detail(
                         let r: Vec<Value> = row.unwrap();
                         if let Some(obj) = translations.as_object_mut() {
                             obj.insert(val_to_string(r[0].clone()), serde_json::json!({
-                                "name": val_to_string(r[1].clone()),
-                                "description": val_to_string(r[2].clone()),
-                                "instructions": val_to_string(r[3].clone()),
+                                "name": decrypt_str(&val_to_string(r[1].clone())),
+                                "description": decrypt_str(&val_to_string(r[2].clone())),
+                                "instructions": decrypt_str(&val_to_string(r[3].clone())),
                                 "instructions_format": val_to_string(r[4].clone()),
-                                "changelog": val_to_string(r[5].clone()),
+                                "changelog": decrypt_str(&val_to_string(r[5].clone())),
                                 "version": val_to_string(r[6].clone()),
                             }));
                         }
@@ -599,14 +633,14 @@ pub async fn db_get_mod_detail(
                 Ok(ApiResponse::ok_val(serde_json::json!({
                     "mod": {
                         "id": mid,
-                        "mod_key": val_to_string(vals[1].clone()),
-                        "display_name": val_to_string(vals[9].clone()),
-                        "description": val_to_string(vals[10].clone()),
-                        "instructions": val_to_string(vals[11].clone()),
+                        "mod_key": decrypt_str(&val_to_string(vals[1].clone())),
+                        "display_name": decrypt_str(&val_to_string(vals[9].clone())),
+                        "description": decrypt_str(&val_to_string(vals[10].clone())),
+                        "instructions": decrypt_str(&val_to_string(vals[11].clone())),
                         "instructions_format": val_to_string(vals[12].clone()),
-                        "changelog": val_to_string(vals[13].clone()),
+                        "changelog": decrypt_str(&val_to_string(vals[13].clone())),
                         "category": val_to_string(vals[3].clone()),
-                        "author_name": val_to_string(vals[8].clone()),
+                        "author_name": decrypt_str(&val_to_string(vals[8].clone())),
                         "author_avatar": val_to_string(vals[15].clone()),
                         "author_id": val_to_i64(&vals[16]),
                         "download_count": val_to_i64(&vals[4]),
@@ -641,7 +675,7 @@ pub async fn db_get_mod_for_edit(
         ).map_err(|e| e.to_string())?;
 
         let (author_id, mod_key, cat) = match mod_row {
-            Some(r) => r,
+            Some((aid, mk, c)) => (aid, decrypt_str(&mk), c),
             None => return Ok(ApiResponse::err("Mod not found")),
         };
 
@@ -683,11 +717,11 @@ pub async fn db_get_mod_for_edit(
                 let r: Vec<Value> = row.unwrap();
                 translations.push(serde_json::json!({
                     "lang": val_to_string(r[0].clone()),
-                    "name": val_to_string(r[1].clone()),
-                    "description": val_to_string(r[2].clone()),
-                    "instructions": val_to_string(r[3].clone()),
+                    "name": decrypt_str(&val_to_string(r[1].clone())),
+                    "description": decrypt_str(&val_to_string(r[2].clone())),
+                    "instructions": decrypt_str(&val_to_string(r[3].clone())),
                     "instructions_format": val_to_string(r[4].clone()),
-                    "changelog": val_to_string(r[5].clone()),
+                    "changelog": decrypt_str(&val_to_string(r[5].clone())),
                     "version": val_to_string(r[6].clone()),
                 }));
             }
@@ -701,12 +735,12 @@ pub async fn db_get_mod_for_edit(
                 files.push(serde_json::json!({
                     "lang_code": val_to_string(r[0].clone()),
                     "file_url": val_to_string(r[1].clone()),
-                    "file_name": val_to_string(r[2].clone()),
+                    "file_name": decrypt_str(&val_to_string(r[2].clone())),
                     "file_size": val_to_i64(&r[3]),
                     "file_hash": match r[4].clone() { Value::Bytes(b) if !b.is_empty() => Some(String::from_utf8_lossy(&b).to_string()), _ => None },
                     "version": val_to_string(r[5].clone()),
                     "created_at": val_to_string(r[6].clone()),
-                    "manifest": val_to_string(r[7].clone()),
+                    "manifest": decrypt_str(&val_to_string(r[7].clone())),
                 }));
             }
         ).map_err(|e| e.to_string())?;
@@ -740,27 +774,53 @@ pub async fn db_create_mod(
             return Ok(ApiResponse::err("mod_key 长度不能超过 64 个字符"));
         }
 
+        let enc_mod_key = encrypt_det(&mod_key)?;
         let exists: Option<(u64,)> = conn.exec_first(
-            "SELECT id FROM mods WHERE mod_id = ?", (&mod_key,)
+            "SELECT id FROM mods WHERE mod_id = ?", (&enc_mod_key,)
         ).map_err(|e| e.to_string())?;
         if exists.is_some() {
             return Ok(ApiResponse::err("Mod key already exists"));
         }
 
-        conn.exec_drop(
+        // mod_key 原样加密（保真，与本地文件夹/安装记录一致）；大小写变体重名由
+        // DB 的 utf8mb4_unicode_ci 唯一索引兜底，捕获 1062 转为友好错误；
+        // 迁移前列宽不足（1406 data too long）同样转为友好提示
+        if let Err(e) = conn.exec_drop(
             "INSERT INTO mods (author_id, mod_id, category) VALUES (?, ?, ?)",
-            (author_id, &mod_key, &cat),
-        ).map_err(|e| e.to_string())?;
+            (author_id, &enc_mod_key, &cat),
+        ) {
+            let msg = e.to_string();
+            let lower = msg.to_lowercase();
+            if lower.contains("1062") || lower.contains("duplicate") {
+                return Ok(ApiResponse::err("Mod key already exists"));
+            }
+            if lower.contains("1406") || lower.contains("data too long") {
+                return Ok(ApiResponse::err("mod_key 密文超出列宽，请先执行加密迁移（cargo run --example migrate_encrypt）"));
+            }
+            return Err(msg);
+        }
 
         let new_id = conn.last_insert_id();
 
         for t in &translations {
             let lc = t.get("lang_code").and_then(|v| v.as_str()).unwrap_or("zh");
-            let name = t.get("name").and_then(|v| v.as_str()).unwrap_or("");
-            let desc = t.get("description").and_then(|v| v.as_str()).unwrap_or("");
-            let instr = t.get("instructions").and_then(|v| v.as_str()).unwrap_or("");
+            let raw_name = t.get("name").and_then(|v| v.as_str()).unwrap_or("");
+            let raw_desc = t.get("description").and_then(|v| v.as_str()).unwrap_or("");
+            let raw_instr = t.get("instructions").and_then(|v| v.as_str()).unwrap_or("");
+            let raw_changelog = t.get("changelog").and_then(|v| v.as_str()).unwrap_or("");
+            // 明文长度上限：确保密文能容纳于目标列宽（name≤255，文本类≤12000 字符）
+            if raw_name.chars().count() > 255
+                || raw_desc.chars().count() > 12000
+                || raw_instr.chars().count() > 12000
+                || raw_changelog.chars().count() > 12000
+            {
+                return Ok(ApiResponse::err("模组文本过长（name≤255 / 描述、说明、更新日志≤12000 字符）"));
+            }
+            let name = encrypt_str(raw_name)?;
+            let desc = encrypt_str(raw_desc)?;
+            let instr = encrypt_str(raw_instr)?;
             let instr_fmt = t.get("instructions_format").and_then(|v| v.as_str()).unwrap_or("markdown");
-            let changelog = t.get("changelog").and_then(|v| v.as_str()).unwrap_or("");
+            let changelog = encrypt_str(raw_changelog)?;
             let t_ver = t.get("version").and_then(|v| v.as_str()).unwrap_or("1.0.0");
             conn.exec_drop(
                 "INSERT INTO mod_translations (mod_id, lang_code, name, description, instructions, instructions_format, changelog, version) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
@@ -812,11 +872,23 @@ pub async fn db_update_mod(
                 }
             }
 
-            let name = t.get("name").and_then(|v| v.as_str()).unwrap_or("");
-            let desc = t.get("description").and_then(|v| v.as_str()).unwrap_or("");
-            let instr = t.get("instructions").and_then(|v| v.as_str()).unwrap_or("");
+            let raw_name = t.get("name").and_then(|v| v.as_str()).unwrap_or("");
+            let raw_desc = t.get("description").and_then(|v| v.as_str()).unwrap_or("");
+            let raw_instr = t.get("instructions").and_then(|v| v.as_str()).unwrap_or("");
+            let raw_changelog = t.get("changelog").and_then(|v| v.as_str()).unwrap_or("");
+            // 明文长度上限：确保密文能容纳于目标列宽（name≤255，文本类≤12000 字符）
+            if raw_name.chars().count() > 255
+                || raw_desc.chars().count() > 12000
+                || raw_instr.chars().count() > 12000
+                || raw_changelog.chars().count() > 12000
+            {
+                return Ok(ApiResponse::err("模组文本过长（name≤255 / 描述、说明、更新日志≤12000 字符）"));
+            }
+            let name = encrypt_str(raw_name)?;
+            let desc = encrypt_str(raw_desc)?;
+            let instr = encrypt_str(raw_instr)?;
             let instr_fmt = t.get("instructions_format").and_then(|v| v.as_str()).unwrap_or("markdown");
-            let changelog = t.get("changelog").and_then(|v| v.as_str()).unwrap_or("");
+            let changelog = encrypt_str(raw_changelog)?;
             let t_ver = t.get("version").and_then(|v| v.as_str()).unwrap_or("1.0.0");
 
             let existing: Option<(u64,)> = conn.exec_first(
@@ -852,9 +924,10 @@ pub async fn db_check_mod_key(
     mod_key: String,
 ) -> Result<ApiResponse, String> {
     with_conn(state.inner(), move |conn: &mut PooledConn| {
+        let enc_mod_key = encrypt_det(&mod_key)?;
         let exists: Option<(u64,)> = conn.exec_first(
             "SELECT id FROM mods WHERE mod_id = ?",
-            (&mod_key,),
+            (&enc_mod_key,),
         ).map_err(|e| e.to_string())?;
         Ok(ApiResponse::ok_val(serde_json::json!({
             "exists": exists.is_some()

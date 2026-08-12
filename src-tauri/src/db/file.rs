@@ -1,7 +1,7 @@
 use mysql::prelude::*;
 use mysql::*;
 
-use crate::db::{get_user_permissions, hash, with_conn, ApiResponse, DbState};
+use crate::db::{encrypt_str, get_user_permissions, hash, with_conn, ApiResponse, DbState};
 
 #[tauri::command(rename_all = "snake_case")]
 pub async fn db_save_mod_file(
@@ -39,15 +39,30 @@ pub async fn db_save_mod_file(
             (mod_id, &lang_code),
         ).map_err(|e| e.to_string())?;
 
+        // 明文长度上限：确保密文能容纳于目标列宽（file_name≤200，manifest≤30000 字符）
+        if file_name.chars().count() > 200 {
+            return Ok(ApiResponse::err("文件名过长（≤200 字符）"));
+        }
+        if let Some(m) = &manifest {
+            if m.chars().count() > 30000 {
+                return Ok(ApiResponse::err("manifest 过长（≤30000 字符）"));
+            }
+        }
+        let enc_name = encrypt_str(&file_name)?;
+        let enc_manifest = match &manifest {
+            Some(m) => Some(encrypt_str(m)?),
+            None => None,
+        };
+
         if existing.is_some() {
             conn.exec_drop(
                 "UPDATE mod_files SET file_url = ?, file_name = ?, file_size = ?, file_hash = ?, version = ?, manifest = ?, file_hashes = ? WHERE mod_id = ? AND lang_code = ?",
-                (&file_url, &file_name, file_size, &file_hash, &ver, &manifest, &file_hashes, mod_id, &lang_code),
+                (&file_url, &enc_name, file_size, &file_hash, &ver, &enc_manifest, &file_hashes, mod_id, &lang_code),
             ).map_err(|e| e.to_string())?;
         } else {
             conn.exec_drop(
                 "INSERT INTO mod_files (mod_id, lang_code, file_url, file_name, file_size, file_hash, version, manifest, file_hashes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (mod_id, &lang_code, &file_url, &file_name, file_size, &file_hash, &ver, &manifest, &file_hashes),
+                (mod_id, &lang_code, &file_url, &enc_name, file_size, &file_hash, &ver, &enc_manifest, &file_hashes),
             ).map_err(|e| e.to_string())?;
         }
 

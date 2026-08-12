@@ -28,3 +28,6 @@ src-tauri/config.db
 *.sln
 *.sw?
 .ace-tool/
+
+# 本地数据库备份（不入库）
+.sqlbak/

@@ -524,7 +524,7 @@ async fn backfill_cloud_hashes(
         return Ok(());
     }
     let json = serde_json::to_string(&parsed).map_err(|e| format!("序列化失败: {e}"))?;
-    let mk = mod_key.to_string();
+    let mk = crate::db::encrypt_det(mod_key)?;
     let lc = lang_code.to_string();
     let _ = with_conn_pool(&state.pool, move |conn: &mut mysql::PooledConn| -> Result<(u64,), String> {
         // 确保 mod_files 有 file_hashes 列（hash.rs 的 ensure 函数是私有的，这里兜底）

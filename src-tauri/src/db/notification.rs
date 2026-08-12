@@ -1,7 +1,7 @@
 use mysql::prelude::*;
 use mysql::*;
 
-use crate::db::{val_to_i64, val_to_string, with_conn, ApiResponse, DbState};
+use crate::db::{decrypt_str, val_to_i64, val_to_string, with_conn, ApiResponse, DbState};
 
 #[tauri::command(rename_all = "snake_case")]
 pub async fn db_get_unread_count(
@@ -63,13 +63,13 @@ pub async fn db_get_my_notifications(
             serde_json::json!({
                 "id": val_to_i64(&r[0]),
                 "mod_id": val_to_i64(&r[1]),
-                "mod_key": val_to_string(r[2].clone()),
+                "mod_key": decrypt_str(&val_to_string(r[2].clone())),
                 "type": val_to_string(r[3].clone()),
                 "comment_id": val_to_i64(&r[4]),
                 "is_read": val_to_i64(&r[5]) != 0,
                 "created_at": val_to_string(r[6].clone()),
-                "content": val_to_string(r[7].clone()),
-                "author_name": val_to_string(r[8].clone()),
+                "content": decrypt_str(&val_to_string(r[7].clone())),
+                "author_name": decrypt_str(&val_to_string(r[8].clone())),
                 "author_avatar": val_to_string(r[9].clone()),
                 "author_id": val_to_i64(&r[10]),
             })

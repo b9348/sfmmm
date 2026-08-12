@@ -19,6 +19,10 @@ fn main() {
                 if let Some(value) = line.strip_prefix("IMGBED_TOKEN=") {
                     println!("cargo:rustc-env=IMGBED_TOKEN={}", value);
                 }
+            } else if line.starts_with("DB_ENC_KEY=") {
+                if let Some(value) = line.strip_prefix("DB_ENC_KEY=") {
+                    println!("cargo:rustc-env=DB_ENC_KEY={}", value);
+                }
             }
         }
     }

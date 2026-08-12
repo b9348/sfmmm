@@ -2,7 +2,7 @@ use mysql::prelude::*;
 use mysql::*;
 
 use crate::db::rating::{ensure_rating_schema, val_to_f64};
-use crate::db::{semver_cmp, val_to_i64, val_to_string, with_conn, ApiResponse, DbState};
+use crate::db::{decrypt_str, encrypt_det, semver_cmp, val_to_i64, val_to_string, with_conn, ApiResponse, DbState};
 
 #[tauri::command(rename_all = "snake_case")]
 pub async fn db_check_updates(
@@ -29,7 +29,7 @@ pub async fn db_check_updates(
                  LEFT JOIN mod_files f ON f.mod_id = m.id AND f.lang_code = ?
                  WHERE m.mod_id = ?
                  ORDER BY t.id DESC LIMIT 1",
-                (lang_code, lang_code, mod_key),
+                (lang_code, lang_code, encrypt_det(&mod_key)?),
             ).map_err(|e| e.to_string())?;
 
             let (latest_ver, display_name, latest_file_hash, rating_avg, rating_count) = match row {
@@ -37,7 +37,7 @@ pub async fn db_check_updates(
                     let vals: Vec<Value> = r.unwrap();
                     (
                         val_to_string(vals[0].clone()),
-                        val_to_string(vals[1].clone()),
+                        decrypt_str(&val_to_string(vals[1].clone())),
                         val_to_string(vals[2].clone()),
                         val_to_f64(&vals[3]),
                         val_to_i64(&vals[4]),

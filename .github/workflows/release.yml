@@ -69,6 +69,7 @@ jobs:
           echo "DB_URL=${{ secrets.DB_URL }}" > src-tauri/.env
           echo "IMGBED_URL=${{ secrets.IMGBED_URL }}" >> src-tauri/.env
           echo "IMGBED_TOKEN=${{ secrets.IMGBED_TOKEN }}" >> src-tauri/.env
+          echo "DB_ENC_KEY=${{ secrets.DB_ENC_KEY }}" >> src-tauri/.env
           echo "VITE_LATEST_URL=${{ secrets.IMGBED_URL }}/file/sfm/installer/latest.json" > .env
         shell: bash
 
