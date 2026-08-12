@@ -8,10 +8,16 @@
 //         状态持久化到 SQLite update_tasks 表，任何页面/重启后 db_get_update_status
 //         都能恢复进度/错误/已就绪。
 //
+// 多线程下载：服务端支持 Range 时按 threads（默认 8）分块并行下载（渐进式落盘 +
+// 进度上报）；单个子块失败会在子任务内重试，仍失败则主线程串行补下失败区间，
+// 子线程失败不影响主流程；服务端不支持 Range 时自动回退单流下载。图床与
+// GitHub Release 两个更新源共用同一引擎。
+//
 // 命令：db_prepare_update / db_get_update_status / db_apply_update
 use std::collections::HashMap;
 use std::fs;
 use std::io::Write;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use futures_util::StreamExt;
@@ -20,8 +26,10 @@ use rusqlite::{Connection, OptionalExtension};
 use serde::Serialize;
 use tauri::Emitter;
 use tauri::Manager;
+use tokio::io::{AsyncSeekExt, AsyncWriteExt};
 use tokio::task::JoinHandle;
 
+use crate::db::gh::build_client;
 use crate::db::subscribe::open_sqlite;
 
 #[cfg(windows)]
@@ -68,6 +76,8 @@ struct UpdateProgress {
     stage: String,
     status: String,
     error: String,
+    /// 实时下载速度（字节/秒），仅下载中有效
+    speed: u64,
 }
 
 // ── 任务状态写回（update_tasks 表）────────────────────────
@@ -107,6 +117,7 @@ fn emit_progress(
     stage: &str,
     status: &str,
     error: &str,
+    speed: u64,
 ) {
     let _ = app_handle.emit(
         "update-progress",
@@ -116,85 +127,357 @@ fn emit_progress(
             stage: stage.into(),
             status: status.into(),
             error: error.into(),
+            speed,
         },
     );
 }
 
-// ── 主任务体（spawn 执行）──────────────────────────────────
-async fn run_update_download_task(app_handle: tauri::AppHandle, task_id: i64, url: String) {
-    // 失败辅助：独立 async fn 避免闭包引用 lifetime 问题（同 subscribe.rs 做法）
-    async fn fail(app_handle: &tauri::AppHandle, task_id: i64, stage: &str, err: &str) {
-        let _ = update_task_status(app_handle, task_id, "failed", 0, stage, Some(err));
-        emit_progress(app_handle, task_id, 0, stage, "failed", err);
+// ── 失败状态写回（多线程/单流路径共用）────────────────────
+fn write_fail(app_handle: &tauri::AppHandle, task_id: i64, stage: &str, err: &str) {
+    let _ = update_task_status(app_handle, task_id, "failed", 0, stage, Some(err));
+    emit_progress(app_handle, task_id, 0, stage, "failed", err, 0);
+}
+
+/// 下载 [start, end] 闭区间到文件对应偏移（独立句柄 + seek，与其它子块互不干扰）。
+/// 内部重试 3 次；成功返回 Ok(())，最终失败返回 Err(())，已写字节数会回退，
+/// 由调用方（主线程）决定是否补下该区间——子线程失败不影响主流程。
+async fn download_range(
+    client: &reqwest::Client,
+    url: &str,
+    path: &std::path::Path,
+    start: u64,
+    end: u64,
+    downloaded: &AtomicU64,
+) -> Result<(), ()> {
+    const ATTEMPTS: u32 = 3;
+    for attempt in 0..ATTEMPTS {
+        let range = format!("bytes={}-{}", start, end);
+        let resp = match client
+            .get(url)
+            .header(reqwest::header::RANGE, range)
+            .send()
+            .await
+        {
+            Ok(r) if r.status().is_success() => r,
+            _ => {
+                tokio::time::sleep(std::time::Duration::from_millis(500 * (attempt as u64 + 1))).await;
+                continue;
+            }
+        };
+        let mut file = match tokio::fs::OpenOptions::new().write(true).open(path).await {
+            Ok(f) => f,
+            Err(_) => continue,
+        };
+        if file.seek(std::io::SeekFrom::Start(start)).await.is_err() {
+            continue;
+        }
+        let mut stream = resp.bytes_stream();
+        let mut written: u64 = 0;
+        let mut stream_err = false;
+        while let Some(chunk) = stream.next().await {
+            match chunk {
+                Ok(c) => {
+                    if file.write_all(&c).await.is_err() {
+                        stream_err = true;
+                        break;
+                    }
+                    written += c.len() as u64;
+                }
+                Err(_) => {
+                    stream_err = true;
+                    break;
+                }
+            }
+        }
+        drop(file);
+        // 进度只统计成功写入的字节；失败时回退，避免重试重复计数
+        downloaded.fetch_add(written, Ordering::Relaxed);
+        if !stream_err && written == end - start + 1 {
+            return Ok(());
+        }
+        downloaded.fetch_sub(written, Ordering::Relaxed);
+        tokio::time::sleep(std::time::Duration::from_millis(500 * (attempt as u64 + 1))).await;
     }
+    Err(())
+}
 
-    let _ = update_task_status(&app_handle, task_id, "downloading", 0, "downloading", None);
-    emit_progress(&app_handle, task_id, 0, "downloading", "downloading", "");
-
-    // 流式下载到应用数据目录（与订阅下载同款 reqwest 客户端）
-    let client = match reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(300))
-        .build()
-    {
-        Ok(c) => c,
-        Err(e) => {
-            fail(&app_handle, task_id, "downloading", &format!("构建 HTTP client 失败: {e}")).await;
-            return;
-        }
-    };
-    let response = match client.get(&url).send().await {
-        Ok(r) if r.status().is_success() => r,
-        Ok(r) => {
-            fail(&app_handle, task_id, "downloading", &format!("下载失败 HTTP {}", r.status())).await;
-            return;
-        }
-        Err(e) => {
-            fail(&app_handle, task_id, "downloading", &format!("下载失败: {e}")).await;
-            return;
-        }
-    };
-    let total = response.content_length().unwrap_or(0);
-    let path = match installer_path(&app_handle) {
-        Ok(p) => p,
-        Err(e) => {
-            fail(&app_handle, task_id, "downloading", &e).await;
-            return;
-        }
-    };
-    let mut file = match fs::File::create(&path) {
+/// 渐进式多线程分块下载（服务端支持 Range 时使用）：
+/// 预分配文件 → 按 threads 分块并行拉取 → 子块失败在主线程串行补下（带重试）。
+/// 全程持续落盘并节流上报进度，成功返回 true。
+async fn download_parallel(
+    app_handle: &tauri::AppHandle,
+    task_id: i64,
+    client: &reqwest::Client,
+    url: &str,
+    path: &std::path::Path,
+    total: u64,
+    threads: u32,
+) -> bool {
+    // 预分配文件，供各子块独立句柄 seek 写入
+    let file = match fs::File::create(path) {
         Ok(f) => f,
         Err(e) => {
-            fail(&app_handle, task_id, "downloading", &format!("创建文件失败: {e}")).await;
-            return;
+            write_fail(app_handle, task_id, "downloading", &format!("创建文件失败: {e}"));
+            return false;
         }
+    };
+    if let Err(e) = file.set_len(total) {
+        write_fail(app_handle, task_id, "downloading", &format!("预分配文件失败: {e}"));
+        return false;
+    }
+    drop(file);
+
+    let chunk_size = total.div_ceil(threads as u64);
+    let downloaded = Arc::new(AtomicU64::new(0));
+    let failed_ranges: Arc<Mutex<Vec<(u64, u64)>>> = Arc::new(Mutex::new(Vec::new()));
+
+    // 并行子块任务
+    let mut handles = Vec::new();
+    for i in 0..threads {
+        let start = (i as u64) * chunk_size;
+        if start >= total {
+            break;
+        }
+        let end = (start + chunk_size - 1).min(total - 1);
+        let c = client.clone();
+        let u = url.to_string();
+        let p = path.to_path_buf();
+        let dl = downloaded.clone();
+        let failed = failed_ranges.clone();
+        handles.push(tokio::spawn(async move {
+            if download_range(&c, &u, &p, start, end, &dl).await.is_err() {
+                if let Ok(mut m) = failed.lock() {
+                    m.push((start, end));
+                }
+            }
+        }));
+    }
+
+    // 进度监控循环：聚合子块已下载字节，节流写库 + 广播（含实时速度）
+    let monitor = {
+        let app = app_handle.clone();
+        let dl = downloaded.clone();
+        tokio::spawn(async move {
+            let mut prev_bytes: u64 = 0;
+            let mut prev_time = tokio::time::Instant::now();
+            loop {
+                tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+                let d = dl.load(Ordering::Relaxed);
+                let now = tokio::time::Instant::now();
+                let elapsed = now.duration_since(prev_time).as_secs_f64();
+                let speed = if elapsed > 0.0 {
+                    ((d - prev_bytes) as f64 / elapsed) as u64
+                } else {
+                    0
+                };
+                prev_bytes = d;
+                prev_time = now;
+                let percent = if total > 0 { (d * 100 / total) as u32 } else { 0 };
+                let _ = update_task_status(&app, task_id, "downloading", percent, "downloading", None);
+                emit_progress(&app, task_id, percent, "downloading", "downloading", "", speed);
+                if percent >= 100 {
+                    break;
+                }
+            }
+        })
+    };
+
+    for h in handles {
+        let _ = h.await;
+    }
+    monitor.abort();
+
+    // 子线程失败不影响主流程：主线程串行补下失败区间（每个区间再重试 3 次）
+    let failed = failed_ranges.lock().map(|m| m.clone()).unwrap_or_default();
+    for (start, end) in failed {
+        let mut ok = false;
+        for _ in 0..3 {
+            if download_range(client, url, path, start, end, &downloaded).await.is_ok() {
+                ok = true;
+                break;
+            }
+        }
+        if !ok {
+            write_fail(app_handle, task_id, "downloading", "分块下载失败，请检查网络后重试");
+            let _ = fs::remove_file(path);
+            return false;
+        }
+    }
+
+    // 完整性校验：落盘字节数必须等于 Content-Length
+    let real_len = fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+    if real_len != total {
+        write_fail(app_handle, task_id, "downloading", "文件完整性校验失败");
+        let _ = fs::remove_file(path);
+        return false;
+    }
+    true
+}
+
+/// 单流下载（服务端不支持 Range / 大小未知 / 单线程时回退）。
+/// 网络抖动/连接被截断时整体重试 3 次（间隔递增），避免一次中断即失败。
+async fn download_single_stream(
+    app_handle: &tauri::AppHandle,
+    task_id: i64,
+    client: &reqwest::Client,
+    url: &str,
+    path: &std::path::Path,
+) -> bool {
+    const ATTEMPTS: u32 = 3;
+    let mut last_err = String::from("下载失败");
+    for attempt in 0..ATTEMPTS {
+        // 重试前恢复 downloading 状态，覆盖上次尝试残留
+        if attempt > 0 {
+            let _ = update_task_status(app_handle, task_id, "downloading", 0, "downloading", None);
+            emit_progress(app_handle, task_id, 0, "downloading", "downloading", "", 0);
+        }
+        match single_stream_attempt(app_handle, task_id, client, url, path).await {
+            Ok(()) => return true,
+            Err(e) => {
+                last_err = e;
+                let _ = fs::remove_file(path);
+                if attempt + 1 < ATTEMPTS {
+                    // 递增退避：800ms / 1600ms
+                    tokio::time::sleep(std::time::Duration::from_millis(800 * (attempt as u64 + 1))).await;
+                }
+            }
+        }
+    }
+    write_fail(app_handle, task_id, "downloading", &last_err);
+    false
+}
+
+/// 单次单流下载尝试：成功 Ok(())，失败 Err(错误信息)，不写失败状态
+async fn single_stream_attempt(
+    app_handle: &tauri::AppHandle,
+    task_id: i64,
+    client: &reqwest::Client,
+    url: &str,
+    path: &std::path::Path,
+) -> Result<(), String> {
+    let response = match client.get(url).send().await {
+        Ok(r) if r.status().is_success() => r,
+        Ok(r) => return Err(format!("下载失败 HTTP {}", r.status())),
+        Err(e) => return Err(format!("下载失败: {e}")),
+    };
+    let total = response.content_length().unwrap_or(0);
+    let mut file = match fs::File::create(path) {
+        Ok(f) => f,
+        Err(e) => return Err(format!("创建文件失败: {e}")),
     };
     let mut stream = response.bytes_stream();
     let mut downloaded: u64 = 0;
+    // 节流上报 + 实时速度：每 400ms 计算一次增量速度并广播
+    let mut prev_bytes: u64 = 0;
+    let mut prev_time = tokio::time::Instant::now();
     while let Some(chunk) = stream.next().await {
         match chunk {
             Ok(c) => {
                 if let Err(e) = file.write_all(&c) {
-                    fail(&app_handle, task_id, "downloading", &format!("写入文件失败: {e}")).await;
-                    let _ = fs::remove_file(&path);
-                    return;
+                    return Err(format!("写入文件失败: {e}"));
                 }
                 downloaded += c.len() as u64;
-                let percent = if total > 0 { (downloaded * 100 / total) as u32 } else { 0 };
-                let _ = update_task_status(&app_handle, task_id, "downloading", percent, "downloading", None);
-                emit_progress(&app_handle, task_id, percent, "downloading", "downloading", "");
+                let now = tokio::time::Instant::now();
+                let elapsed = now.duration_since(prev_time).as_secs_f64();
+                if elapsed >= 0.4 {
+                    let speed = if elapsed > 0.0 {
+                        ((downloaded - prev_bytes) as f64 / elapsed) as u64
+                    } else {
+                        0
+                    };
+                    prev_bytes = downloaded;
+                    prev_time = now;
+                    let percent = if total > 0 { (downloaded * 100 / total) as u32 } else { 0 };
+                    let _ = update_task_status(app_handle, task_id, "downloading", percent, "downloading", None);
+                    emit_progress(app_handle, task_id, percent, "downloading", "downloading", "", speed);
+                }
             }
             Err(e) => {
-                fail(&app_handle, task_id, "downloading", &format!("下载中断: {e}")).await;
-                let _ = fs::remove_file(&path);
-                return;
+                return Err(format!("下载中断: {e}"));
             }
         }
     }
+    // 收尾：上报最终进度，随后主任务置 ready
+    let final_percent = if total > 0 { 100 } else { 0 };
+    let _ = update_task_status(app_handle, task_id, "downloading", final_percent, "downloading", None);
+    emit_progress(app_handle, task_id, final_percent, "downloading", "downloading", "", 0);
     drop(file);
+    Ok(())
+}
+
+// ── 主任务体（spawn 执行）──────────────────────────────────
+async fn run_update_download_task(app_handle: tauri::AppHandle, task_id: i64, url: String, threads: u32) {
+    let _ = update_task_status(&app_handle, task_id, "downloading", 0, "downloading", None);
+    emit_progress(&app_handle, task_id, 0, "downloading", "downloading", "", 0);
+
+    // 复用 gh.rs 的客户端构建（代理遵循 reqwest 默认系统代理检测，不做额外干预）
+    let client = match build_client(300) {
+        Ok(c) => c,
+        Err(e) => {
+            write_fail(&app_handle, task_id, "downloading", &format!("构建 HTTP client 失败: {e}"));
+            return;
+        }
+    };
+    let path = match installer_path(&app_handle) {
+        Ok(p) => p,
+        Err(e) => {
+            write_fail(&app_handle, task_id, "downloading", &e);
+            return;
+        }
+    };
+
+    // 探测是否支持 Range 分块（多线程下载的前提）。
+    // 先 HEAD 探测；HEAD 失败/未确认 Range 支持时，回退 GET + Range: bytes=0-0
+    // 实测（GitHub 等 CDN 对 Range 请求返回 206 + content-range，可拿到总大小）。
+    let mut total: u64 = 0;
+    let mut supports_range = false;
+    if let Ok(r) = client.head(&url).send().await {
+        if r.status().is_success() {
+            total = r.content_length().unwrap_or(0);
+            supports_range = r
+                .headers()
+                .get(reqwest::header::ACCEPT_RANGES)
+                .and_then(|v| v.to_str().ok())
+                .map(|s| s.eq_ignore_ascii_case("bytes"))
+                .unwrap_or(false);
+        }
+    }
+    if total == 0 || !supports_range {
+        if let Ok(r) = client
+            .get(&url)
+            .header(reqwest::header::RANGE, "bytes=0-0")
+            .send()
+            .await
+        {
+            if r.status() == reqwest::StatusCode::PARTIAL_CONTENT {
+                // content-range: bytes 0-0/10027510 → 取斜杠后的总大小
+                if let Some(cr) = r
+                    .headers()
+                    .get(reqwest::header::CONTENT_RANGE)
+                    .and_then(|v| v.to_str().ok())
+                {
+                    if let Some(size) = cr.rsplit('/').next().and_then(|s| s.trim().parse::<u64>().ok()) {
+                        total = size;
+                        supports_range = size > 0;
+                    }
+                }
+            }
+        }
+    }
+
+    // HEAD/Range 探测不可用 / 大小未知 / 不支持 Range / 单线程 → 回退单流
+    let ok = if total > 0 && supports_range && threads > 1 {
+        download_parallel(&app_handle, task_id, &client, &url, &path, total, threads).await
+    } else {
+        download_single_stream(&app_handle, task_id, &client, &url, &path).await
+    };
+    if !ok {
+        return; // 失败状态已在子路径中写回
+    }
 
     // ready：安装包已就绪，等用户"重启并更新"（或下次启动自动应用）
     let _ = update_task_status(&app_handle, task_id, "ready", 100, "done", None);
-    emit_progress(&app_handle, task_id, 100, "done", "ready", "");
+    emit_progress(&app_handle, task_id, 100, "done", "ready", "", 0);
     // 清理句柄
     if let Ok(mut m) = tasks().lock() {
         m.remove(&task_id);
@@ -205,13 +488,17 @@ async fn run_update_download_task(app_handle: tauri::AppHandle, task_id: i64, ur
 
 /// 创建更新安装包下载后台任务并立即返回 task_id；下载在 Rust 后台执行，
 /// 离开设置页/切换标签不中断，进度通过全局事件 "update-progress" 广播。
+/// threads 指定分块下载线程数（默认 8，范围 1-16；服务端不支持 Range 时
+/// 自动回退单流）。图床与 GitHub Release 两个更新源共用此命令。
 /// 去重：仅当查到的运行态任务在本进程内确实有句柄（TASK_HANDLES）时才复用，
 /// 避免重复下载；进程重启后残留的运行态行没有句柄接管，重置为 failed 后新建任务。
 #[tauri::command(rename_all = "snake_case")]
 pub async fn db_prepare_update(
     app_handle: tauri::AppHandle,
     url: String,
+    threads: Option<u32>,
 ) -> Result<serde_json::Value, String> {
+    let threads = threads.unwrap_or(8).clamp(1, 16);
     let conn = open_sqlite(&app_handle)?;
     let existing: Option<i64> = conn
         .query_row(
@@ -249,7 +536,7 @@ pub async fn db_prepare_update(
     // spawn 后台任务
     let app = app_handle.clone();
     let handle: JoinHandle<()> = tokio::spawn(async move {
-        run_update_download_task(app, task_id, url).await;
+        run_update_download_task(app, task_id, url, threads).await;
     });
     if let Ok(mut m) = tasks().lock() {
         m.insert(task_id, handle);
@@ -312,8 +599,17 @@ pub async fn db_get_update_status(
                 v["status"] = serde_json::json!("ready");
                 v["percent"] = serde_json::json!(100);
                 v["stage"] = serde_json::json!("done");
+                Ok(v)
+            } else if v.get("status").and_then(|s| s.as_str()) == Some("failed") {
+                // 失败的过期残留（安装包不存在，如网络失败后已清理）：
+                // 直接删除任务记录并返回 null，避免每次打开设置页都显示过期的下载失败错误
+                if let Some(id) = v.get("id").and_then(|x| x.as_i64()) {
+                    let _ = conn.execute("DELETE FROM update_tasks WHERE id = ?", rusqlite::params![id]);
+                }
+                Ok(serde_json::Value::Null)
+            } else {
+                Ok(v)
             }
-            Ok(v)
         }
         None if has_installer => Ok(serde_json::json!({
             "id": 0,

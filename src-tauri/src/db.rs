@@ -10,6 +10,7 @@ pub mod hash;
 pub mod installer;
 pub mod subscribe;
 pub mod bepinex;
+pub mod gh;
 
 mod user;
 mod mod_ops;

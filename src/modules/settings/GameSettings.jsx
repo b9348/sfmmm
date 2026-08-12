@@ -16,6 +16,8 @@ import {
   ArrowSync24Regular,
   ArrowDownload24Regular,
   Link24Regular,
+  Globe24Regular,
+  Delete24Regular,
 } from '@fluentui/react-icons'
 import { makeStyles, tokens } from '@fluentui/react-components'
 import { invoke } from '@tauri-apps/api/core'
@@ -25,7 +27,7 @@ import { open as openUrl } from '@tauri-apps/plugin-shell'
 import { getConfig, setConfig } from '../../services/dbHelper'
 import { Acknowledgments } from './Acknowledgments'
 import i18n from '../../i18n'
-import { checkVersion, prepareUpdate, applyUpdate, getUpdateStatus, compareVersions } from '../../services/updateApi'
+import { checkVersion, checkGitHubUpdate, prepareUpdate, applyUpdate, getUpdateStatus, compareVersions } from '../../services/updateApi'
 import APP_VERSION from '../../version.js'
 
 const useStyles = makeStyles({
@@ -71,6 +73,14 @@ const useStyles = makeStyles({
   },
 })
 
+// 实时下载速度格式化：B/s / KB/s / MB/s
+function formatSpeed(bytesPerSec) {
+  if (!bytesPerSec || bytesPerSec <= 0) return ''
+  if (bytesPerSec >= 1024 * 1024) return (bytesPerSec / 1024 / 1024).toFixed(1) + ' MB/s'
+  if (bytesPerSec >= 1024) return Math.round(bytesPerSec / 1024) + ' KB/s'
+  return Math.round(bytesPerSec) + ' B/s'
+}
+
 export function GameSettings({ config, onConfigChange, appUpdateInfo }) {
   const { t, i18n: i18nInstance } = useTranslation()
   const styles = useStyles()
@@ -84,6 +94,10 @@ export function GameSettings({ config, onConfigChange, appUpdateInfo }) {
   const [prepared, setPrepared] = useState(false)
   const [pendingUpdate, setPendingUpdate] = useState(false)
   const [updateInfo, setUpdateInfo] = useState(null)
+  // GitHub 下载渠道解析直链中（检测已确认发布，无需再检测版本）
+  const [ghResolving, setGhResolving] = useState(false)
+  // 实时下载速度（字节/秒），来自 update-progress 事件
+  const [downloadSpeed, setDownloadSpeed] = useState(0)
   // 当前后台下载任务 id：进度事件按 taskId 匹配（与订阅下载同模式）
   const taskIdRef = useRef(null)
 
@@ -157,7 +171,7 @@ export function GameSettings({ config, onConfigChange, appUpdateInfo }) {
         } else if (st.status === 'ready') {
           setPrepared(true)
         } else if (st.status === 'failed') {
-          setDownloadError(st.error || t('settings.downloadFailed'))
+          setDownloadError(st.error || t('settings.downloadFailedGeneric'))
         }
       } catch (e) {
         console.warn('[Update] 恢复下载状态失败:', e)
@@ -179,16 +193,19 @@ export function GameSettings({ config, onConfigChange, appUpdateInfo }) {
         setDownloadProgress(100)
         setDownloadStage('')
         setDownloadError('')
+        setDownloadSpeed(0)
         setPrepared(true)
         setPendingUpdate(false)
         saveConfig({ pending_update: 'false' })
       } else if (payload.status === 'failed') {
         setDownloading(false)
         setDownloadStage('')
-        setDownloadError(payload.error || t('settings.downloadFailed'))
+        setDownloadSpeed(0)
+        setDownloadError(payload.error || t('settings.downloadFailedGeneric'))
       } else {
         setDownloadProgress(payload.percent ?? 0)
         setDownloadStage(payload.stage || 'downloading')
+        setDownloadSpeed(payload.speed ?? 0)
       }
     }).then(fn => { unlistenFn = fn }).catch(e => console.warn('[Update] 监听进度事件失败:', e))
 
@@ -255,13 +272,40 @@ export function GameSettings({ config, onConfigChange, appUpdateInfo }) {
     try {
       // 创建后台下载任务后立即返回；下载在 Rust 执行，进度由 update-progress 事件回传，
       // 离开设置页也不中断，重进页面通过 getUpdateStatus() 恢复
-      const res = await prepareUpdate(updateInfo.updateUrl)
+      const res = await prepareUpdate(updateInfo.updateUrl, 8)
       taskIdRef.current = res?.taskId ?? null
     } catch (e) {
       console.error('[Update] 创建下载任务失败:', e)
       setDownloading(false)
       setDownloadStage('')
-      setDownloadError(e.message || t('settings.downloadFailed'))
+      setDownloadError(e.message || t('settings.downloadFailedGeneric'))
+    }
+  }
+
+  // GitHub Releases 下载渠道：检测已确认发布完成，拉取直链后直接发起下载
+  const handleGhDownloadUpdate = async () => {
+    if (!updateInfo?.latestVersion || downloading || ghResolving) return
+    setGhResolving(true)
+    setDownloadError('')
+    try {
+      const data = await checkGitHubUpdate()
+      // 校验 GitHub 直链版本与检测到的最新版一致（CI 发布完成后两者应相同）
+      if (!data.updateUrl) {
+        throw new Error(t('settings.ghNoAsset'))
+      }
+      if (data.version !== updateInfo.latestVersion) {
+        throw new Error(t('settings.ghNotReady', { version: updateInfo.latestVersion }))
+      }
+      setDownloading(true)
+      setDownloadProgress(0)
+      setDownloadStage('downloading')
+      const res = await prepareUpdate(data.updateUrl, 8)
+      taskIdRef.current = res?.taskId ?? null
+    } catch (e) {
+      console.error('[Update] GitHub 下载失败:', e)
+      setDownloadError(e.message || t('settings.downloadFailedGeneric'))
+    } finally {
+      setGhResolving(false)
     }
   }
 
@@ -281,6 +325,21 @@ export function GameSettings({ config, onConfigChange, appUpdateInfo }) {
       setPrepared(false)
     } catch (e) {
       console.error('[Update] 保存待更新状态失败:', e)
+    }
+  }
+
+  // 开发环境专用：清理已就绪的安装包与任务记录，重置回可再次选择下载源的状态
+  const handleClearAndReset = async () => {
+    try {
+      await invoke('db_clear_update')
+      setPrepared(false)
+      setPendingUpdate(false)
+      setDownloadProgress(0)
+      setDownloadStage('')
+      setDownloadError('')
+      saveConfig({ pending_update: 'false' })
+    } catch (e) {
+      console.warn('[Update] 清理更新任务失败:', e)
     }
   }
 
@@ -342,13 +401,14 @@ export function GameSettings({ config, onConfigChange, appUpdateInfo }) {
         <CardHeader header={<Title2>{t('settings.updateTitle')}</Title2>} />
         <div style={{ padding: '8px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
           <div className={styles.updateRow}>
+            {/* loading 状态统一收敛到「检测更新」按钮：无论从哪个源下载/解析直链，都由此按钮转圈指示 */}
             <Button
               size="small"
-              icon={checking ? <Spinner size="tiny" /> : <ArrowSync24Regular />}
+              icon={checking || downloading || ghResolving ? <Spinner size="tiny" /> : <ArrowSync24Regular />}
               onClick={handleCheckUpdate}
-              disabled={checking}
+              disabled={checking || downloading || ghResolving}
             >
-{checking ? t('settings.checking') : t('settings.checkUpdateBtn')}
+              {checking ? t('settings.checking') : (downloading || ghResolving) ? t('settings.downloadingUpdate') : t('settings.checkUpdateBtn')}
             </Button>
             <div className={styles.updateInfo}>
               {prepared ? (
@@ -367,23 +427,49 @@ export function GameSettings({ config, onConfigChange, appUpdateInfo }) {
                   <Button size="small" onClick={handleLater}>
                     {t('settings.updateLater')}
                   </Button>
+                  {/* 开发环境专用：清理安装包并重置更新状态，便于连续测试不同下载源 */}
+                  {import.meta.env.DEV && (
+                    <Button
+                      size="small"
+                      icon={<Delete24Regular />}
+                      onClick={handleClearAndReset}
+                    >
+                      {t('settings.clearAndReset')}
+                    </Button>
+                  )}
                 </>
               ) : updateInfo?.hasUpdate ? (
                 <>
                   <span className={styles.currentTag}>v{APP_VERSION}</span>
                   <Text>→</Text>
                   <span className={styles.newTag}>v{updateInfo.latestVersion}</span>
-                  {downloadError && (
-                    <Text size="small" className={styles.noUpdate}>{downloadError}</Text>
-                  )}
+                  {/* 两个下载渠道：默认图床源 / GitHub Release 源（检测已确认发布，只需选源下载）。
+                      对等并列，样式保持一致，仅以图标区分来源，避免暗示优先级。
+                      下载/解析中统一由「检测更新」按钮转圈，此处保持静态仅禁用 */}
                   <Button
                     size="small"
-                    appearance="primary"
-                    icon={downloading ? <Spinner size="tiny" /> : <ArrowDownload24Regular />}
+                    icon={<ArrowDownload24Regular />}
                     onClick={handleDownloadUpdate}
-                    disabled={downloading}
+                    disabled={downloading || ghResolving}
                   >
-                    {downloading ? t('settings.downloadingUpdate') : t('settings.downloadUpdate')}
+                    {t('settings.downloadUpdate')}
+                  </Button>
+                  <Button
+                    size="small"
+                    icon={<Globe24Regular />}
+                    onClick={handleGhDownloadUpdate}
+                    disabled={downloading || ghResolving}
+                  >
+                    {t('settings.ghDownloadUpdate')}
+                  </Button>
+                  {/* 第三下载源：夸克网盘（浏览器打开分享链接，由用户自行下载安装包） */}
+                  <Button
+                    size="small"
+                    icon={<Link24Regular />}
+                    onClick={() => openUrl('https://pan.quark.cn/s/6717bb155e47')}
+                    disabled={downloading || ghResolving}
+                  >
+                    {t('settings.quarkDownload')}
                   </Button>
                 </>
               ) : pendingUpdate ? (
@@ -394,18 +480,26 @@ export function GameSettings({ config, onConfigChange, appUpdateInfo }) {
                 <span className={styles.noUpdate}>{t('settings.alreadyLatest')}</span>
               ) : null}
             </div>
-            {downloading && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', padding: '4px 0' }}>
-                <ProgressBar value={downloadProgress / 100} />
-                <Text size="small" style={{ color: tokens.colorNeutralForeground3 }}>
-                  {downloadStage === 'downloading' && t('settings.downloadingUpdate') + ` ${downloadProgress}%`}
-                </Text>
-              </div>
-            )}
           </div>
           <Text size="small" style={{ color: tokens.colorNeutralForeground3 }}>
             {t('settings.currentVersion', { version: APP_VERSION })}
           </Text>
+          {/* 下载进度与网络报错：独立换行显示在版本文案下方，避免抢占更新按钮行空间 */}
+          {(downloading || downloadError) && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+              {downloading && (
+                <>
+                  <ProgressBar value={downloadProgress / 100} />
+                  <Text size="small" style={{ color: tokens.colorNeutralForeground3 }}>
+                    {downloadStage === 'downloading' && t('settings.downloadingUpdate') + ` ${downloadProgress}%` + (downloadSpeed > 0 ? ` · ${formatSpeed(downloadSpeed)}` : '')}
+                  </Text>
+                </>
+              )}
+              {downloadError && (
+                <Text size="small" className={styles.noUpdate}>{downloadError}</Text>
+              )}
+            </div>
+          )}
         </div>
       </Card>
 

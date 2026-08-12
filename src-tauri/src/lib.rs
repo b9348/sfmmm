@@ -1096,6 +1096,7 @@ pub fn run() {
             db::db_rate_mod, db::db_unrate_mod,
             db::db_check_updates,
             db::db_fetch_latest,
+            db::gh::db_gh_latest_release,
             db::hash::db_preflight_mod,
             db::hash::db_set_mod_file_hashes,
             db::installer::db_prepare_update,
