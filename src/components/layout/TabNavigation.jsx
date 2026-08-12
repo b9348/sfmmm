@@ -27,6 +27,9 @@ import {
   ChevronDown24Regular,
   Play24Regular,
   Navigation24Regular,
+  WeatherSunny24Regular,
+  WeatherMoon24Regular,
+  Desktop24Regular,
 } from '@fluentui/react-icons'
 import { useAuth } from '../../contexts/useAuth'
 import { useUserNav } from '../../contexts/useUserNav'
@@ -43,7 +46,7 @@ const LAUNCH_VALUE = '__launch'
  * 侧边导航（TabNavigation）——基于 WinUI NavigationView 风格组件实现。
  * 保留原有全部功能：登录/注册、用户菜单、标签切换、启动游戏、版本与更新徽章。
  */
-export function TabNavigation({ value, onChange, isCollapsed, onToggleCollapse, updateInfo, onNavigateToSettings, children }) {
+export function TabNavigation({ value, onChange, isCollapsed, onToggleCollapse, updateInfo, onNavigateToSettings, themeMode, onSelectTheme, children }) {
   const { t } = useTranslation()
   const { user, isLoggedIn, logout } = useAuth()
   const { openUser } = useUserNav()
@@ -217,6 +220,54 @@ export function TabNavigation({ value, onChange, isCollapsed, onToggleCollapse, 
     </div>
   )
 
+  // 主题切换：三态菜单（亮色/深色/跟随系统），置于底部菜单顶部（启动游戏上方）
+  const themeMeta = {
+    light: { icon: <WeatherSunny24Regular />, label: t('nav.themeLight') },
+    dark: { icon: <WeatherMoon24Regular />, label: t('nav.themeDark') },
+    system: { icon: <Desktop24Regular />, label: t('nav.themeSystem') },
+  }
+  const currentTheme = themeMeta[themeMode] ?? themeMeta.system
+  const themeToggleItem = (
+    <Menu>
+      <MenuTrigger disableButtonEnhancement>
+        <div
+          role="button"
+          tabIndex={0}
+          className="winnv-item winnv-theme-toggle"
+          title={isCollapsed ? currentTheme.label : undefined}
+        >
+          <span className="winnv-icon winnv-icon-node">{currentTheme.icon}</span>
+          <span className="winnv-label">{currentTheme.label}</span>
+        </div>
+      </MenuTrigger>
+      <MenuPopover>
+        <MenuList>
+          <MenuItem
+            icon={<WeatherSunny24Regular />}
+            checkmark={{ checked: themeMode === 'light' }}
+            onClick={() => onSelectTheme('light')}
+          >
+            {t('nav.themeLight')}
+          </MenuItem>
+          <MenuItem
+            icon={<WeatherMoon24Regular />}
+            checkmark={{ checked: themeMode === 'dark' }}
+            onClick={() => onSelectTheme('dark')}
+          >
+            {t('nav.themeDark')}
+          </MenuItem>
+          <MenuItem
+            icon={<Desktop24Regular />}
+            checkmark={{ checked: themeMode === 'system' }}
+            onClick={() => onSelectTheme('system')}
+          >
+            {t('nav.themeSystem')}
+          </MenuItem>
+        </MenuList>
+      </MenuPopover>
+    </Menu>
+  )
+
   // 面板底部：版本号 + 更新徽章
   const paneFooter = (
     <div
@@ -271,6 +322,7 @@ export function TabNavigation({ value, onChange, isCollapsed, onToggleCollapse, 
       isBackButtonVisible={false}
       paneHeader={paneHeader}
       paneFooter={paneFooter}
+      footerLeading={themeToggleItem}
       icons={{
         hamburger: <Navigation24Regular />,
         settings: <Settings24Regular />,

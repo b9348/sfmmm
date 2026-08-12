@@ -81,6 +81,7 @@ export function WinNavigationView({
   icons = {},
   paneHeader = null,
   paneFooter = null,
+  footerLeading = null,
   children,
 }) {
   // 内置按钮图标：优先使用传入的 React 节点，否则回退到 Segoe 字形
@@ -447,6 +448,7 @@ export function WinNavigationView({
                 {normalizedMenu.map((item) => renderMenuItem(item))}
               </div>
               <div className="winnv-footer">
+                {footerLeading}
                 {normalizedFooter.map((item) => renderMenuItem(item))}
                 {isSettingsVisible && (
                   <div

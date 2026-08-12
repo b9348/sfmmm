@@ -605,27 +605,37 @@
 }
 
 /* ---------- 深色主题 ---------- */
-@media (prefers-color-scheme: dark) {
-  .winnv-shell {
-    --winnv-app-bg: #202020;
-    --winnv-layer-default: rgba(58, 58, 58, 0.30);
-    --winnv-card-stroke: rgba(0, 0, 0, 0.10);
-    --winnv-text-primary: #FFFFFF;
-    --winnv-text-secondary: rgba(255, 255, 255, 0.77);
-    --winnv-text-disabled: rgba(255, 255, 255, 0.36);
-    --winnv-subtle-secondary: rgba(255, 255, 255, 0.0605);
-    --winnv-subtle-tertiary: rgba(255, 255, 255, 0.0419);
-    --winnv-accent: #4CC2FF;
-    --winnv-stroke-divider: rgba(255, 255, 255, 0.08);
-    --winnv-pane-fill: rgba(32, 32, 32, 0.78);
-    background: #202020;
-  }
+/* 由 App.jsx 在 FluentProvider 上设置的 app-theme-dark class 驱动，
+   不再跟随系统 prefers-color-scheme，保证与 Fluent 组件主题一致切换 */
+.app-theme-dark .winnv-shell {
+  --winnv-app-bg: #202020;
+  --winnv-layer-default: rgba(58, 58, 58, 0.30);
+  --winnv-card-stroke: rgba(0, 0, 0, 0.10);
+  --winnv-text-primary: #FFFFFF;
+  --winnv-text-secondary: rgba(255, 255, 255, 0.77);
+  --winnv-text-disabled: rgba(255, 255, 255, 0.36);
+  --winnv-subtle-secondary: rgba(255, 255, 255, 0.0605);
+  --winnv-subtle-tertiary: rgba(255, 255, 255, 0.0419);
+  --winnv-accent: #4CC2FF;
+  --winnv-stroke-divider: rgba(255, 255, 255, 0.08);
+  --winnv-pane-fill: rgba(32, 32, 32, 0.78);
+  background: #202020;
+}
 
-  .winnv-footer {
-    background: #202020;
-  }
+.app-theme-dark .winnv-footer {
+  background: #202020;
+}
 
-  .winnv-item .winnv-infobadge {
-    color: #000000;
-  }
+.app-theme-dark .winnv-item .winnv-infobadge {
+  color: #000000;
+}
+
+/* ---------- 主题切换 ---------- */
+.winnv-theme-toggle {
+  cursor: pointer;
+}
+
+/* 深色主题下开关行 hover 背景跟随侧栏变量 */
+.app-theme-dark .winnv-theme-toggle:not(.is-disabled):hover {
+  background: var(--winnv-subtle-secondary, rgba(255, 255, 255, 0.0605));
 }

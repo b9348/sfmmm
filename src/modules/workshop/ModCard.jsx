@@ -1,6 +1,6 @@
 import { useTranslation } from 'react-i18next'
 import {
-  Card, CardHeader, Text,
+  Card, CardHeader, Text, Avatar,
   makeStyles, tokens, Badge,
 } from '@fluentui/react-components'
 import {
@@ -8,8 +8,9 @@ import {
   HeartFilled,
   CommentRegular,
 } from '@fluentui/react-icons'
-import { FileRow, UserLink } from '../../components'
+import { FileRow } from '../../components'
 import { RatingStarsDisplay } from '../../components/common/RatingStars'
+import { getAvatarUrl } from '../../utils/avatars'
 
 const CATEGORIES = [
   { value: 'v1', label: 'v1' },
@@ -70,13 +71,18 @@ export function ModCard({ mod, onClick, onMouseEnter, onMouseLeave, onMouseDown 
         }
         description={
           <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-            <UserLink
-              userId={mod.author_id}
-              username={mod.author_name}
-              avatar={mod.author_avatar}
-              size={16}
-              nameSize={100}
-            />
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0 }}>
+              {getAvatarUrl(mod.author_avatar) ? (
+                <img
+                  src={getAvatarUrl(mod.author_avatar)}
+                  alt={mod.author_name || ''}
+                  style={{ width: 16, height: 16, borderRadius: '50%', objectFit: 'cover', display: 'block', flexShrink: 0 }}
+                />
+              ) : (
+                <Avatar name={mod.author_name || '?'} size={20} color="brand" />
+              )}
+              <Text size={100} className={styles.meta} truncate>{mod.author_name}</Text>
+            </div>
             <Text size="small" className={styles.meta}>
               {mod.updated_at && mod.updated_at !== mod.created_at ? mod.updated_at : mod.created_at}
             </Text>

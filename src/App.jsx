@@ -1,5 +1,5 @@
 import { useState, useEffect, useReducer } from 'react'
-import { FluentProvider, webLightTheme, Dialog, DialogSurface, DialogBody, DialogTitle, DialogContent, DialogActions, DialogTrigger, Button, Text } from '@fluentui/react-components'
+import { FluentProvider, webLightTheme, webDarkTheme, Dialog, DialogSurface, DialogBody, DialogTitle, DialogContent, DialogActions, DialogTrigger, Button, Text } from '@fluentui/react-components'
 import { makeStyles, tokens } from '@fluentui/react-components'
 import { TabNavigation, WelcomeScreen, TitleBar } from './components'
 import { SaveManagement, ImportExport, GameSettings, Workshop, LocalMods, NotifyPage } from './modules'
@@ -69,6 +69,40 @@ function App() {
   const { sidebarCollapsed, toggleSidebar } = usePersistUI()
   const [state, dispatch] = useReducer(appReducer, initialState)
   const [updateInfo, setUpdateInfo] = useState(null)
+  // 主题模式：'light' | 'dark' | 'system'。默认跟随系统，启动后读取持久化配置覆盖。
+  // 通过 class 名驱动 WinNavigationView 的自定义 CSS 变量，Fluent 组件则切换 webDarkTheme。
+  const [themeMode, setThemeMode] = useState('system')
+  // 系统是否处于深色模式（仅 themeMode === 'system' 时生效）
+  const [systemDark, setSystemDark] = useState(
+    () => window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false
+  )
+  // 实际生效的主题：跟随系统模式下由系统偏好决定
+  const resolvedTheme = themeMode === 'system' ? (systemDark ? 'dark' : 'light') : themeMode
+
+  // 监听系统主题变化，供"跟随系统"模式使用
+  useEffect(() => {
+    const mq = window.matchMedia?.('(prefers-color-scheme: dark)')
+    if (!mq) return
+    const onChange = (e) => setSystemDark(e.matches)
+    onChange(mq)
+    mq.addEventListener?.('change', onChange)
+    return () => mq.removeEventListener?.('change', onChange)
+  }, [])
+
+  // 选择主题模式（亮色/深色/跟随系统）并持久化到 config 表
+  const handleSelectTheme = async (mode) => {
+    if (!['light', 'dark', 'system'].includes(mode) || mode === themeMode) return
+    const prev = themeMode
+    setThemeMode(mode)
+    try {
+      await setConfig('theme_mode', mode)
+    } catch (e) {
+      console.error('Failed to persist theme mode:', e)
+      // 保存失败时回滚 UI，避免界面声称已切换但重启后丢失
+      setThemeMode(prev)
+      alert(t('nav.themePersistFailed'))
+    }
+  }
 
   // 全局拦截外部链接点击：改用系统默认浏览器打开，避免 WebView 原地导航
   useEffect(() => {
@@ -126,10 +160,15 @@ function App() {
 
     const initialize = async () => {
       try {
-        const configMap = await getConfigs(['language', 'selected_tab', 'initialized', 'game_path', 'exe_path'])
+        const configMap = await getConfigs(['language', 'selected_tab', 'initialized', 'game_path', 'exe_path', 'theme_mode'])
 
         if (!isMounted) {
           return
+        }
+
+        // 应用已保存的主题模式（未保存时保持跟随系统）
+        if (['light', 'dark', 'system'].includes(configMap.theme_mode)) {
+          setThemeMode(configMap.theme_mode)
         }
 
         // 应用已保存的语言设置（在 dispatch 之前等待完成，避免 UI 渲染时语言正在切换）
@@ -219,7 +258,7 @@ function App() {
 
   if (state.isFirstRun === null) {
     return (
-      <FluentProvider theme={webLightTheme}>
+      <FluentProvider theme={resolvedTheme === 'dark' ? webDarkTheme : webLightTheme} className={`app-theme-${resolvedTheme}`}>
         <div className={styles.loadingContainer}>
         </div>
       </FluentProvider>
@@ -228,7 +267,7 @@ function App() {
 
   if (state.isFirstRun) {
     return (
-      <FluentProvider theme={webLightTheme}>
+      <FluentProvider theme={resolvedTheme === 'dark' ? webDarkTheme : webLightTheme} className={`app-theme-${resolvedTheme}`}>
         <div className={styles.root}>
           <TitleBar />
           <WelcomeScreen onComplete={handleWelcomeComplete} />
@@ -238,7 +277,7 @@ function App() {
   }
 
   return (
-    <FluentProvider theme={webLightTheme}>
+    <FluentProvider theme={resolvedTheme === 'dark' ? webDarkTheme : webLightTheme} className={`app-theme-${resolvedTheme}`}>
       <AuthProvider>
         <UserNavProvider onOpenMod={(modId) => {
           window.location.hash = `#/mod/${modId}`
@@ -255,6 +294,8 @@ function App() {
              isCollapsed={sidebarCollapsed}
              onToggleCollapse={toggleSidebar}
              updateInfo={updateInfo}
+             themeMode={themeMode}
+             onSelectTheme={handleSelectTheme}
              onNavigateToSettings={() => handleTabChange('settings')}
            >
             <main className={styles.tabContent}>
