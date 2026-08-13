@@ -150,7 +150,8 @@ export default function ApplicationsPage({ onNavigate, panel, visible = true }) 
       })
       setNotifs(res.items || [])
       setTotalNotifs(res.total || 0)
-    } catch {
+    } catch (e) {
+      console.error('getMyNotifications failed', e)
       setNotifs([])
     } finally {
       setLoadingNotifs(false)

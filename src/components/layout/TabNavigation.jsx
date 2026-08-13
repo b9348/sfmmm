@@ -62,6 +62,31 @@ export function TabNavigation({ value, onChange, isCollapsed, onToggleCollapse, 
     refreshUnread(user.user_id)
   }, [isLoggedIn, user?.user_id, refreshUnread])
 
+  // 程序化跳转（通知列表 → 讨论区/云详情、订阅记录/用户资料 → 云详情等）只改 hash 并切 tab，
+  // 不经过 handleSelect，subValue 会滞留旧值导致蓝标不随动；
+  // 监听 hashchange 按 hash 重新对齐 subValue（#/workshop/<tab> 等子页 hash 与侧边栏子项一一对应，
+  // #/discuss/<id>、#/mod/<id> 分别归入 讨论区/云 子项）。
+  useEffect(() => {
+    const syncSubValueFromHash = () => {
+      const h = window.location.hash
+      let next = null
+      const m = h.match(/^#\/(workshop|localmods|notify)\/(\w+)/)
+      if (m) {
+        next = `${m[1]}:${m[2]}`
+      } else if (/^#\/discuss\//.test(h)) {
+        next = 'workshop:discuss'
+      } else if (/^#\/mod\//.test(h)) {
+        next = 'workshop:browse'
+      }
+      if (!next) return
+      // 仅当 hash 归属分组与当前页面一致时对齐，避免残留 hash 串扰其他页签的蓝标
+      if (value && next.startsWith(`${value}:`)) setSubValue(next)
+    }
+    syncSubValueFromHash()
+    window.addEventListener('hashchange', syncSubValueFromHash)
+    return () => window.removeEventListener('hashchange', syncSubValueFromHash)
+  }, [value])
+
   const menuItems = [
     {
       value: 'localmods',

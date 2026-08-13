@@ -59,7 +59,9 @@ pub async fn db_get_my_notifications(
 
         let mut rows: Vec<Vec<Value>> = Vec::new();
         conn.exec_map(
-            "SELECT n.id, 'mod' as entity, n.mod_id as target_id, m.mod_id as display_key, n.type, n.comment_id, n.is_read, n.created_at,
+            // mod_notifications 为 utf8mb4_0900_ai_ci，其余表为 utf8mb4_unicode_ci，
+            // UNION 合并需显式统一 type 列的 collation，否则报 Illegal mix of collations for operation 'UNION'
+            "SELECT n.id, 'mod' as entity, n.mod_id as target_id, m.mod_id as display_key, n.type COLLATE utf8mb4_unicode_ci, n.comment_id, n.is_read, n.created_at,
                     c.content as comment_content, u.username as comment_author, u.avatar as comment_author_avatar, c.author_id
              FROM mod_notifications n
              JOIN mods m ON n.mod_id = m.id
