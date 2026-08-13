@@ -4,9 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 常用命令
 
-- 安装依赖：`pnpm install`
 - 仅运行 Vite 前端：`pnpm dev`
-- 构建 Vite 前端：`pnpm build`
 - 以开发模式运行桌面应用：`pnpm tauri dev`
 - 构建桌面应用安装包：`pnpm tauri build`
 
@@ -160,5 +158,4 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## 注意事项
 
 - 本项目使用 `pnpm`；依赖变更时保持 `pnpm-lock.yaml` 同步。
-- ESLint 使用 `eslint.config.js` 中的 flat config，并忽略 `dist` 和 `src-tauri/target`。
 - `src-tauri/Cargo.toml` 依赖: `tauri-plugin-sql` (SQLite)、`mysql` (远程数据库)、`reqwest` (HTTP)、`sha2` (密码哈希)、`tokio` (异步运行时)、`dotenvy` (环境变量加载)。
