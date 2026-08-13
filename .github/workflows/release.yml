@@ -37,7 +37,8 @@ jobs:
         shell: bash
         run: |
           TAG="${{ steps.get_version.outputs.tag_name }}"
-          if ! git rev-parse "$TAG" >/dev/null 2>&1; then
+          # 直接检查远端标签，避免浅克隆下本地 git rev-parse 查不到已存在的 tag
+          if ! git ls-remote --exit-code origin "refs/tags/$TAG" >/dev/null 2>&1; then
             git config user.name "github-actions"
             git config user.email "github-actions@github.com"
             git tag "$TAG"
