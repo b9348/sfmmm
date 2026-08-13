@@ -7,7 +7,6 @@ import {
 import {
   Send24Regular, Delete24Regular, Edit24Regular,
 } from '@fluentui/react-icons'
-import { addComment, getComments, getCommentReplies, deleteComment, editComment } from '../../services/workshopApi'
 import { resolvePendingImagesInMarkdown, stripPendingUrls, deleteImageFromImgbed, extractImgbedUrls } from '../../services/imageApi'
 import { useAuth } from '../../contexts/useAuth'
 import { MarkdownContent, MarkdownEditor } from '../../components/common/RichTextEditor'
@@ -24,10 +23,11 @@ function isOwnItem(item, user) {
   return item?.author_name === user.username
 }
 
-// 解析评论内容中的 pending 图片并上传
-async function resolveCommentImages(content, modId, commentId) {
+// 解析评论内容中的 pending 图片并上传；
+// folderPrefix 区分不同实体（mod 用 'sfm'，讨论区用 'sfmmm/discourse'）
+async function resolveCommentImages(content, folderPrefix, targetId, commentId) {
   const result = await resolvePendingImagesInMarkdown(content, {
-    getFolder: () => `sfm/${modId}/comments/${commentId}`,
+    getFolder: () => `${folderPrefix}/${targetId}/comments/${commentId}`,
   })
   return result.content
 }
@@ -69,7 +69,18 @@ const useStyles = makeStyles({
   },
 })
 
-export default function CommentSection({ modId, scrollToCommentId }) {
+/**
+ * 通用评论组件（mod 评论 / 讨论区评论 两用）。
+ * @param {Object} api 评论 API 注入（统一签名，由调用方适配）：
+ *   api.list({ targetId, page, page_size })   → { comments, total, totalIncludingReplies, page, page_size }
+ *   api.add({ targetId, author_id, content, parent_id }) → { data: { comment_id } }
+ *   api.replies({ comment_id, page, page_size }) → { replies, total }
+ *   api.edit({ comment_id, author_id, content })
+ *   api.del({ comment_id, author_id })
+ * @param {number|string} targetId 评论挂载的实体 ID（mod_id / discussion_id）
+ * @param {string} [folderPrefix='sfm'] 图床目录前缀（mod='sfm'，讨论区='sfmmm/discourse'）
+ */
+export default function CommentSection({ api, targetId, folderPrefix = 'sfm', scrollToCommentId }) {
   const { t } = useTranslation()
   const styles = useStyles()
   const { user, isLoggedIn } = useAuth()
@@ -105,7 +116,7 @@ export default function CommentSection({ modId, scrollToCommentId }) {
   const fetchComments = useCallback(async (p) => {
     setLoading(true)
     try {
-      const data = await getComments({ mod_id: modId, page: p, page_size: 10 })
+      const data = await api.list({ targetId, page: p, page_size: 10 })
       setComments(data.comments)
       setTotal(data.total)
       // 优先使用后端返回的全量计数（含楼中楼）；兜底用 一楼 + 各楼楼中楼之和
@@ -119,7 +130,7 @@ export default function CommentSection({ modId, scrollToCommentId }) {
     } finally {
       setLoading(false)
     }
-  }, [modId])
+  }, [targetId, api])
 
   useEffect(() => {
     if (!initialFetch.current) {
@@ -179,15 +190,15 @@ export default function CommentSection({ modId, scrollToCommentId }) {
     try {
       // 1. 先创建评论，pending 图片先用占位文本替代，避免上传失败时残留坏链接
       const safeContent = stripPendingUrls(content)
-      const res = await addComment({ mod_id: modId, author_id: user.user_id, content: safeContent })
+      const res = await api.add({ targetId, author_id: user.user_id, content: safeContent })
       const commentId = res.data.comment_id
 
       // 2. 上传图片并替换占位符
-      const resolvedContent = await resolveCommentImages(content, modId, commentId)
+      const resolvedContent = await resolveCommentImages(content, folderPrefix, targetId, commentId)
 
       // 3. 更新评论内容为真实 URL
       if (resolvedContent !== safeContent) {
-        await editComment({ comment_id: commentId, author_id: user.user_id, content: resolvedContent })
+        await api.edit({ comment_id: commentId, author_id: user.user_id, content: resolvedContent })
       }
 
       // 本地追加，不刷新全页
@@ -243,15 +254,15 @@ export default function CommentSection({ modId, scrollToCommentId }) {
     try {
       // 1. 先创建回复，pending 图片先用占位文本替代
       const safeContent = stripPendingUrls(prefixedContent)
-      const res = await addComment({ mod_id: modId, author_id: user.user_id, content: safeContent, parent_id: topId })
+      const res = await api.add({ targetId, author_id: user.user_id, content: safeContent, parent_id: topId })
       const replyId = res.data.comment_id
 
       // 2. 上传图片并替换占位符
-      const resolvedContent = await resolveCommentImages(prefixedContent, modId, replyId)
+      const resolvedContent = await resolveCommentImages(prefixedContent, folderPrefix, targetId, replyId)
 
       // 3. 更新回复内容为真实 URL
       if (resolvedContent !== safeContent) {
-        await editComment({ comment_id: replyId, author_id: user.user_id, content: resolvedContent })
+        await api.edit({ comment_id: replyId, author_id: user.user_id, content: resolvedContent })
       }
 
       const newReply = {
@@ -318,7 +329,7 @@ export default function CommentSection({ modId, scrollToCommentId }) {
         }
       }
 
-      await deleteComment({ comment_id: commentId, author_id: user.user_id })
+      await api.del({ comment_id: commentId, author_id: user.user_id })
 
       // 异步清理图床图片（不阻塞 UI，失败仅 warn）
       // 删除一楼时要同时清理其所有楼中楼的图片
@@ -415,8 +426,8 @@ export default function CommentSection({ modId, scrollToCommentId }) {
       }
 
       // 编辑时已知 comment_id，先上传新增的图片再保存
-      const resolvedContent = await resolveCommentImages(content, modId, commentId)
-      await editComment({ comment_id: commentId, author_id: user.user_id, content: resolvedContent })
+      const resolvedContent = await resolveCommentImages(content, folderPrefix, targetId, commentId)
+      await api.edit({ comment_id: commentId, author_id: user.user_id, content: resolvedContent })
 
       // 清理被删除的图片（编辑成功后异步处理，不阻塞 UI）
       const oldUrls = extractImgbedUrls(oldContent)
@@ -465,7 +476,7 @@ export default function CommentSection({ modId, scrollToCommentId }) {
     const nextPage = rs.page + 1
     setReplyState(prev => ({ ...prev, [commentId]: { ...rs, expanded: true, loading: true } }))
     try {
-      const data = await getCommentReplies({ comment_id: commentId, page: nextPage, page_size: 10 })
+      const data = await api.replies({ comment_id: commentId, page: nextPage, page_size: 10 })
       setReplyState(prev => ({
         ...prev,
         [commentId]: {

@@ -14,10 +14,17 @@ pub async fn db_get_unread_count(
             (user_id,),
         ).map_err(|e| e.to_string())?.unwrap_or(0i64);
 
-        let unread_notifs: i64 = conn.exec_first(
+        let unread_mod: i64 = conn.exec_first(
             "SELECT COUNT(*) FROM mod_notifications WHERE user_id = ? AND is_read = 0",
             (user_id,),
         ).map_err(|e| e.to_string())?.unwrap_or(0i64);
+
+        let unread_disc: i64 = conn.exec_first(
+            "SELECT COUNT(*) FROM discussion_notifications WHERE user_id = ? AND is_read = 0",
+            (user_id,),
+        ).map_err(|e| e.to_string())?.unwrap_or(0i64);
+
+        let unread_notifs = unread_mod + unread_disc;
 
         Ok(ApiResponse::ok_val(serde_json::json!({
             "applications": pending_apps,
@@ -39,39 +46,54 @@ pub async fn db_get_my_notifications(
         let page_size = page_size.unwrap_or(20).min(100);
         let offset = (page - 1) * page_size;
 
-        let total: i64 = conn.exec_first(
+        // 合并两类通知：mod_notifications（mod 评论/回复）+ discussion_notifications（讨论区评论/回复）
+        let total_mod: i64 = conn.exec_first(
             "SELECT COUNT(*) FROM mod_notifications WHERE user_id = ?",
             (user_id,),
         ).map_err(|e| e.to_string())?.unwrap_or(0i64);
+        let total_disc: i64 = conn.exec_first(
+            "SELECT COUNT(*) FROM discussion_notifications WHERE user_id = ?",
+            (user_id,),
+        ).map_err(|e| e.to_string())?.unwrap_or(0i64);
+        let total = total_mod + total_disc;
 
         let mut rows: Vec<Vec<Value>> = Vec::new();
         conn.exec_map(
-            "SELECT n.id, n.mod_id, m.mod_id as mod_key, n.type, n.comment_id, n.is_read, n.created_at,
+            "SELECT n.id, 'mod' as entity, n.mod_id as target_id, m.mod_id as display_key, n.type, n.comment_id, n.is_read, n.created_at,
                     c.content as comment_content, u.username as comment_author, u.avatar as comment_author_avatar, c.author_id
              FROM mod_notifications n
              JOIN mods m ON n.mod_id = m.id
              LEFT JOIN mod_comments c ON n.comment_id = c.id
              LEFT JOIN users u ON c.author_id = u.id
              WHERE n.user_id = ?
-             ORDER BY n.created_at DESC
+             UNION ALL
+             SELECT n.id, 'discussion' as entity, n.discussion_id as target_id, d.title as display_key, n.type, n.comment_id, n.is_read, n.created_at,
+                    c.content as comment_content, u.username as comment_author, u.avatar as comment_author_avatar, c.author_id
+             FROM discussion_notifications n
+             JOIN discussions d ON n.discussion_id = d.id
+             LEFT JOIN discussion_comments c ON n.comment_id = c.id
+             LEFT JOIN users u ON c.author_id = u.id
+             WHERE n.user_id = ?
+             ORDER BY created_at DESC
              LIMIT ? OFFSET ?",
-            (user_id, page_size as i64, offset as i64),
+            (user_id, user_id, page_size as i64, offset as i64),
             |row: Row| { rows.push(row.unwrap()); }
         ).map_err(|e| e.to_string())?;
 
         let items: Vec<serde_json::Value> = rows.into_iter().map(|r| {
             serde_json::json!({
                 "id": val_to_i64(&r[0]),
-                "mod_id": val_to_i64(&r[1]),
-                "mod_key": decrypt_str(&val_to_string(r[2].clone())),
-                "type": val_to_string(r[3].clone()),
-                "comment_id": val_to_i64(&r[4]),
-                "is_read": val_to_i64(&r[5]) != 0,
-                "created_at": val_to_string(r[6].clone()),
-                "content": decrypt_str(&val_to_string(r[7].clone())),
-                "author_name": decrypt_str(&val_to_string(r[8].clone())),
-                "author_avatar": val_to_string(r[9].clone()),
-                "author_id": val_to_i64(&r[10]),
+                "entity": val_to_string(r[1].clone()),
+                "target_id": val_to_i64(&r[2]),
+                "display_key": decrypt_str(&val_to_string(r[3].clone())),
+                "type": val_to_string(r[4].clone()),
+                "comment_id": val_to_i64(&r[5]),
+                "is_read": val_to_i64(&r[6]) != 0,
+                "created_at": val_to_string(r[7].clone()),
+                "content": decrypt_str(&val_to_string(r[8].clone())),
+                "author_name": decrypt_str(&val_to_string(r[9].clone())),
+                "author_avatar": val_to_string(r[10].clone()),
+                "author_id": val_to_i64(&r[11]),
             })
         }).collect();
 
@@ -84,6 +106,7 @@ pub async fn db_mark_read(
     state: tauri::State<'_, DbState>,
     user_id: u64,
     target_type: Option<String>,
+    entity: Option<String>,
     ids: Option<Vec<u64>>,
 ) -> Result<ApiResponse, String> {
     with_conn(state.inner(), move |conn: &mut PooledConn| {
@@ -106,15 +129,29 @@ pub async fn db_mark_read(
                 }
                 "notification" => {
                     if let Some(id_list) = &ids {
+                        // mod_notifications 与 discussion_notifications 各自 AUTO_INCREMENT，
+                        // 相同数字 id 可能分属两张表：按 entity 只更新对应表，避免跨表误标已读
+                        let is_discussion = entity.as_deref() == Some("discussion");
                         for id in id_list {
-                            conn.exec_drop(
-                                "UPDATE mod_notifications SET is_read = 1 WHERE id = ? AND user_id = ?",
-                                (id, user_id),
-                            ).map_err(|e| e.to_string())?;
+                            if is_discussion {
+                                conn.exec_drop(
+                                    "UPDATE discussion_notifications SET is_read = 1 WHERE id = ? AND user_id = ?",
+                                    (id, user_id),
+                                ).map_err(|e| e.to_string())?;
+                            } else {
+                                conn.exec_drop(
+                                    "UPDATE mod_notifications SET is_read = 1 WHERE id = ? AND user_id = ?",
+                                    (id, user_id),
+                                ).map_err(|e| e.to_string())?;
+                            }
                         }
                     } else {
                         conn.exec_drop(
                             "UPDATE mod_notifications SET is_read = 1 WHERE user_id = ? AND is_read = 0",
+                            (user_id,),
+                        ).map_err(|e| e.to_string())?;
+                        conn.exec_drop(
+                            "UPDATE discussion_notifications SET is_read = 1 WHERE user_id = ? AND is_read = 0",
                             (user_id,),
                         ).map_err(|e| e.to_string())?;
                     }
@@ -128,6 +165,10 @@ pub async fn db_mark_read(
             ).map_err(|e| e.to_string())?;
             conn.exec_drop(
                 "UPDATE mod_notifications SET is_read = 1 WHERE user_id = ? AND is_read = 0",
+                (user_id,),
+            ).map_err(|e| e.to_string())?;
+            conn.exec_drop(
+                "UPDATE discussion_notifications SET is_read = 1 WHERE user_id = ? AND is_read = 0",
                 (user_id,),
             ).map_err(|e| e.to_string())?;
         }

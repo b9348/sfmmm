@@ -431,8 +431,8 @@ export async function getMyNotifications({ user_id, page = 1, page_size = 20 } =
   return { items: res.mods || [], total: res.total || 0, page: res.page || 1, page_size: res.page_size || page_size }
 }
 
-export async function markRead({ user_id, target_type, ids }) {
-  return await dbCall('db_mark_read', { user_id, target_type: target_type || null, ids: ids || null })
+export async function markRead({ user_id, target_type, entity, ids }) {
+  return await dbCall('db_mark_read', { user_id, target_type: target_type || null, entity: entity || null, ids: ids || null })
 }
 
 // ── 浏览器端 SHA-256（使用 SubtleCrypto） ──
@@ -493,4 +493,166 @@ async function hashZipEntries(zip, map, depth) {
 async function sha256Bytes(bytes) {
   const buf = await crypto.subtle.digest('SHA-256', bytes)
   return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('')
+}
+
+// ── 讨论区（独立于 mod 体系；帖子/投票/Boost/评论/我的历史） ──
+
+// 帖子列表：sort_by = created_at | likes | boosts；d_type = regular | poll | 空（全部）
+export async function listDiscussions({ page = 1, limit = 20, search, sort_by = 'created_at', d_type = '', user_id } = {}) {
+  const res = await dbCall('db_list_discussions', {
+    page,
+    limit,
+    search: search || null,
+    sort_by: sort_by || null,
+    d_type: d_type || null,
+    user_id: user_id || null,
+  })
+  return {
+    success: true,
+    discussions: res.data?.discussions || [],
+    total: res.data?.total || 0,
+    page: res.data?.page || 1,
+    page_size: res.data?.page_size || limit,
+  }
+}
+
+export async function getDiscussionDetail(id, user_id) {
+  const res = await dbCall('db_get_discussion_detail', { id: Number(id) || 0, user_id: user_id || null })
+  return { success: true, data: res.data?.discussion || null }
+}
+
+// poll: { poll_type: 'single'|'multiple'|'number', min?, max?, step?, results_visibility?, options: [label,...] }
+export async function createDiscussion({ author_id, title, content, content_format = 'markdown', d_type = 'regular', poll = null }) {
+  const res = await dbCall('db_create_discussion', {
+    author_id,
+    title,
+    content,
+    content_format: content_format || null,
+    d_type: d_type || null,
+    poll: poll || null,
+  })
+  return { success: true, data: res.data }
+}
+
+export async function updateDiscussion({ author_id, discussion_id, title, content, content_format = 'markdown' }) {
+  const res = await dbCall('db_update_discussion', {
+    author_id,
+    discussion_id: Number(discussion_id),
+    title: title || null,
+    content: content || null,
+    content_format: content_format || null,
+  })
+  return { success: true, data: res.data }
+}
+
+export async function deleteDiscussion({ author_id, discussion_id }) {
+  await dbCall('db_delete_discussion', { author_id, discussion_id: Number(discussion_id) })
+  return { success: true }
+}
+
+// ── 讨论区互动：点赞 / Boost ──
+
+export async function likeDiscussion({ discussion_id, user_id }) {
+  const res = await dbCall('db_like_discussion', { discussion_id: Number(discussion_id), user_id })
+  return { success: true, data: res.data }
+}
+
+export async function unlikeDiscussion({ discussion_id, user_id }) {
+  const res = await dbCall('db_unlike_discussion', { discussion_id: Number(discussion_id), user_id })
+  return { success: true, data: res.data }
+}
+
+// boost 内容 ≤16 字符；每人对每帖 ≤1 条
+export async function boostDiscussion({ discussion_id, user_id, content }) {
+  const res = await dbCall('db_boost_discussion', { discussion_id: Number(discussion_id), user_id, content })
+  return { success: true, data: res.data }
+}
+
+export async function unboostDiscussion({ discussion_id, user_id }) {
+  const res = await dbCall('db_unboost_discussion', { discussion_id: Number(discussion_id), user_id })
+  return { success: true, data: res.data }
+}
+
+// ── 讨论区投票 ──
+
+// single: option_ids=[n]；multiple: option_ids=[n1,n2]；number: value=n
+export async function votePoll({ poll_id, discussion_id, user_id, option_ids = [], value = null }) {
+  const res = await dbCall('db_vote_poll', {
+    poll_id: Number(poll_id),
+    discussion_id: Number(discussion_id),
+    user_id,
+    option_ids: option_ids.length > 0 ? option_ids : null,
+    value: value ?? null,
+  })
+  return { success: true, data: res.data }
+}
+
+export async function getPollResults({ poll_id, user_id }) {
+  const res = await dbCall('db_get_poll_results', { poll_id: Number(poll_id), user_id: user_id || null })
+  return { success: true, data: res.data }
+}
+
+// ── 讨论区评论（镜像 mod 评论结构，供 CommentSection 泛化复用） ──
+
+export async function addDiscussionComment({ discussion_id, author_id, content, parent_id }) {
+  const res = await dbCall('db_add_discussion_comment', { discussion_id, author_id, content, parent_id: parent_id || null })
+  return { success: true, data: res.data }
+}
+
+export async function getDiscussionComments({ discussion_id, page = 1, page_size = 10 }) {
+  const res = await dbCall('db_get_discussion_comments', { discussion_id, page, page_size })
+  return {
+    success: true,
+    comments: res.data?.comments || [],
+    total: res.data?.total || 0,
+    totalIncludingReplies: res.data?.total_including_replies || 0,
+    page: res.data?.page || 1,
+    page_size: res.data?.page_size || page_size,
+  }
+}
+
+export async function getDiscussionReplies({ comment_id, page = 1, page_size = 10 }) {
+  const res = await dbCall('db_get_discussion_replies', { comment_id, page, page_size })
+  return {
+    success: true,
+    replies: res.data?.replies || [],
+    total: res.data?.total || 0,
+    page: res.data?.page || 1,
+    page_size: res.data?.page_size || page_size,
+  }
+}
+
+export async function deleteDiscussionComment({ comment_id, author_id }) {
+  await dbCall('db_delete_discussion_comment', { comment_id, author_id })
+  return { success: true }
+}
+
+export async function editDiscussionComment({ comment_id, author_id, content }) {
+  const res = await dbCall('db_edit_discussion_comment', { comment_id, author_id, content })
+  return { success: true, data: res.data }
+}
+
+// ── 讨论区「我的」历史 ──
+
+export async function listMyDiscussions({ author_id, page = 1, page_size = 20, user_id } = {}) {
+  const res = await dbCall('db_list_my_discussions', { author_id, page, page_size, user_id: user_id || null })
+  return {
+    success: true,
+    discussions: res.data?.discussions || [],
+    total: res.data?.total || 0,
+    page: res.data?.page || 1,
+    page_size: res.data?.page_size || page_size,
+  }
+}
+
+// 我的回复（含楼中楼）：comment_id / discussion_id / discussion_title / is_reply
+export async function listMyDiscussionComments({ author_id, page = 1, page_size = 20 } = {}) {
+  const res = await dbCall('db_list_my_discussion_comments', { author_id, page, page_size })
+  return {
+    success: true,
+    comments: res.data?.comments || [],
+    total: res.data?.total || 0,
+    page: res.data?.page || 1,
+    page_size: res.data?.page_size || page_size,
+  }
 }

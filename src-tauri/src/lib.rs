@@ -1117,6 +1117,15 @@ pub fn run() {
             db::db_get_my_notifications,
             db::db_mark_read,
             db::db_get_user_public_profile,
+            // 讨论区
+            db::db_list_discussions, db::db_get_discussion_detail,
+            db::db_create_discussion, db::db_update_discussion, db::db_delete_discussion,
+            db::db_like_discussion, db::db_unlike_discussion,
+            db::db_boost_discussion, db::db_unboost_discussion,
+            db::db_vote_poll, db::db_get_poll_results,
+            db::db_add_discussion_comment, db::db_get_discussion_comments,
+            db::db_get_discussion_replies, db::db_edit_discussion_comment, db::db_delete_discussion_comment,
+            db::db_list_my_discussions, db::db_list_my_discussion_comments,
         ])
         .plugin(
             Builder::default()

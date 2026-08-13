@@ -5,6 +5,7 @@ import {
   Input, Select, makeStyles, tokens,
   Badge, Dialog, DialogTrigger, DialogSurface,
   DialogBody, DialogTitle, DialogContent,
+  TabList, Tab,
 } from '@fluentui/react-components'
 import {
   Add24Regular, Delete24Regular, Edit24Regular,
@@ -12,6 +13,7 @@ import {
   Save24Regular,
   Heart24Regular, Heart24Filled,
   ArrowLeft24Regular,
+  Comment24Regular,
 } from '@fluentui/react-icons'
 import { listMyMods, createMod, updateMod, uploadModFile, deleteModFile, getModForEdit, getModDetail, deleteMod, checkModKey, setModPermissions, getDeviceId } from '../../services/workshopApi'
 import { resolveTranslationImages, extractImgbedUrls, deleteImageFromImgbed } from '../../services/imageApi'
@@ -22,6 +24,7 @@ import { selectModFiles, selectModFolders } from '../../hooks/useFileSelection'
 import JSZip from 'jszip'
 import { runReplaceFlow } from './runReplaceFlow'
 import ModDetailPage from './ModDetailPage'
+import { MyDiscussions } from './MyDiscussions'
 import { ConfirmDialog, BackButton, ProgressModal, AsyncView, LoginForm, EmptyState } from '../../components'
 import PermissionSettings from './PermissionSettings'
 import { LANGUAGES, LANG_LABELS } from '../../i18n/languages'
@@ -996,6 +999,8 @@ export function MyMods() {
   const { t } = useTranslation()
   const { user, isLoggedIn } = useAuth()
   const deviceIdRef = useRef(getDeviceId())
+  // 内部 tab：mods（我的模组）/ discussions（我的讨论：发帖+回复 tag 区分）
+  const [subTab, setSubTab] = useState('mods')
   const [mods, setMods] = useState([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -1094,6 +1099,21 @@ export function MyMods() {
 
   return (
     <div className={styles.root}>
+      <TabList selectedValue={subTab} onTabSelect={(_, d) => setSubTab(d.value)}>
+        <Tab value="mods" icon={<Cloud24Regular />}>{t('workshop.myMods')}</Tab>
+        <Tab value="discussions" icon={<Comment24Regular />}>{t('workshop.myDiscussions')}</Tab>
+      </TabList>
+      {subTab === 'discussions' ? (
+        <MyDiscussions
+          userId={user.user_id}
+          isLoggedIn={isLoggedIn}
+          onOpenDiscussion={(id, commentId) => {
+            // 设置 #/discuss/<id>?comment=<cid>，Workshop hashchange 自动切到讨论区并打开详情
+            window.location.hash = commentId ? `#/discuss/${id}?comment=${commentId}` : `#/discuss/${id}`
+          }}
+        />
+      ) : (
+      <>
       <div className={styles.toolbarRow}>
         <Text size="small" className={styles.meta} style={{ flex: 1 }}>
           {t('workshop.modCount', { username: user.username, count: mods.length })}
@@ -1188,6 +1208,8 @@ export function MyMods() {
         percent={deletePercent}
         stepText={deleteStep}
       />
+      </>
+      )}
     </div>
   )
 }

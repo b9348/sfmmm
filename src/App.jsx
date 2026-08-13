@@ -303,9 +303,18 @@ function App() {
               {selectedTab === 'saves' && <SaveManagement config={state.config} />}
               {selectedTab === 'import-export' && <ImportExport config={state.config} />}
               {selectedTab === 'workshop' && <Workshop initialModId={navTarget?.modId} initialCommentId={navTarget?.commentId} onConsumeNavTarget={() => setNavTarget(null)} />}
-              {selectedTab === 'notify' && <NotifyPage onNavigate={(modId, commentId) => {
-                setNavTarget({ modId, commentId })
-                handleTabChange('workshop')
+              {selectedTab === 'notify' && <NotifyPage onNavigate={(entity, targetId, commentId) => {
+                if (entity === 'discussion') {
+                  // 讨论区通知：设置 #/discuss/<id>?comment=<cid>，Workshop hashchange 自动切到讨论区并打开对应楼层
+                  window.location.hash = commentId ? `#/discuss/${targetId}?comment=${commentId}` : `#/discuss/${targetId}`
+                  handleTabChange('workshop')
+                } else {
+                  // mod 通知：同步写入 #/mod/<id> hash（BrowseMods 从 hash 恢复详情），
+                  // 避免残留上次讨论区的 #/discuss/ hash 导致刷新/挂载时 tab 恢复错乱
+                  window.location.hash = commentId ? `#/mod/${targetId}?comment=${commentId}` : `#/mod/${targetId}`
+                  setNavTarget({ modId: targetId, commentId })
+                  handleTabChange('workshop')
+                }
               }} />}
               {selectedTab === 'settings' && <GameSettings config={state.config} onConfigChange={handleConfigChange} appUpdateInfo={updateInfo} />}
             </main>

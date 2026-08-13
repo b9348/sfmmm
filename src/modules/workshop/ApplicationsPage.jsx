@@ -324,28 +324,36 @@ export default function ApplicationsPage({ onNavigate, panel, visible = true }) 
             )}
 
             {!loadingNotifs && notifs.map((n) => (
-              <Card key={n.id} className={styles.card} onClick={async () => {
+              <Card key={`${n.entity}-${n.id}`} className={styles.card} onClick={async () => {
                 if (!n.is_read) {
                   try {
-                    await markRead({ user_id: user.user_id, target_type: 'notification', ids: [n.id] })
-                    setNotifs(prev => prev.map(item => item.id === n.id ? { ...item, is_read: true } : item))
+                    // 携带 entity：两张通知表各自 AUTO_INCREMENT，相同数字 id 可能分属不同表，
+                    // 后端按 entity 只更新对应表，避免跨表误标已读
+                    await markRead({ user_id: user.user_id, target_type: 'notification', entity: n.entity || 'mod', ids: [n.id] })
+                    setNotifs(prev => prev.map(item => `${item.entity || 'mod'}-${item.id}` === `${n.entity || 'mod'}-${n.id}` ? { ...item, is_read: true } : item))
                     refreshUnread(user.user_id)
                   } catch (e) { console.error('markRead failed', e) }
                 }
-                onNavigate?.(n.mod_id, n.comment_id)
+                // mod 通知走原有详情跳转；讨论区通知跳转到讨论详情对应楼层
+                onNavigate?.(n.entity || 'mod', n.target_id, n.comment_id)
               }}>
                 <div className={styles.cardContent}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
                     <Badge appearance="outline" size="small">
                       {n.type === 'new_like' ? t('workshop.notifLike') : n.type === 'new_comment' ? t('workshop.notifComment') : t('workshop.notifReply')}
                     </Badge>
+                    {n.entity === 'discussion' && (
+                      <Badge appearance="outline" size="small" color="brand">
+                        {t('nav.discuss')}
+                      </Badge>
+                    )}
                     {!n.is_read && (
                       <Badge appearance="filled" size="small" color="brand">
                         未读
                       </Badge>
                     )}
                   </div>
-                  <Text weight="semibold" size="small">{n.mod_key || n.mod_name}</Text>
+                  <Text weight="semibold" size="small">{n.display_key || n.mod_key || n.mod_name}</Text>
                   {n.type === 'new_like' ? (
                     <Text size="small" className={styles.metaText}>
                       {t('workshop.notifLikeHint')}

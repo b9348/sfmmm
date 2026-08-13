@@ -23,6 +23,7 @@ mod permission;
 mod notification;
 mod update;
 mod image;
+mod discussion;
 
 pub use user::*;
 pub use mod_ops::*;
@@ -35,6 +36,7 @@ pub use notification::*;
 pub use update::*;
 pub use image::*;
 pub use crypto::*;
+pub use discussion::*;
 
 const DB_POOL_MIN: usize = 0;
 const DB_POOL_MAX: usize = 1;

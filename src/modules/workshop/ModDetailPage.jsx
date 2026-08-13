@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   Text, Button, Badge, ProgressBar,
@@ -19,7 +19,7 @@ import { listen } from '@tauri-apps/api/event'
 import { RichTextContent, MarkdownContent } from '../../components/common/RichTextEditor'
 import { invoke } from '@tauri-apps/api/core'
 import { useAuth } from '../../contexts/useAuth'
-import { submitApplication, likeMod, unlikeMod, getDeviceId, rateMod, unrateMod } from '../../services/workshopApi'
+import { submitApplication, likeMod, unlikeMod, getDeviceId, rateMod, unrateMod, addComment, getComments, getCommentReplies, deleteComment, editComment } from '../../services/workshopApi'
 import { upsertLikedModToCache, removeLikedModFromCache } from '../../services/likedModsCache'
 import { upsertRatedModToCache } from '../../services/ratingCache'
 import CommentSection from './CommentSection'
@@ -110,6 +110,15 @@ export default function ModDetailPage({ mod, onBack, onEdit, scrollToCommentId }
   const perms = mod.user_permissions || {}
   const canEdit = perms.is_author || perms.can_edit_mod_info || perms.can_edit_all_langs || (perms.editable_langs && perms.editable_langs.length > 0)
   const canApply = perms.can_apply_mod_info || perms.can_apply_lang
+  // 评论 API 适配器：mod 评论 → CommentSection 统一签名；useMemo 保持引用稳定，
+  // 避免 CommentSection 的 fetchComments useCallback 在每次父级渲染时重建
+  const modCommentApi = useMemo(() => ({
+    list: (args) => getComments({ mod_id: args.targetId, page: args.page, page_size: args.page_size }),
+    add: (args) => addComment({ mod_id: args.targetId, author_id: args.author_id, content: args.content, parent_id: args.parent_id }),
+    replies: (args) => getCommentReplies({ comment_id: args.comment_id, page: args.page, page_size: args.page_size }),
+    edit: (args) => editComment({ comment_id: args.comment_id, author_id: args.author_id, content: args.content }),
+    del: (args) => deleteComment({ comment_id: args.comment_id, author_id: args.author_id }),
+  }), [])
   const [installingLang, setInstallingLang] = useState('')
   const [installError, setInstallError] = useState('')
   const [installInfo, setInstallInfo] = useState('')
@@ -758,7 +767,12 @@ export default function ModDetailPage({ mod, onBack, onEdit, scrollToCommentId }
             <Text size="small" style={{ color: tokens.colorPaletteRedForeground1 }}>{uninstallError}</Text>
           </div>
         )}
-        <CommentSection modId={mod.id} scrollToCommentId={scrollToCommentId} />
+        <CommentSection
+          api={modCommentApi}
+          targetId={mod.id}
+          folderPrefix="sfm"
+          scrollToCommentId={scrollToCommentId}
+        />
       </div>
 
       <Dialog open={applyOpen} onOpenChange={(_, { open }) => !open && setApplyOpen(false)}>

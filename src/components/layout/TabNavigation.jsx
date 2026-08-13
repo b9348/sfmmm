@@ -81,10 +81,11 @@ export function TabNavigation({ value, onChange, isCollapsed, onToggleCollapse, 
       value: 'workshop',
       label: t('nav.workshop'),
       icon: <Cloud24Regular />,
-      // 子菜单对应创意工坊页面顶部 3 个 tab（browse/my/records），
+      // 子菜单对应创意工坊页面顶部 tab（browse/discuss/my/records），
       // 图标与 Workshop 页面 TabList 保持一致
       children: [
         { value: 'workshop:browse', label: t('workshop.cloud'), icon: <Cloud24Regular /> },
+        { value: 'workshop:discuss', label: t('nav.discuss'), icon: <Comment24Regular /> },
         { value: 'workshop:my', label: t('workshop.mine'), icon: <Person24Regular /> },
         { value: 'workshop:records', label: t('nav.subscriptions'), icon: <ArrowSync24Regular /> },
       ],

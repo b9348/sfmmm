@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { TabList, Tab, makeStyles } from '@fluentui/react-components'
-import { Cloud24Regular, Person24Regular, ArrowSync24Regular } from '@fluentui/react-icons'
+import { Cloud24Regular, Person24Regular, ArrowSync24Regular, Comment24Regular } from '@fluentui/react-icons'
 import { BrowseMods } from './BrowseMods'
 import { MyMods } from './MyMods'
+import { Discussion } from './Discussion'
 import SubscriptionRecords from '../subscribe/SubscriptionRecords'
 
 const useStyles = makeStyles({
@@ -35,10 +36,12 @@ export function Workshop({ initialModId, initialCommentId, onConsumeNavTarget })
   const { t } = useTranslation()
   const styles = useStyles()
 
-  // 从 URL hash 恢复 tab（Ctrl+R 刷新后保持）
+  // 从 URL hash 恢复 tab（Ctrl+R 刷新后保持）；
+  // 讨论详情跳转使用 #/discuss/<id>?comment=<cid> 前缀，也归入 discuss tab
   const getInitialTab = () => {
+    if (/^#\/discuss\//.test(window.location.hash)) return 'discuss'
     const m = window.location.hash.match(/^#\/workshop\/(\w+)/)
-    return m && ['browse', 'my', 'records'].includes(m[1]) ? m[1] : 'browse'
+    return m && ['browse', 'my', 'records', 'discuss'].includes(m[1]) ? m[1] : 'browse'
   }
   const [subTab, setSubTab] = useState(getInitialTab)
 
@@ -83,6 +86,7 @@ export function Workshop({ initialModId, initialCommentId, onConsumeNavTarget })
         onTabSelect={handleTabSelect}
       >
         <Tab value="browse" icon={<Cloud24Regular />}>{t('workshop.cloud')}</Tab>
+        <Tab value="discuss" icon={<Comment24Regular />}>{t('nav.discuss')}</Tab>
         <Tab value="my" icon={<Person24Regular />}>{t('workshop.mine')}</Tab>
         <Tab value="records" icon={<ArrowSync24Regular />}>{t('nav.subscriptions')}</Tab>
       </TabList>
@@ -90,6 +94,9 @@ export function Workshop({ initialModId, initialCommentId, onConsumeNavTarget })
       <div className={styles.content}>
         <div className={`${styles.tabContent}${subTab !== 'browse' ? ` ${styles.tabHidden}` : ''}`}>
           <BrowseMods initialModId={initialModId} initialCommentId={initialCommentId} onConsumeNavTarget={onConsumeNavTarget} />
+        </div>
+        <div className={`${styles.tabContent}${subTab !== 'discuss' ? ` ${styles.tabHidden}` : ''}`}>
+          <Discussion />
         </div>
         <div className={`${styles.tabContent}${subTab !== 'my' ? ` ${styles.tabHidden}` : ''}`}>
           <MyMods />
