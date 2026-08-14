@@ -5,8 +5,10 @@ import {
   BoxMultiple24Regular,
   Folder24Regular,
   DocumentFolder24Regular,
+  Save24Regular,
 } from '@fluentui/react-icons'
 import { MissionFolder } from '../missions'
+import { SaveManagement } from '../saves'
 
 const useStyles = makeStyles({
   root: {
@@ -46,7 +48,7 @@ export function LocalMods({ config, onUninstall, refreshKey }) {
   // 从 URL hash 恢复 tab（Ctrl+R 刷新后保持）
   const getInitialTab = () => {
     const m = window.location.hash.match(/^#\/localmods\/(\w+)/)
-    return m && ['mods', 'v1', 'v2'].includes(m[1]) ? m[1] : 'mods'
+    return m && ['mods', 'v1', 'v2', 'saves'].includes(m[1]) ? m[1] : 'mods'
   }
   // 从 URL hash 恢复待定位 mod_key（#/localmods/<tab>?mod=<key>，订阅记录跳转携带）
   const getFocusModKey = () => {
@@ -91,16 +93,21 @@ export function LocalMods({ config, onUninstall, refreshKey }) {
         <Tab value="mods" icon={<BoxMultiple24Regular />}>{t('nav.mods')}</Tab>
         <Tab value="v1" icon={<Folder24Regular />}>{t('nav.v1')}</Tab>
         <Tab value="v2" icon={<DocumentFolder24Regular />}>{t('nav.v2')}</Tab>
+        <Tab value="saves" icon={<Save24Regular />}>{t('nav.saves')}</Tab>
       </TabList>
 
       <div className={styles.content}>
-        <MissionFolder
-          key={`localmods-${subTab}-${config?.game_path || ''}-${refreshKey || 0}`}
-          config={config}
-          subfolder={SUBFOLDER_BY_TAB[subTab]}
-          onUninstall={onUninstall}
-          focusModKey={focusModKey}
-        />
+        {subTab === 'saves' ? (
+          <SaveManagement />
+        ) : (
+          <MissionFolder
+            key={`localmods-${subTab}-${config?.game_path || ''}-${refreshKey || 0}`}
+            config={config}
+            subfolder={SUBFOLDER_BY_TAB[subTab]}
+            onUninstall={onUninstall}
+            focusModKey={focusModKey}
+          />
+        )}
       </div>
     </div>
   )

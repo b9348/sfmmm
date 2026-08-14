@@ -771,6 +771,7 @@ export default function ModDetailPage({ mod, onBack, onEdit, scrollToCommentId }
           api={modCommentApi}
           targetId={mod.id}
           folderPrefix="sfm"
+          ownerId={mod.author_id}
           scrollToCommentId={scrollToCommentId}
         />
       </div>

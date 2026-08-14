@@ -1,5 +1,5 @@
 import { useState, useEffect, useReducer } from 'react'
-import { FluentProvider, webLightTheme, webDarkTheme, Dialog, DialogSurface, DialogBody, DialogTitle, DialogContent, DialogActions, DialogTrigger, Button, Text } from '@fluentui/react-components'
+import { FluentProvider, webLightTheme, webDarkTheme, Dialog, DialogSurface, DialogBody, DialogTitle, DialogContent, DialogActions, DialogTrigger, Button, Text, Toaster } from '@fluentui/react-components'
 import { makeStyles, tokens } from '@fluentui/react-components'
 import { TabNavigation, WelcomeScreen, TitleBar } from './components'
 import { SaveManagement, ImportExport, GameSettings, Workshop, LocalMods, NotifyPage } from './modules'
@@ -349,6 +349,7 @@ function App() {
         </Dialog>
 
       </AuthProvider>
+      <Toaster position="top-end" />
     </FluentProvider>
   )
 }

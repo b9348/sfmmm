@@ -19,6 +19,7 @@ import {
   PersonAccounts24Regular,
   Folder24Regular,
   DocumentFolder24Regular,
+  Save24Regular,
   Heart24Regular,
   Star24Regular,
   Comment24Regular,
@@ -92,15 +93,15 @@ export function TabNavigation({ value, onChange, isCollapsed, onToggleCollapse, 
       value: 'localmods',
       label: t('nav.localmods'),
       icon: <BoxMultiple24Regular />,
-      // 子菜单收纳本地模组三个 tab（mods/v1/v2），
+      // 子菜单收纳本地模组 tab（mods/v1/v2/saves），
       // 与 LocalMods 页面 hash 路由 #/localmods/<tab> 对齐
       children: [
         { value: 'localmods:mods', label: t('nav.mods'), icon: <BoxMultiple24Regular /> },
         { value: 'localmods:v1', label: t('nav.v1'), icon: <Folder24Regular /> },
         { value: 'localmods:v2', label: t('nav.v2'), icon: <DocumentFolder24Regular /> },
+        { value: 'localmods:saves', label: t('nav.saves'), icon: <Save24Regular /> },
       ],
     },
-    // { value: 'saves', label: '存档', icon: <Save24Regular /> },
     // { value: 'import-export', label: '导入/导出', icon: <ArrowSwap24Regular /> },
     {
       value: 'workshop',

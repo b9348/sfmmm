@@ -257,20 +257,42 @@ pub async fn db_delete_comment(
     author_id: u64,
 ) -> Result<ApiResponse, String> {
     with_conn(state.inner(), move |conn: &mut PooledConn| {
-        let owner: Option<(u64,)> = conn.exec_first(
-            "SELECT author_id FROM mod_comments WHERE id = ?", (comment_id,)
+        // 取评论归属信息：作者 / 父评论（楼中楼指向的一楼）/ 所属模组
+        let comment: Option<(u64, Option<u64>, u64)> = conn.exec_first(
+            "SELECT author_id, parent_id, mod_id FROM mod_comments WHERE id = ?",
+            (comment_id,),
         ).map_err(|e| e.to_string())?;
 
-        match owner {
-            Some((aid,)) if aid == author_id => {
-                conn.exec_drop("DELETE FROM mod_comments WHERE parent_id = ?", (comment_id,))
-                    .map_err(|e| e.to_string())?;
-                conn.exec_drop("DELETE FROM mod_comments WHERE id = ?", (comment_id,))
-                    .map_err(|e| e.to_string())?;
-                Ok(ApiResponse::ok_msg("Comment deleted"))
-            }
-            Some(_) => Ok(ApiResponse::err("You can only delete your own comments")),
-            None => Ok(ApiResponse::err("Comment not found")),
+        let Some((comment_author, parent_id, mod_id)) = comment else {
+            return Ok(ApiResponse::err("Comment not found"));
+        };
+
+        // 权限判定：本人 / 模组楼主（可删自己 mod 下所有评论及楼中楼）/ 楼中楼的层主（可删自己一楼下的回复）
+        let mut allowed = comment_author == author_id;
+        if !allowed {
+            let owner: Option<(u64,)> = conn.exec_first(
+                "SELECT author_id FROM mods WHERE id = ?", (mod_id,)
+            ).map_err(|e| e.to_string())?;
+            allowed = owner.is_some_and(|(oid,)| oid == author_id);
         }
+        if !allowed {
+            if let Some(pid) = parent_id {
+                let floor_owner: Option<(u64,)> = conn.exec_first(
+                    "SELECT author_id FROM mod_comments WHERE id = ?", (pid,)
+                ).map_err(|e| e.to_string())?;
+                allowed = floor_owner.is_some_and(|(fid,)| fid == author_id);
+            }
+        }
+
+        if !allowed {
+            return Ok(ApiResponse::err("You can only delete your own comments"));
+        }
+
+        // 删除评论及其楼中楼
+        conn.exec_drop("DELETE FROM mod_comments WHERE parent_id = ?", (comment_id,))
+            .map_err(|e| e.to_string())?;
+        conn.exec_drop("DELETE FROM mod_comments WHERE id = ?", (comment_id,))
+            .map_err(|e| e.to_string())?;
+        Ok(ApiResponse::ok_msg("Comment deleted"))
     }).await
 }
