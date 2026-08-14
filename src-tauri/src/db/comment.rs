@@ -67,11 +67,19 @@ pub async fn db_get_comments(
     mod_id: u64,
     page: Option<u64>,
     page_size: Option<u64>,
+    sort_order: Option<String>,
+    reply_order: Option<String>,
 ) -> Result<ApiResponse, String> {
     with_conn(state.inner(), move |conn: &mut PooledConn| {
         let page = page.unwrap_or(1).max(1);
         let page_size = page_size.unwrap_or(10).min(100);
         let offset = (page - 1) * page_size;
+        // 一楼排序方向：desc（新→旧，默认）| asc（旧→新）
+        let sort_order = sort_order.filter(|s| s == "asc" || s == "desc").unwrap_or_else(|| "desc".into());
+        // 楼中楼排序方向：asc（旧→新，默认）| desc（新→旧）；与 db_get_replies 保持一致
+        let reply_order = reply_order.filter(|s| s == "asc" || s == "desc").unwrap_or_else(|| "asc".into());
+        let top_order = if sort_order == "asc" { "ASC" } else { "DESC" };
+        let reply_dir = if reply_order == "asc" { "ASC" } else { "DESC" };
 
         let total: i64 = conn.exec_first(
             "SELECT COUNT(*) FROM mod_comments WHERE mod_id = ? AND parent_id IS NULL", (mod_id,)
@@ -82,13 +90,17 @@ pub async fn db_get_comments(
         ).map_err(|e| e.to_string())?.unwrap_or(0i64);
 
         let mut top_rows: Vec<Vec<Value>> = Vec::new();
-        conn.exec_map(
+        let top_sql = format!(
             "SELECT c.id, c.content, c.created_at, u.username, u.avatar, c.author_id
              FROM mod_comments c
              JOIN users u ON c.author_id = u.id
              WHERE c.mod_id = ? AND c.parent_id IS NULL
-             ORDER BY c.created_at DESC
+             ORDER BY c.created_at {} 
              LIMIT ? OFFSET ?",
+            top_order
+        );
+        conn.exec_map(
+            &top_sql,
             (mod_id, page_size as i64, offset as i64),
             |row: Row| { top_rows.push(row.unwrap()); },
         ).map_err(|e| e.to_string())?;
@@ -101,13 +113,17 @@ pub async fn db_get_comments(
             ).map_err(|e| e.to_string())?.unwrap_or(0i64);
 
             let mut reply_rows: Vec<Vec<Value>> = Vec::new();
-            conn.exec_map(
+            let reply_sql = format!(
                 "SELECT c.id, c.content, c.created_at, u.username, u.avatar, c.author_id
                  FROM mod_comments c
                  JOIN users u ON c.author_id = u.id
                  WHERE c.parent_id = ?
-                 ORDER BY c.created_at ASC
+                 ORDER BY c.created_at {} 
                  LIMIT 2",
+                reply_dir
+            );
+            conn.exec_map(
+                &reply_sql,
                 (cid,),
                 |row: Row| { reply_rows.push(row.unwrap()); },
             ).map_err(|e| e.to_string())?;
@@ -162,11 +178,16 @@ pub async fn db_get_replies(
     comment_id: u64,
     page: Option<u64>,
     page_size: Option<u64>,
+    sort_order: Option<String>,
 ) -> Result<ApiResponse, String> {
     with_conn(state.inner(), move |conn: &mut PooledConn| {
         let page = page.unwrap_or(1).max(1);
         let page_size = page_size.unwrap_or(10).min(50);
         let offset = (page - 1) * page_size;
+        // 楼中楼排序方向：asc（旧→新，默认）| desc（新→旧）；
+        // 与 db_get_comments 的 reply_order 保持一致（预览前 2 条 + 分页跳过）
+        let sort_order = sort_order.filter(|s| s == "asc" || s == "desc").unwrap_or_else(|| "asc".into());
+        let dir = if sort_order == "asc" { "ASC" } else { "DESC" };
 
         let total: i64 = conn.exec_first(
             "SELECT COUNT(*) FROM mod_comments WHERE parent_id = ?", (comment_id,)
@@ -175,13 +196,17 @@ pub async fn db_get_replies(
         let adjusted_offset = if page == 1 { 2u64 } else { 2 + offset };
 
         let mut rows: Vec<Vec<Value>> = Vec::new();
-        conn.exec_map(
+        let sql = format!(
             "SELECT c.id, c.content, c.created_at, u.username, u.avatar, c.author_id
              FROM mod_comments c
              JOIN users u ON c.author_id = u.id
              WHERE c.parent_id = ?
-             ORDER BY c.created_at ASC
+             ORDER BY c.created_at {} 
              LIMIT ? OFFSET ?",
+            dir
+        );
+        conn.exec_map(
+            &sql,
             (comment_id, page_size as i64, adjusted_offset as i64),
             |row: Row| { rows.push(row.unwrap()); },
         ).map_err(|e| e.to_string())?;

@@ -126,6 +126,7 @@ pub async fn db_list_mods(
     page: Option<u64>,
     limit: Option<u64>,
     sort_by: Option<String>,
+    sort_order: Option<String>,
     device_id: Option<String>,
     category: Option<String>,
 ) -> Result<ApiResponse, String> {
@@ -135,9 +136,13 @@ pub async fn db_list_mods(
         let limit = limit.unwrap_or(20).min(100);
         let offset = (page - 1) * limit;
         let sort_by = sort_by.filter(|s| !s.is_empty()).unwrap_or_else(|| "created_at".into());
+        // 时间正/倒序：sort_order = asc（旧→新）| desc（新→旧，默认）；
+        // 其余指标排序（likes/rating）始终按数值降序，不受方向参数影响
+        let sort_order = sort_order.filter(|s| s == "asc" || s == "desc").unwrap_or_else(|| "desc".into());
         let order_sql = match sort_by.as_str() {
             "likes" => "ORDER BY m.like_count DESC, m.created_at DESC",
             "rating" => "ORDER BY m.rating_avg DESC, m.rating_count DESC, m.created_at DESC",
+            _ if sort_order == "asc" => "ORDER BY m.created_at ASC",
             _ => "ORDER BY m.created_at DESC",
         };
 

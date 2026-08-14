@@ -96,9 +96,9 @@ export function DiscussionDetailPage({ discussion, onBack, scrollToCommentId, on
   // 评论 API 适配器：讨论区评论 → CommentSection 统一签名；
   // useMemo 保持引用稳定，避免 CommentSection 的 fetchComments useCallback 每次渲染重建
   const discussionCommentApi = useMemo(() => ({
-    list: (args) => getDiscussionComments({ discussion_id: args.targetId, page: args.page, page_size: args.page_size }),
+    list: (args) => getDiscussionComments({ discussion_id: args.targetId, page: args.page, page_size: args.page_size, sort_order: args.sort_order, reply_order: args.reply_order }),
     add: (args) => addDiscussionComment({ discussion_id: args.targetId, author_id: args.author_id, content: args.content, parent_id: args.parent_id }),
-    replies: (args) => getDiscussionReplies({ comment_id: args.comment_id, page: args.page, page_size: args.page_size }),
+    replies: (args) => getDiscussionReplies({ comment_id: args.comment_id, page: args.page, page_size: args.page_size, sort_order: args.sort_order }),
     edit: (args) => editDiscussionComment({ comment_id: args.comment_id, author_id: args.author_id, content: args.content }),
     del: (args) => deleteDiscussionComment({ comment_id: args.comment_id, author_id: args.author_id }),
   }), [])

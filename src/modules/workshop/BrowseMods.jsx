@@ -67,6 +67,8 @@ export function BrowseMods({ initialModId, initialCommentId, onConsumeNavTarget 
   const deviceIdRef = useRef(getDeviceId())
   const [search, setSearch] = useState('')
   const [sortBy, setSortBy] = useState(() => sessionStorage.getItem('workshop_browse_sort') || 'created_at')
+  // 时间正/倒序：desc（新→旧，默认）| asc（旧→新），持久化到 sqlite config 表
+  const [sortOrder, setSortOrder] = useState('desc')
   const [categoryFilter, setCategoryFilter] = useState('')
   const [mods, setMods] = useState([])
   const [total, setTotal] = useState(0)
@@ -163,37 +165,38 @@ export function BrowseMods({ initialModId, initialCommentId, onConsumeNavTarget 
   useEffect(() => clearHoverTimer, [clearHoverTimer])
 
   // 分页预请求：当前页就绪后自动预请求下一页，翻页命中缓存免等待
-  const { fetchPage, fetchFresh, prefetch, peek, clearCache } = usePagePrefetch(async (p, keyword, cat, sort) => {
+  const { fetchPage, fetchFresh, prefetch, peek, clearCache } = usePagePrefetch(async (p, keyword, cat, sort, order) => {
     const data = await listMods({
       lang: 'zh',
       search: keyword,
       page: p,
       limit: 20,
       sort_by: sort,
+      sort_order: order,
       device_id: deviceIdRef.current,
       category: cat,
     })
     return { mods: data.mods || [], total: data.total || 0, page: data.page || 1 }
   })
 
-  const fetchMods = useCallback(async (p, keyword = search, cat = categoryFilter, sort = sortBy, opts = {}) => {
+  const fetchMods = useCallback(async (p, keyword = search, cat = categoryFilter, sort = sortBy, order = sortOrder, opts = {}) => {
     const { force = false } = opts
     // 命中预请求缓存：免 loading 直接渲染，并继续预请求下一页维持预取链
     if (!force) {
-      const cached = peek(p, keyword, cat, sort)
+      const cached = peek(p, keyword, cat, sort, order)
       if (cached) {
         setMods(cached.mods)
         setTotal(cached.total)
         setPage(cached.page)
         setError('')
-        prefetch(p + 1, keyword, cat, sort)
+        prefetch(p + 1, keyword, cat, sort, order)
         return
       }
     }
     setLoading(true)
     setError('')
     try {
-      const data = force ? await fetchFresh(p, keyword, cat, sort) : await fetchPage(p, keyword, cat, sort)
+      const data = force ? await fetchFresh(p, keyword, cat, sort, order) : await fetchPage(p, keyword, cat, sort, order)
       setMods(data.mods || [])
       setTotal(data.total || 0)
       setPage(data.page || 1)
@@ -203,7 +206,7 @@ export function BrowseMods({ initialModId, initialCommentId, onConsumeNavTarget 
     } finally {
       setLoading(false)
     }
-  }, [search, sortBy, categoryFilter, peek, fetchPage, fetchFresh, prefetch])
+  }, [search, sortBy, sortOrder, categoryFilter, peek, fetchPage, fetchFresh, prefetch])
 
   useEffect(() => {
     sessionStorage.setItem('workshop_browse_page', String(page))
@@ -212,6 +215,35 @@ export function BrowseMods({ initialModId, initialCommentId, onConsumeNavTarget 
   useEffect(() => {
     sessionStorage.setItem('workshop_browse_sort', sortBy)
   }, [sortBy])
+
+  // 时间正/倒序持久化到 sqlite config 表（个性化浏览习惯，跨会话保持）
+  useEffect(() => {
+    const loadSortOrder = async () => {
+      try {
+        const value = await getConfig('workshop_browse_sort_order')
+        if (value === 'asc' || value === 'desc') {
+          setSortOrder(value)
+          // 恢复的方向非默认时立即按该方向拉取：
+          // initialFetch 门控不会因 sortOrder 变化重拉，需显式请求才能让持久化偏好生效
+          if (value !== 'desc') {
+            fetchMods(1, search, categoryFilter, sortBy, value, { force: true })
+          }
+        }
+      } catch (e) {
+        console.warn('[BrowseMods] 读取时间排序方向失败:', e)
+      }
+    }
+    loadSortOrder()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const saveSortOrder = useCallback(async (value) => {
+    try {
+      await setConfig('workshop_browse_sort_order', value)
+    } catch (e) {
+      console.warn('[BrowseMods] 保存时间排序方向失败:', e)
+    }
+  }, [])
 
   useEffect(() => {
     const loadItemsPerRow = async () => {
@@ -378,13 +410,13 @@ export function BrowseMods({ initialModId, initialCommentId, onConsumeNavTarget 
           <Button size="small" icon={<Search24Regular />} onClick={handleSearchSubmit} disabled={loading}>
             {t('workshop.search')}
           </Button>
-          <Button size="small" icon={<ArrowClockwise24Regular />} onClick={() => fetchMods(1, search, categoryFilter, sortBy, { force: true })} disabled={loading}>
+          <Button size="small" icon={<ArrowClockwise24Regular />} onClick={() => fetchMods(1, search, categoryFilter, sortBy, sortOrder, { force: true })} disabled={loading}>
             {t('workshop.refresh')}
           </Button>
           <div style={{ flex: 1 }} />
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
             <Text size="small">{t('workshop.type')}</Text>
-            <Select size="small" value={categoryFilter} onChange={(_, d) => { const v = d.value; setCategoryFilter(v); setPage(1); fetchMods(1, search, v, sortBy) }} disabled={loading}>
+            <Select size="small" value={categoryFilter} onChange={(_, d) => { const v = d.value; setCategoryFilter(v); setPage(1); fetchMods(1, search, v, sortBy, sortOrder) }} disabled={loading}>
               <option value="">{t('workshop.typeAll')}</option>
               <option value="v1">{t('workshop.category_v1')}</option>
               <option value="v2">{t('workshop.category_v2')}</option>
@@ -394,10 +426,22 @@ export function BrowseMods({ initialModId, initialCommentId, onConsumeNavTarget 
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
             <Text size="small">{t('workshop.sortBy')}</Text>
-            <Select size="small" value={sortBy} onChange={(_, d) => { const v = d.value; setSortBy(v); setPage(1); fetchMods(1, search, categoryFilter, v) }} disabled={loading}>
+            <Select size="small" value={sortBy} onChange={(_, d) => { const v = d.value; setSortBy(v); setPage(1); fetchMods(1, search, categoryFilter, v, sortOrder) }} disabled={loading}>
               <option value="created_at">{t('workshop.sortNewest')}</option>
               <option value="likes">{t('workshop.sortLikes')}</option>
               <option value="rating">{t('workshop.sortRating')}</option>
+            </Select>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <Text size="small">{t('workshop.sortTime')}</Text>
+            <Select
+              size="small"
+              value={sortOrder}
+              onChange={(_, d) => { const v = d.value; setSortOrder(v); saveSortOrder(v); setPage(1); fetchMods(1, search, categoryFilter, sortBy, v) }}
+              disabled={loading || sortBy !== 'created_at'}
+            >
+              <option value="desc">{t('workshop.sortNewestFirst')}</option>
+              <option value="asc">{t('workshop.sortOldestFirst')}</option>
             </Select>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -454,7 +498,7 @@ export function BrowseMods({ initialModId, initialCommentId, onConsumeNavTarget 
       </AsyncView>
 
       <FloatingActions items={[
-        { key: 'refresh', icon: <ArrowClockwise24Regular />, onClick: () => fetchMods(page, search, categoryFilter, sortBy, { force: true }), disabled: loading, label: t('workshop.refresh') },
+        { key: 'refresh', icon: <ArrowClockwise24Regular />, onClick: () => fetchMods(page, search, categoryFilter, sortBy, sortOrder, { force: true }), disabled: loading, label: t('workshop.refresh') },
         { key: 'publish', icon: <Add24Regular />, appearance: 'primary', onClick: handlePublishClick, label: t('workshop.publishMod') },
       ]} />
 

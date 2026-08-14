@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
-  Card, Text, Button, Spinner,
+  Card, Text, Button, Spinner, Select,
   Menu, MenuTrigger, MenuPopover, MenuList, MenuItem,
   makeStyles, tokens,
 } from '@fluentui/react-components'
@@ -9,6 +9,7 @@ import {
   Send24Regular, Delete24Regular, Edit24Regular,
 } from '@fluentui/react-icons'
 import { resolvePendingImagesInMarkdown, stripPendingUrls, deleteImageFromImgbed, extractImgbedUrls } from '../../services/imageApi'
+import { getConfig, setConfig } from '../../services/dbHelper'
 import { useAuth } from '../../contexts/useAuth'
 import { MarkdownContent, MarkdownEditor } from '../../components/common/RichTextEditor'
 import { Lightbox } from '../../components/common/Lightbox'
@@ -48,7 +49,8 @@ async function resolveCommentImages(content, folderPrefix, targetId, commentId) 
 
 const useStyles = makeStyles({
   root: { marginTop: '16px', borderTop: `1px solid ${tokens.colorNeutralStroke2}`, paddingTop: '12px' },
-  title: { marginBottom: '12px' },
+  titleRow: { display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginBottom: '12px' },
+  sortBox: { display: 'flex', alignItems: 'center', gap: '6px', marginLeft: 'auto', flexWrap: 'wrap' },
   commentFormCard: { padding: '12px', marginBottom: '16px' },
   formRow: { display: 'flex', gap: '8px', alignItems: 'flex-end' },
   textarea: { flex: 1 },
@@ -126,12 +128,42 @@ export default function CommentSection({ api, targetId, folderPrefix = 'sfm', sc
   // 每楼的回复加载状态
   const [replyState, setReplyState] = useState({})
 
+  // 个性化浏览习惯：一楼排序方向（desc 新→旧 | asc 旧→新，默认 desc）
+  // 与楼中楼排序方向（asc 旧→新 | desc 新→旧，默认 asc），持久化到 sqlite config 表
+  const [sortOrder, setSortOrder] = useState('desc')
+  const [replyOrder, setReplyOrder] = useState('asc')
+
   const initialFetch = useRef(false)
 
-  const fetchComments = useCallback(async (p) => {
+  // 从 sqlite 恢复浏览习惯（详情页打开即生效，无需登录）
+  useEffect(() => {
+    const loadOrders = async () => {
+      try {
+        const [s, r] = await Promise.all([
+          getConfig('comment_sort_order'),
+          getConfig('comment_reply_order'),
+        ])
+        if (s === 'asc' || s === 'desc') setSortOrder(s)
+        if (r === 'asc' || r === 'desc') setReplyOrder(r)
+      } catch (e) {
+        console.warn('[CommentSection] 读取浏览习惯失败:', e)
+      }
+    }
+    loadOrders()
+  }, [])
+
+  const saveSortOrder = useCallback(async (v) => {
+    try { await setConfig('comment_sort_order', v) } catch (e) { console.warn('[CommentSection] 保存一楼排序失败:', e) }
+  }, [])
+  const saveReplyOrder = useCallback(async (v) => {
+    try { await setConfig('comment_reply_order', v) } catch (e) { console.warn('[CommentSection] 保存回复排序失败:', e) }
+  }, [])
+
+  // 接受显式排序参数：切换排序时调用方传入新值，避免 setState 未提交时的陈旧闭包
+  const fetchComments = useCallback(async (p, sort = sortOrder, reply = replyOrder) => {
     setLoading(true)
     try {
-      const data = await api.list({ targetId, page: p, page_size: 10 })
+      const data = await api.list({ targetId, page: p, page_size: 10, sort_order: sort, reply_order: reply })
       setComments(data.comments)
       setTotal(data.total)
       // 优先使用后端返回的全量计数（含楼中楼）；兜底用 一楼 + 各楼楼中楼之和
@@ -145,7 +177,7 @@ export default function CommentSection({ api, targetId, folderPrefix = 'sfm', sc
     } finally {
       setLoading(false)
     }
-  }, [targetId, api])
+  }, [targetId, api, sortOrder, replyOrder])
 
   useEffect(() => {
     if (!initialFetch.current) {
@@ -491,7 +523,7 @@ export default function CommentSection({ api, targetId, folderPrefix = 'sfm', sc
     const nextPage = rs.page + 1
     setReplyState(prev => ({ ...prev, [commentId]: { ...rs, expanded: true, loading: true } }))
     try {
-      const data = await api.replies({ comment_id: commentId, page: nextPage, page_size: 10 })
+      const data = await api.replies({ comment_id: commentId, page: nextPage, page_size: 10, sort_order: replyOrder })
       setReplyState(prev => ({
         ...prev,
         [commentId]: {
@@ -511,9 +543,43 @@ export default function CommentSection({ api, targetId, folderPrefix = 'sfm', sc
 
   return (
     <div className={styles.root}>
-      <Text weight="semibold" size={400} className={styles.title}>
-        {t('workshop.comment', { count: commentTotal })}
-      </Text>
+      <div className={styles.titleRow}>
+        <Text weight="semibold" size={400} className={styles.title}>
+          {t('workshop.comment', { count: commentTotal })}
+        </Text>
+        <div className={styles.sortBox}>
+          <Text size="small">{t('workshop.commentSortLabel')}</Text>
+          <Select
+            size="small"
+            value={sortOrder}
+            onChange={(_, d) => {
+              const v = d.value
+              setSortOrder(v)
+              saveSortOrder(v)
+              // 显式传新值拉取，避免陈旧闭包导致仍按旧方向请求
+              fetchComments(1, v, replyOrder)
+            }}
+          >
+            <option value="desc">{t('workshop.sortNewestFirst')}</option>
+            <option value="asc">{t('workshop.sortOldestFirst')}</option>
+          </Select>
+          <Text size="small">{t('workshop.replySortLabel')}</Text>
+          <Select
+            size="small"
+            value={replyOrder}
+            onChange={(_, d) => {
+              const v = d.value
+              setReplyOrder(v)
+              saveReplyOrder(v)
+              // 显式传新值拉取，避免陈旧闭包导致仍按旧方向请求
+              fetchComments(1, sortOrder, v)
+            }}
+          >
+            <option value="asc">{t('workshop.sortOldestFirst')}</option>
+            <option value="desc">{t('workshop.sortNewestFirst')}</option>
+          </Select>
+        </div>
+      </div>
 
       {/* ── 发表评论表单 ── */}
       {isLoggedIn ? (

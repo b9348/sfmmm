@@ -113,9 +113,9 @@ export default function ModDetailPage({ mod, onBack, onEdit, scrollToCommentId }
   // 评论 API 适配器：mod 评论 → CommentSection 统一签名；useMemo 保持引用稳定，
   // 避免 CommentSection 的 fetchComments useCallback 在每次父级渲染时重建
   const modCommentApi = useMemo(() => ({
-    list: (args) => getComments({ mod_id: args.targetId, page: args.page, page_size: args.page_size }),
+    list: (args) => getComments({ mod_id: args.targetId, page: args.page, page_size: args.page_size, sort_order: args.sort_order, reply_order: args.reply_order }),
     add: (args) => addComment({ mod_id: args.targetId, author_id: args.author_id, content: args.content, parent_id: args.parent_id }),
-    replies: (args) => getCommentReplies({ comment_id: args.comment_id, page: args.page, page_size: args.page_size }),
+    replies: (args) => getCommentReplies({ comment_id: args.comment_id, page: args.page, page_size: args.page_size, sort_order: args.sort_order }),
     edit: (args) => editComment({ comment_id: args.comment_id, author_id: args.author_id, content: args.content }),
     del: (args) => deleteComment({ comment_id: args.comment_id, author_id: args.author_id }),
   }), [])

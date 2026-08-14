@@ -77,6 +77,8 @@ export function Discussion() {
 
   const [search, setSearch] = useState('')
   const [sortBy, setSortBy] = useState('created_at')
+  // 时间正/倒序：desc（新→旧，默认）| asc（旧→新），持久化到 sqlite config 表
+  const [sortOrder, setSortOrder] = useState('desc')
   const [itemsPerRow, setItemsPerRow] = useState(3)
   const [discussions, setDiscussions] = useState([])
   const [total, setTotal] = useState(0)
@@ -182,34 +184,35 @@ export function Discussion() {
     window.location.hash = '#/workshop/discuss'
   }, [])
 
-  const { fetchPage, fetchFresh, prefetch, peek, clearCache } = usePagePrefetch(async (p, keyword, sort) => {
+  const { fetchPage, fetchFresh, prefetch, peek, clearCache } = usePagePrefetch(async (p, keyword, sort, order) => {
     const data = await listDiscussions({
       page: p,
       limit: 20,
       search: keyword,
       sort_by: sort,
+      sort_order: order,
       user_id: user?.user_id,
     })
     return { discussions: data.discussions || [], total: data.total || 0, page: data.page || 1 }
   })
 
-  const fetchList = useCallback(async (p, keyword = search, sort = sortBy, opts = {}) => {
+  const fetchList = useCallback(async (p, keyword = search, sort = sortBy, order = sortOrder, opts = {}) => {
     const { force = false } = opts
     if (!force) {
-      const cached = peek(p, keyword, sort)
+      const cached = peek(p, keyword, sort, order)
       if (cached) {
         setDiscussions(cached.discussions)
         setTotal(cached.total)
         setPage(cached.page)
         setError('')
-        prefetch(p + 1, keyword, sort)
+        prefetch(p + 1, keyword, sort, order)
         return
       }
     }
     setLoading(true)
     setError('')
     try {
-      const data = force ? await fetchFresh(p, keyword, sort) : await fetchPage(p, keyword, sort)
+      const data = force ? await fetchFresh(p, keyword, sort, order) : await fetchPage(p, keyword, sort, order)
       setDiscussions(data.discussions || [])
       setTotal(data.total || 0)
       setPage(data.page || 1)
@@ -219,7 +222,7 @@ export function Discussion() {
     } finally {
       setLoading(false)
     }
-  }, [search, sortBy, peek, fetchPage, fetchFresh, prefetch])
+  }, [search, sortBy, sortOrder, peek, fetchPage, fetchFresh, prefetch])
 
   const initialFetch = useRef(false)
   useEffect(() => {
@@ -228,6 +231,35 @@ export function Discussion() {
       fetchList(1)
     }
   }, [fetchList])
+
+  // 时间正/倒序持久化到 sqlite config 表（个性化浏览习惯，跨会话保持）
+  useEffect(() => {
+    const loadSortOrder = async () => {
+      try {
+        const value = await getConfig('discussion_sort_order')
+        if (value === 'asc' || value === 'desc') {
+          setSortOrder(value)
+          // 恢复的方向非默认时立即按该方向拉取：
+          // initialFetch 门控不会因 sortOrder 变化重拉，需显式请求才能让持久化偏好生效
+          if (value !== 'desc') {
+            fetchList(1, search, sortBy, value, { force: true })
+          }
+        }
+      } catch (e) {
+        console.warn('[Discussion] 读取时间排序方向失败:', e)
+      }
+    }
+    loadSortOrder()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const saveSortOrder = useCallback(async (value) => {
+    try {
+      await setConfig('discussion_sort_order', value)
+    } catch (e) {
+      console.warn('[Discussion] 保存时间排序方向失败:', e)
+    }
+  }, [])
 
   // 每行展示数量：与「云」共用 workshop_items_per_row 配置键（1-10 持久化）
   useEffect(() => {
@@ -306,14 +338,14 @@ export function Discussion() {
 
   const handleSearchSubmit = () => {
     setPage(1)
-    fetchList(1, search, sortBy, { force: true })
+    fetchList(1, search, sortBy, sortOrder, { force: true })
   }
 
   const handleSearchKeyDown = (e) => {
     if (e.key === 'Enter') {
       setSearch(e.target.value)
       setPage(1)
-      fetchList(1, e.target.value, sortBy, { force: true })
+      fetchList(1, e.target.value, sortBy, sortOrder, { force: true })
     }
   }
 
@@ -333,7 +365,7 @@ export function Discussion() {
         onCreated={() => {
           setShowCreate(false)
           clearCache()
-          fetchList(1, search, sortBy, { force: true })
+          fetchList(1, search, sortBy, sortOrder, { force: true })
         }}
       />
     )
@@ -356,16 +388,28 @@ export function Discussion() {
           <Button size="small" icon={<Search24Regular />} onClick={handleSearchSubmit} disabled={loading}>
             {t('discussion.search')}
           </Button>
-          <Button size="small" icon={<ArrowClockwise24Regular />} onClick={() => fetchList(1, search, sortBy, { force: true })} disabled={loading}>
+          <Button size="small" icon={<ArrowClockwise24Regular />} onClick={() => fetchList(1, search, sortBy, sortOrder, { force: true })} disabled={loading}>
             {t('discussion.refresh')}
           </Button>
           <div style={{ flex: 1 }} />
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
             <Text size="small">{t('workshop.sortBy')}</Text>
-            <Select size="small" value={sortBy} onChange={(_, d) => { const v = d.value; setSortBy(v); setPage(1); fetchList(1, search, v, { force: true }) }} disabled={loading}>
+            <Select size="small" value={sortBy} onChange={(_, d) => { const v = d.value; setSortBy(v); setPage(1); fetchList(1, search, v, sortOrder, { force: true }) }} disabled={loading}>
               <option value="created_at">{t('workshop.sortNewest')}</option>
               <option value="likes">{t('workshop.sortLikes')}</option>
               <option value="boosts">{t('discussion.boostCount', { count: '' })}</option>
+            </Select>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <Text size="small">{t('workshop.sortTime')}</Text>
+            <Select
+              size="small"
+              value={sortOrder}
+              onChange={(_, d) => { const v = d.value; setSortOrder(v); saveSortOrder(v); setPage(1); fetchList(1, search, sortBy, v, { force: true }) }}
+              disabled={loading || sortBy !== 'created_at'}
+            >
+              <option value="desc">{t('workshop.sortNewestFirst')}</option>
+              <option value="asc">{t('workshop.sortOldestFirst')}</option>
             </Select>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -427,7 +471,7 @@ export function Discussion() {
             </AsyncView>
 
             <FloatingActions items={[
-              { key: 'refresh', icon: <ArrowClockwise24Regular />, onClick: () => fetchList(page, search, sortBy, { force: true }), disabled: loading, label: t('discussion.refresh') },
+              { key: 'refresh', icon: <ArrowClockwise24Regular />, onClick: () => fetchList(page, search, sortBy, sortOrder, { force: true }), disabled: loading, label: t('discussion.refresh') },
               { key: 'publish', icon: <Add24Regular />, appearance: 'primary', onClick: handlePublishClick, label: t('discussion.publish') },
             ]} />
 
@@ -450,7 +494,7 @@ export function Discussion() {
                 // 同步更新详情缓存，避免关闭详情后再次点击命中旧数据
                 detailCacheRef.current?.set(updated.id, updated)
                 clearCache()
-                fetchList(1, search, sortBy, { force: true })
+                fetchList(1, search, sortBy, sortOrder, { force: true })
               }}
             />
           </div>

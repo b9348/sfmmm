@@ -89,13 +89,14 @@ export function getDeviceId() {
 
 // ── Mod 浏览 ──
 
-export async function listMods({ lang = 'zh', search, page = 1, limit = 20, sort_by, device_id, category } = {}) {
+export async function listMods({ lang = 'zh', search, page = 1, limit = 20, sort_by, sort_order, device_id, category } = {}) {
   const res = await dbCall('db_list_mods', {
     lang,
     search: search || null,
     page,
     limit,
     sort_by: sort_by || null,
+    sort_order: sort_order || null,
     device_id: device_id || null,
     category: category || null,
   })
@@ -368,8 +369,8 @@ export async function addComment({ mod_id, author_id, content, parent_id }) {
   return { success: true, data: res.data }
 }
 
-export async function getComments({ mod_id, page = 1, page_size = 10 }) {
-  const res = await dbCall('db_get_comments', { mod_id, page, page_size })
+export async function getComments({ mod_id, page = 1, page_size = 10, sort_order, reply_order } = {}) {
+  const res = await dbCall('db_get_comments', { mod_id, page, page_size, sort_order: sort_order || null, reply_order: reply_order || null })
   return {
     success: true,
     comments: res.data?.comments || [],
@@ -381,8 +382,8 @@ export async function getComments({ mod_id, page = 1, page_size = 10 }) {
   }
 }
 
-export async function getCommentReplies({ comment_id, page = 1, page_size = 10 }) {
-  const res = await dbCall('db_get_replies', { comment_id, page, page_size })
+export async function getCommentReplies({ comment_id, page = 1, page_size = 10, sort_order } = {}) {
+  const res = await dbCall('db_get_replies', { comment_id, page, page_size, sort_order: sort_order || null })
   return {
     success: true,
     replies: res.data?.replies || [],
@@ -498,12 +499,13 @@ async function sha256Bytes(bytes) {
 // ── 讨论区（独立于 mod 体系；帖子/投票/Boost/评论/我的历史） ──
 
 // 帖子列表：sort_by = created_at | likes | boosts；d_type = regular | poll | 空（全部）
-export async function listDiscussions({ page = 1, limit = 20, search, sort_by = 'created_at', d_type = '', user_id } = {}) {
+export async function listDiscussions({ page = 1, limit = 20, search, sort_by = 'created_at', sort_order, d_type = '', user_id } = {}) {
   const res = await dbCall('db_list_discussions', {
     page,
     limit,
     search: search || null,
     sort_by: sort_by || null,
+    sort_order: sort_order || null,
     d_type: d_type || null,
     user_id: user_id || null,
   })
@@ -599,8 +601,8 @@ export async function addDiscussionComment({ discussion_id, author_id, content, 
   return { success: true, data: res.data }
 }
 
-export async function getDiscussionComments({ discussion_id, page = 1, page_size = 10 }) {
-  const res = await dbCall('db_get_discussion_comments', { discussion_id, page, page_size })
+export async function getDiscussionComments({ discussion_id, page = 1, page_size = 10, sort_order, reply_order } = {}) {
+  const res = await dbCall('db_get_discussion_comments', { discussion_id, page, page_size, sort_order: sort_order || null, reply_order: reply_order || null })
   return {
     success: true,
     comments: res.data?.comments || [],
@@ -611,8 +613,8 @@ export async function getDiscussionComments({ discussion_id, page = 1, page_size
   }
 }
 
-export async function getDiscussionReplies({ comment_id, page = 1, page_size = 10 }) {
-  const res = await dbCall('db_get_discussion_replies', { comment_id, page, page_size })
+export async function getDiscussionReplies({ comment_id, page = 1, page_size = 10, sort_order } = {}) {
+  const res = await dbCall('db_get_discussion_replies', { comment_id, page, page_size, sort_order: sort_order || null })
   return {
     success: true,
     replies: res.data?.replies || [],
