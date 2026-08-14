@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
-import { makeStyles, tokens, Text, Button, Card, CardHeader, Badge, Tooltip } from '@fluentui/react-components'
+import { makeStyles, tokens, Text, Button, Card, Badge, Tooltip } from '@fluentui/react-components'
 import { FolderOpen24Regular, ArrowClockwise24Regular, Document24Regular, Folder24Regular, ChevronRight24Regular, Play24Regular, Pause24Regular, Delete24Regular, Cloud24Regular, ArrowDownload24Regular } from '@fluentui/react-icons'
 import { invoke } from '@tauri-apps/api/core'
 import { readDir, stat } from '@tauri-apps/plugin-fs'
@@ -8,7 +8,8 @@ import { useInstalledMods } from '../../hooks/useInstalledMods'
 import { useUserNav } from '../../contexts/useUserNav'
 import { getModDetail } from '../../services/workshopApi'
 import { installMod } from '../../services/installMod'
-import { AsyncView, EmptyState, BepInExPrereqBanner } from '../../components'
+import { AsyncView, EmptyState, BepInExPrereqBanner, ItemsPerRowControl } from '../../components'
+import { getConfig, setConfig } from '../../services/dbHelper'
 import { LANG_LABELS } from '../../i18n/languages'
 import { RatingStarsDisplay } from '../../components/common/RatingStars'
 
@@ -60,8 +61,7 @@ const useStyles = makeStyles({
     flex: 1,
     minHeight: 0,
     overflow: 'auto',
-    display: 'flex',
-    flexWrap: 'wrap',
+    display: 'grid',
     gap: '8px',
     alignContent: 'flex-start',
   },
@@ -69,8 +69,15 @@ const useStyles = makeStyles({
     padding: '12px',
     cursor: 'pointer',
     transition: 'box-shadow 0.2s ease',
-    minWidth: '180px',
-    flex: '1 1 0px',
+    minWidth: '0',
+    // 卡片外观（原 Fluent Card 默认 overflow:hidden 会裁剪长文件名溢出内容，改普通 div 后内容可自由增高）
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '8px',
+    boxSizing: 'border-box',
+    border: `1px solid ${tokens.colorNeutralStroke1}`,
+    borderRadius: tokens.borderRadiusMedium,
+    backgroundColor: tokens.colorNeutralBackground1,
     '&:hover': {
       boxShadow: tokens.shadow4,
     },
@@ -78,11 +85,12 @@ const useStyles = makeStyles({
   // 同一创意工坊订阅的分组容器：横贯整行，带淡绿描边（创意工坊徽章同色更淡，避免与单选高亮的品牌蓝撞色）
   groupCard: {
     padding: '12px 14px',
-    flexBasis: '100%',
+    gridColumn: '1 / -1',
     boxSizing: 'border-box',
     display: 'flex',
     flexDirection: 'column',
     gap: '10px',
+    backgroundColor: tokens.colorNeutralBackground2,
     border: `2px solid ${tokens.colorStatusSuccessBackground2}`,
     borderRadius: tokens.borderRadiusXLarge,
     boxShadow: `0 0 0 3px ${tokens.colorStatusSuccessBackground3}, ${tokens.shadow4}`,
@@ -106,8 +114,7 @@ const useStyles = makeStyles({
     marginLeft: 'auto',
   },
   groupInnerGrid: {
-    display: 'flex',
-    flexWrap: 'wrap',
+    display: 'grid',
     gap: '8px',
   },
   // 组内成员的紧凑卡片
@@ -115,9 +122,14 @@ const useStyles = makeStyles({
     padding: '8px 10px',
     cursor: 'pointer',
     transition: 'box-shadow 0.2s ease',
-    minWidth: '160px',
-    flex: '1 1 0px',
+    minWidth: '0',
     backgroundColor: tokens.colorNeutralBackground1,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '8px',
+    boxSizing: 'border-box',
+    border: `1px solid ${tokens.colorNeutralStroke1}`,
+    borderRadius: tokens.borderRadiusMedium,
     '&:hover': {
       boxShadow: tokens.shadow4,
     },
@@ -132,6 +144,16 @@ const useStyles = makeStyles({
     overflow: 'hidden',
     overflowWrap: 'break-word',
     wordBreak: 'break-word',
+    // flex 子项默认 min-width:auto，长名无法收缩折行、会横向溢出被 Card(overflow:hidden) 裁掉；
+    // 归零后长名在卡片内正常折行，卡片随内容增高（配合上方 overflowWrap/wordBreak）
+    minWidth: '0',
+  },
+  // 卡片头部：图标+文件名 与 描述（子项数等）上下排列
+  cardHeader: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '4px',
+    minWidth: '0',
   },
   emptyState: {
     display: 'flex',
@@ -323,36 +345,29 @@ function FolderCard({ name, fullPath, onNavigate, isWorkshop, workshopDetail, cl
   const showWorkshopInfo = isWorkshop && !inGroup
 
   return (
-    <Card
+    <div
       className={inGroup ? styles.innerCard : styles.card}
-      appearance="outline"
       id={`mission-item-${encodeURIComponent(fullPath)}`}
       onClick={(e) => { onSelect?.(fullPath, e) }}
       onDoubleClick={(e) => { if (!e.ctrlKey && !e.shiftKey) onNavigate(fullPath) }}
       style={{
-        border: `2px solid ${selected ? tokens.colorBrandStroke1 : 'transparent'}`,
+        border: selected ? `2px solid ${tokens.colorBrandStroke1}` : undefined,
         boxShadow: selected ? `0 0 0 2px ${tokens.colorBrandBackground2}, ${tokens.shadow4}` : undefined,
       }}
     >
-      <CardHeader
-        header={
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0 }}>
-            <Folder24Regular />
-            <Text size="small" weight="semibold" className={styles.fileName}>{name}</Text>
-          </div>
-        }
-        description={
-          <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexWrap: 'wrap' }}>
-            {childInfo && (
-              <Text size="small" className={styles.meta}>
-                {childInfo.dirs > 0
-                  ? t('mission.folderCount', { dirs: childInfo.dirs, files: childInfo.total - childInfo.dirs })
-                  : t('mission.itemCount', { count: childInfo.total })}
-              </Text>
-            )}
-          </div>
-        }
-      />
+      <div className={styles.cardHeader}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0 }}>
+          <Folder24Regular />
+          <Text size="small" weight="semibold" className={styles.fileName}>{name}</Text>
+        </div>
+        {childInfo && (
+          <Text size="small" className={styles.meta}>
+            {childInfo.dirs > 0
+              ? t('mission.folderCount', { dirs: childInfo.dirs, files: childInfo.total - childInfo.dirs })
+              : t('mission.itemCount', { count: childInfo.total })}
+          </Text>
+        )}
+      </div>
       <div className={styles.buttonRow}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexWrap: 'wrap', marginRight: 'auto' }}>
           {showWorkshopInfo && <Badge appearance="filled" color="success" size="small">{t('mods.workshopBadge')}</Badge>}
@@ -372,7 +387,7 @@ function FolderCard({ name, fullPath, onNavigate, isWorkshop, workshopDetail, cl
           <ModCardActions modKey={modKey} hasUpdate={hasUpdate} onViewDetail={onViewDetail} onUpdate={onUpdate} onUninstall={onUninstall} pushRight={false} />
         )}
       </div>
-    </Card>
+    </div>
   )
 }
 
@@ -383,24 +398,21 @@ function FileCard({ name, fullPath, isBanned, onToggle, isWorkshop, hasUpdate, w
   // 分组模式下工坊信息统一显示在组头，成员卡片保持精简
   const showWorkshopInfo = isWorkshop && !inGroup
   return (
-    <Card
+    <div
       className={inGroup ? styles.innerCard : styles.card}
-      appearance="outline"
       id={`mission-item-${encodeURIComponent(fullPath)}`}
       onClick={(e) => { onSelect?.(fullPath, e) }}
       style={{
-        border: `2px solid ${selected ? tokens.colorBrandStroke1 : 'transparent'}`,
+        border: selected ? `2px solid ${tokens.colorBrandStroke1}` : undefined,
         boxShadow: selected ? `0 0 0 2px ${tokens.colorBrandBackground2}, ${tokens.shadow4}` : undefined,
       }}
     >
-      <CardHeader
-        header={
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0 }}>
-            <Document24Regular />
-            <Text size="small" weight="semibold" className={styles.fileName}>{name}</Text>
-          </div>
-        }
-      />
+      <div className={styles.cardHeader}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0 }}>
+          <Document24Regular />
+          <Text size="small" weight="semibold" className={styles.fileName}>{name}</Text>
+        </div>
+      </div>
       <div className={styles.buttonRow}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexWrap: 'wrap', marginRight: 'auto' }}>
           <Badge appearance="outline" size="small">{ext.toUpperCase()}</Badge>
@@ -431,25 +443,25 @@ function FileCard({ name, fullPath, isBanned, onToggle, isWorkshop, hasUpdate, w
           <ModCardActions modKey={modKey} hasUpdate={hasUpdate} onViewDetail={onViewDetail} onUpdate={onUpdate} onUninstall={onUninstall} pushRight={false} />
         )}
       </div>
-    </Card>
+    </div>
   )
 }
 
 // 同一创意工坊订阅源（同 mod_key）下多个文件/文件夹的分组卡片：
 // 订阅级信息与操作集中在组头，组内成员保留各自的独立交互（打开、启用/停用等）
-function ModGroupCard({ modKey, items, children, workshopDetail, cloudInfo, hasUpdate, onViewDetail, onUpdate, onUninstall, onDisableAll, onEnableAll }) {
+function ModGroupCard({ modKey, items, children, workshopDetail, cloudInfo, hasUpdate, onViewDetail, onUpdate, onUninstall, onDisableAll, onEnableAll, itemsPerRow = 3 }) {
   const { t } = useTranslation()
   const styles = useStyles()
   const title = cloudInfo?.displayName || modKey
   return (
-    <Card className={styles.groupCard} appearance="filled-alternative">
+    <div className={styles.groupCard}>
       <div className={styles.groupHeader}>
         <Cloud24Regular />
         <Tooltip content={modKey} relationship="label">
           <Text size="small" weight="semibold" className={styles.fileName}>{title}</Text>
         </Tooltip>
       </div>
-      <div className={styles.groupInnerGrid}>
+      <div className={styles.groupInnerGrid} style={{ gridTemplateColumns: `repeat(${itemsPerRow}, minmax(0, 1fr))` }}>
         {children}
       </div>
       <div className={styles.buttonRow}>
@@ -474,7 +486,7 @@ function ModGroupCard({ modKey, items, children, workshopDetail, cloudInfo, hasU
         </Tooltip>
         <ModCardActions modKey={modKey} hasUpdate={hasUpdate} onViewDetail={onViewDetail} onUpdate={onUpdate} onUninstall={onUninstall} pushRight={false} />
       </div>
-    </Card>
+    </div>
   )
 }
 
@@ -489,6 +501,8 @@ export function MissionFolder({ config, subfolder, onUninstall, focusModKey }) {
   const { installed, updates, modDetails, cloudInfo } = useInstalledMods()
   // 当前选中的条目集合（支持 Ctrl/Shift 多选，高亮提示用户）；仅在本页/本目录内生效
   const [selectedPaths, setSelectedPaths] = useState(() => new Set())
+  // 每行展示数量：与创意工坊共用 workshop_items_per_row 配置键（1-10 持久化），复用同一「每行 X 个」控件
+  const [itemsPerRow, setItemsPerRow] = useState(3)
   const anchorRef = useRef(null) // Shift 范围选择的锚点
   const orderedPaths = files.map(f => `${currentDir}/${f.name}`)
 
@@ -557,6 +571,33 @@ export function MissionFolder({ config, subfolder, onUninstall, focusModKey }) {
     setSelectedPaths(new Set())
     anchorRef.current = null
   }, [currentDir])
+
+  // 每行展示数量：读取持久化配置（与创意工坊的「云/讨论区」共用 workshop_items_per_row 键）
+  useEffect(() => {
+    const loadItemsPerRow = async () => {
+      try {
+        const value = await getConfig('workshop_items_per_row')
+        if (value !== null) {
+          const parsed = parseInt(value, 10)
+          if (!Number.isNaN(parsed) && parsed >= 1 && parsed <= 10) {
+            setItemsPerRow(parsed)
+          }
+        }
+      } catch (e) {
+        console.warn('[MissionFolder] 读取每行展示数量失败:', e)
+      }
+    }
+    loadItemsPerRow()
+  }, [])
+
+  const handleItemsPerRowChange = useCallback(async (value) => {
+    setItemsPerRow(value)
+    try {
+      await setConfig('workshop_items_per_row', String(value))
+    } catch (e) {
+      console.warn('[MissionFolder] 保存每行展示数量失败:', e)
+    }
+  }, [])
 
   // 检查文件/文件夹是否是已安装的工坊模组
   // 解析出对应的创意工坊 mod_key：
@@ -821,6 +862,7 @@ export function MissionFolder({ config, subfolder, onUninstall, focusModKey }) {
           <Button size="small" icon={<ArrowClockwise24Regular />} appearance="subtle" onClick={refresh} disabled={!currentDir || loading} />
           <Button size="small" icon={<Pause24Regular />} appearance="subtle" onClick={() => handleBatchToggle(true)} disabled={!currentDir || loading} title={t('mods.disableAll')} />
           <Button size="small" icon={<Play24Regular />} appearance="subtle" onClick={() => handleBatchToggle(false)} disabled={!currentDir || loading} title={t('mods.enableAll')} />
+          <ItemsPerRowControl value={itemsPerRow} onChange={handleItemsPerRowChange} disabled={!currentDir || loading} />
         </div>
 
         <Text size="small" className={styles.pathText} title={currentDir}>
@@ -881,7 +923,7 @@ export function MissionFolder({ config, subfolder, onUninstall, focusModKey }) {
         }
 
         return (
-          <div className={styles.grid}>
+          <div className={styles.grid} style={{ gridTemplateColumns: `repeat(${itemsPerRow}, minmax(0, 1fr))` }}>
             {files.map((f, i) => {
               const mk = resolveModKey(f.name)
               const grouped = mk && (keyCount.get(mk) || 0) >= 2
@@ -900,6 +942,7 @@ export function MissionFolder({ config, subfolder, onUninstall, focusModKey }) {
                   workshopDetail={modDetails.get(mk)}
                   cloudInfo={cloudInfo.get(mk)}
                   hasUpdate={updates.has(mk)}
+                  itemsPerRow={itemsPerRow}
                   onViewDetail={handleViewDetail}
                   onUpdate={handleUpdate}
                   onUninstall={onUninstall}

@@ -6,7 +6,7 @@ import {
 } from '@fluentui/react-components'
 import {
   ArrowClockwise24Regular, Heart24Regular,
-  Star24Regular, Add20Regular, Subtract20Regular,
+  Star24Regular,
 } from '@fluentui/react-icons'
 import { listLikedMods, listRatedMods, getModDetail, getDeviceId } from '../../services/workshopApi'
 import {
@@ -19,7 +19,7 @@ import { getConfig, setConfig } from '../../services/dbHelper'
 import { useAuth } from '../../contexts/useAuth'
 import ModDetailPage from '../workshop/ModDetailPage'
 import { ModCard } from '../workshop/ModCard'
-import { AsyncView, LoginForm, EmptyState } from '../../components'
+import { AsyncView, LoginForm, EmptyState, ItemsPerRowControl } from '../../components'
 
 const useStyles = makeStyles({
   root: {
@@ -140,12 +140,9 @@ export function LikeRecords({ panel, visible = true }) {
     }
   }, [])
 
-  const handleItemsPerRowChange = useCallback((delta) => {
-    setItemsPerRow(prev => {
-      const next = Math.min(10, Math.max(1, prev + delta))
-      saveItemsPerRow(next)
-      return next
-    })
+  const handleItemsPerRowChange = useCallback((next) => {
+    setItemsPerRow(next)
+    saveItemsPerRow(next)
   }, [saveItemsPerRow])
 
   // 查远程库并回写 SQLite 缓存（点赞栏）
@@ -289,24 +286,7 @@ export function LikeRecords({ panel, visible = true }) {
             <Text size="small" className={styles.meta} style={{ flex: 1 }}>
               {t('likes.ratedCount', { count: ratedMods.length })}
             </Text>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <Text size="small">{t('workshop.itemsPerRow')}</Text>
-              <Button
-                size="small"
-                icon={<Subtract20Regular />}
-                appearance="subtle"
-                onClick={() => handleItemsPerRowChange(-1)}
-                disabled={itemsPerRow <= 1 || likedLoading || ratedLoading}
-              />
-              <Text size="small" style={{ minWidth: '20px', textAlign: 'center' }}>{itemsPerRow}</Text>
-              <Button
-                size="small"
-                icon={<Add20Regular />}
-                appearance="subtle"
-                onClick={() => handleItemsPerRowChange(1)}
-                disabled={itemsPerRow >= 10 || likedLoading || ratedLoading}
-              />
-            </div>
+            <ItemsPerRowControl value={itemsPerRow} onChange={handleItemsPerRowChange} disabled={likedLoading || ratedLoading} />
             <Button size="small" icon={<ArrowClockwise24Regular />} onClick={refreshRated} disabled={ratedLoading}>
               {t('workshop.refresh')}
             </Button>

@@ -7,8 +7,6 @@ import {
   ArrowClockwise24Regular,
   Search24Regular,
   Add24Regular,
-  Add20Regular,
-  Subtract20Regular,
 } from '@fluentui/react-icons'
 import { useTranslation } from 'react-i18next'
 import { listDiscussions, getDiscussionDetail } from '../../services/workshopApi'
@@ -18,7 +16,7 @@ import { DiscussionDetailPage } from './DiscussionDetailPage'
 import { CreateDiscussionPage } from './CreateDiscussionPage'
 import { useAuth } from '../../contexts/useAuth'
 import { usePagePrefetch } from '../../hooks/usePagePrefetch'
-import { Pagination, AsyncView, LoginDialog, FloatingActions, EmptyState } from '../../components'
+import { Pagination, AsyncView, LoginDialog, FloatingActions, EmptyState, ItemsPerRowControl } from '../../components'
 
 const useStyles = makeStyles({
   root: {
@@ -287,12 +285,9 @@ export function Discussion() {
     }
   }, [])
 
-  const handleItemsPerRowChange = useCallback((delta) => {
-    setItemsPerRow(prev => {
-      const next = Math.min(10, Math.max(1, prev + delta))
-      saveItemsPerRow(next)
-      return next
-    })
+  const handleItemsPerRowChange = useCallback((next) => {
+    setItemsPerRow(next)
+    saveItemsPerRow(next)
   }, [saveItemsPerRow])
 
   // 详情页以覆盖层形式渲染在列表上方，列表保持挂载：
@@ -412,24 +407,7 @@ export function Discussion() {
               <option value="asc">{t('workshop.sortOldestFirst')}</option>
             </Select>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <Text size="small">{t('workshop.itemsPerRow')}</Text>
-            <Button
-              size="small"
-              icon={<Subtract20Regular />}
-              appearance="subtle"
-              onClick={() => handleItemsPerRowChange(-1)}
-              disabled={itemsPerRow <= 1 || loading}
-            />
-            <Text size="small" style={{ minWidth: '20px', textAlign: 'center' }}>{itemsPerRow}</Text>
-            <Button
-              size="small"
-              icon={<Add20Regular />}
-              appearance="subtle"
-              onClick={() => handleItemsPerRowChange(1)}
-              disabled={itemsPerRow >= 10 || loading}
-            />
-          </div>
+          <ItemsPerRowControl value={itemsPerRow} onChange={handleItemsPerRowChange} disabled={loading} />
         </div>
       </Card>
 
