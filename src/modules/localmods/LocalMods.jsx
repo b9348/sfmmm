@@ -48,7 +48,13 @@ export function LocalMods({ config, onUninstall, refreshKey }) {
     const m = window.location.hash.match(/^#\/localmods\/(\w+)/)
     return m && ['mods', 'v1', 'v2'].includes(m[1]) ? m[1] : 'mods'
   }
+  // 从 URL hash 恢复待定位 mod_key（#/localmods/<tab>?mod=<key>，订阅记录跳转携带）
+  const getFocusModKey = () => {
+    const m = window.location.hash.match(/[?&]mod=([^&]+)/)
+    return m ? decodeURIComponent(m[1]) : null
+  }
   const [subTab, setSubTab] = useState(getInitialTab)
+  const [focusModKey, setFocusModKey] = useState(getFocusModKey)
 
   const handleTabSelect = (_, d) => {
     setSubTab(d.value)
@@ -64,11 +70,12 @@ export function LocalMods({ config, onUninstall, refreshKey }) {
   }, [])
 
   // 侧边栏「本地模组」子菜单点击会设置 hash（#/localmods/<tab>），
-  // 监听 hashchange 同步内部 tab，保证已在本页时也能切换。
+  // 监听 hashchange 同步内部 tab 与待定位 mod_key（外部跳转可携带 ?mod=<key>）。
   useEffect(() => {
     const onHashChange = () => {
       const tab = getInitialTab()
       setSubTab((prev) => (tab !== prev ? tab : prev))
+      setFocusModKey(getFocusModKey())
     }
     window.addEventListener('hashchange', onHashChange)
     return () => window.removeEventListener('hashchange', onHashChange)
@@ -92,6 +99,7 @@ export function LocalMods({ config, onUninstall, refreshKey }) {
           config={config}
           subfolder={SUBFOLDER_BY_TAB[subTab]}
           onUninstall={onUninstall}
+          focusModKey={focusModKey}
         />
       </div>
     </div>

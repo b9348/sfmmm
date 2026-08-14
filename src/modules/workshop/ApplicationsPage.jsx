@@ -12,6 +12,17 @@ import { useNotification } from '../../contexts/NotificationContext'
 import { listApplications, handleApplication, getMyNotifications, markRead } from '../../services/workshopApi'
 import { Pagination, EmptyState, UserLink } from '../../components'
 
+// 从 markdown/html 正文中提取第一张图片 URL（图床图片），并返回去掉图片语法后的纯文本摘要
+function extractFirstImage(content) {
+  if (!content) return { image: null, text: '' }
+  const imgRegex = /!\[[^\]]*\]\((https?:\/\/[^)\s]+)\)|<img[^>]+src=["'](https?:\/\/[^"']+)["']/gi
+  const matches = [...content.matchAll(imgRegex)]
+  const image = matches.length > 0 ? (matches[0][1] || matches[0][2] || null) : null
+  // 仅将图片语法替换为空，保留其余正文文本
+  const text = content.replace(imgRegex, ' ').replace(/\s+/g, ' ').trim()
+  return { image, text }
+}
+
 const useStyles = makeStyles({
   root: {
     display: 'flex',
@@ -91,6 +102,14 @@ const useStyles = makeStyles({
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
     maxWidth: '100%',
+  },
+  thumb: {
+    maxWidth: '33.33%',
+    maxHeight: '140px',
+    objectFit: 'cover',
+    borderRadius: '6px',
+    display: 'block',
+    backgroundColor: tokens.colorNeutralBackground1Hover,
   },
 })
 
@@ -324,7 +343,9 @@ export default function ApplicationsPage({ onNavigate, panel, visible = true }) 
               <EmptyState description={t('workshop.noNotifications')} />
             )}
 
-            {!loadingNotifs && notifs.map((n) => (
+            {!loadingNotifs && notifs.map((n) => {
+              const { image, text } = extractFirstImage(n.content)
+              return (
               <Card key={`${n.entity}-${n.id}`} className={styles.card} onClick={async () => {
                 if (!n.is_read) {
                   try {
@@ -360,9 +381,14 @@ export default function ApplicationsPage({ onNavigate, panel, visible = true }) 
                       {t('workshop.notifLikeHint')}
                     </Text>
                   ) : (
-                    <Text size="small" className={styles.truncate} title={n.content}>
-                      {truncateText(n.content)}
-                    </Text>
+                    <>
+                      {image && <img src={image} alt="" className={styles.thumb} loading="lazy" />}
+                      {text && (
+                        <Text size="small" className={styles.truncate} title={text}>
+                          {truncateText(text)}
+                        </Text>
+                      )}
+                    </>
                   )}
                   {n.author_name ? (
                     <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '4px' }}>
@@ -380,7 +406,8 @@ export default function ApplicationsPage({ onNavigate, panel, visible = true }) 
                   )}
                 </div>
               </Card>
-            ))}
+              )
+            })}
 
             <Pagination page={notifPage} totalPages={totalNotifPages} onChange={(p) => setNotifPage(p)} />
           </div>

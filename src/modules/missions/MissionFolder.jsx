@@ -326,6 +326,7 @@ function FolderCard({ name, fullPath, onNavigate, isWorkshop, workshopDetail, cl
     <Card
       className={inGroup ? styles.innerCard : styles.card}
       appearance="outline"
+      id={`mission-item-${encodeURIComponent(fullPath)}`}
       onClick={(e) => { onSelect?.(fullPath, e) }}
       onDoubleClick={(e) => { if (!e.ctrlKey && !e.shiftKey) onNavigate(fullPath) }}
       style={{
@@ -385,6 +386,7 @@ function FileCard({ name, fullPath, isBanned, onToggle, isWorkshop, hasUpdate, w
     <Card
       className={inGroup ? styles.innerCard : styles.card}
       appearance="outline"
+      id={`mission-item-${encodeURIComponent(fullPath)}`}
       onClick={(e) => { onSelect?.(fullPath, e) }}
       style={{
         border: `2px solid ${selected ? tokens.colorBrandStroke1 : 'transparent'}`,
@@ -476,7 +478,7 @@ function ModGroupCard({ modKey, items, children, workshopDetail, cloudInfo, hasU
   )
 }
 
-export function MissionFolder({ config, subfolder, onUninstall }) {
+export function MissionFolder({ config, subfolder, onUninstall, focusModKey }) {
   const styles = useStyles()
   const { t } = useTranslation()
   const gamePath = config?.game_path?.replace(/\\/g, '/') || ''
@@ -604,6 +606,39 @@ export function MissionFolder({ config, subfolder, onUninstall }) {
       loadFiles()
     }
   }, [currentDir, loadFiles])
+
+  // 外部跳转定位（订阅记录「在本地模组中查看」）：按 focusModKey 选中对应 item，
+  // 滚动到视口并临时高亮——与 CommentSection 滚动到评论同模式：
+  // 等待数据就绪后按文件名归一化/mod_key 匹配，重试等待 DOM 渲染完成再做 scrollIntoView + 背景色闪亮。
+  const focusTimerRef = useRef(null)
+  useEffect(() => {
+    if (!focusModKey || loading || files.length === 0) return
+    // 匹配当前目录中的条目：resolveModKey 归一化命中，或文件名直接等于 mod_key
+    const target = files.find(f => {
+      const k = resolveModKey(f.name)
+      return k === focusModKey || getWorkshopKey(f.name) === focusModKey
+    })
+    if (!target) return
+    const fullPath = `${currentDir}/${target.name}`
+    // 单选语义：清空后加入选中集，锚点同步（与 handleItemSelect 行为一致）
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setSelectedPaths(new Set([fullPath]))
+    anchorRef.current = fullPath
+    const domId = `mission-item-${encodeURIComponent(fullPath)}`
+    const tryScroll = (retries = 8) => {
+      const el = document.getElementById(domId)
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+        el.style.transition = 'background-color 1s ease'
+        el.style.backgroundColor = tokens.colorBrandBackground2Hover
+        setTimeout(() => { el.style.backgroundColor = '' }, 2000)
+      } else if (retries > 0) {
+        focusTimerRef.current = setTimeout(() => tryScroll(retries - 1), 300)
+      }
+    }
+    tryScroll()
+    return () => { if (focusTimerRef.current) clearTimeout(focusTimerRef.current) }
+  }, [focusModKey, loading, files, currentDir, resolveModKey])
 
   // BepInEx 前置安装完成后：清空目录缓存并刷新文件列表
   const onPrereqInstalled = useCallback(() => {

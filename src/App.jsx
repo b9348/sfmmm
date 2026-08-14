@@ -283,6 +283,11 @@ function App() {
           window.location.hash = `#/mod/${modId}`
           setNavTarget({ modId, commentId: null })
           handleTabChange('workshop')
+        }} onOpenLocalMods={(localTab, modKey) => {
+          // 携带 modKey 时写入 #/localmods/<tab>?mod=<key>，LocalMods 解析后透传 MissionFolder 定位高亮
+          const base = `#/localmods/${localTab || 'mods'}`
+          window.location.hash = modKey ? `${base}?mod=${encodeURIComponent(modKey)}` : base
+          handleTabChange('localmods')
         }}>
         <NotificationProvider>
           <div className={styles.root}>

@@ -475,6 +475,7 @@
     "empty": "No subscription records yet",
     "cancel": "Cancel download",
     "openDir": "Open folder",
+    "viewInLocalMods": "View in Local Mods",
     "cancelledNote": "Cancelled",
     "status": {
       "pending": "Pending",

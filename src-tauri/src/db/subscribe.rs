@@ -569,6 +569,15 @@ pub async fn db_subscribe_mod(
     //      安装记录已不在（被退订删掉），done 视为失效允许新建重下重装
     //    - failed/cancelled：不命中，允许新建（视为重试）
     let conn = open_sqlite(&app_handle)?;
+    // 1.5) 覆盖旧记录：新订阅意味着同 mod_key+版本+hash 的旧失败/取消行已失效，
+    //     删除它们，保证任意时刻同 mod 同版本只一条有效记录——
+    //     否则"首次失败 → 重试成功 → 退订"后，旧的 failed 行与新 done(已退订) 行并存
+    let _ = conn.execute(
+        "DELETE FROM subscription_tasks
+         WHERE mod_key = ? AND version = ? AND file_hash = ?
+           AND status IN ('failed', 'cancelled')",
+        rusqlite::params![mod_key, version, file_hash],
+    );
     let existing: Option<i64> = conn
         .query_row(
             "SELECT id FROM subscription_tasks

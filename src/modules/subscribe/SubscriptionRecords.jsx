@@ -12,6 +12,7 @@ import {
 import {
   ArrowSync24Regular, Dismiss24Regular, Folder24Regular,
   ArrowDownload24Regular, ErrorCircle24Regular, Cloud24Regular,
+  BoxMultiple24Regular,
 } from '@fluentui/react-icons'
 import { invoke as openFolder } from '@tauri-apps/api/core'
 
@@ -19,11 +20,8 @@ const useStyles = makeStyles({
   root: {
     display: 'flex',
     flexDirection: 'column',
-    height: '100%',
-    minHeight: 0,
     padding: '16px',
     gap: '12px',
-    overflow: 'auto',
   },
   header: {
     display: 'flex',
@@ -108,7 +106,7 @@ function statusBadge(t, status) {
     extracting:   { appearance: 'inform',  color: 'brand'   },
     recording:    { appearance: 'inform',  color: 'brand'   },
     done:         { appearance: 'filled',  color: 'success' },
-    uninstalled:  { appearance: 'ghost',   color: 'severe'  },
+    uninstalled:  { appearance: 'filled',  color: 'severe'  },
     failed:       { appearance: 'filled',  color: 'danger'  },
     cancelled:    { appearance: 'ghost',   color: 'severe'  },
   }
@@ -124,10 +122,14 @@ function isRunning(status) {
   return ['pending', 'downloading', 'extracting', 'recording'].includes(status)
 }
 
+// 订阅任务 category → 本地模组页内部 tab 映射
+// （dll/folder/composite 都在 BepInEx/plugins 下 → mods；v1/v2 各自对应）
+const LOCAL_TAB_BY_CATEGORY = { v1: 'v1', v2: 'v2' }
+
 export function SubscriptionRecords() {
   const { t } = useTranslation()
   const styles = useStyles()
-  const { openMod } = useUserNav()
+  const { openMod, openLocalMods } = useUserNav()
   const [tasks, setTasks] = useState([])
   const [loading, setLoading] = useState(true)
 
@@ -136,6 +138,12 @@ export function SubscriptionRecords() {
     if (!modKey) return
     openMod(modKey)
   }, [openMod])
+
+  // 前往本地模组页查看：按 category 映射到 LocalMods 内部 tab，并携带 modKey 供定位高亮
+  // （dll/folder/composite 都在 BepInEx/plugins 下 → mods；v1/v2 各自对应）
+  const handleViewLocalMods = useCallback((category, modKey) => {
+    openLocalMods(LOCAL_TAB_BY_CATEGORY[category] || 'mods', modKey)
+  }, [openLocalMods])
 
   const refresh = useCallback(async () => {
     try {
@@ -173,7 +181,19 @@ export function SubscriptionRecords() {
           }
         })
       }
-      setTasks(rows)
+      // 新记录覆盖旧记录（前端展示层兜底）：同 mod_key + version + lang_code 只保留 id 最大的一条。
+      // 历史遗留场景：旧 failed 行 + 新 done(已退订) 行并存——修复前 failed/cancelled 行从不清理，
+      // 首次订阅失败留下 failed，重试成功后退订，done 行虚拟显示为已退订，导致同 mod 同版本两条。
+      // 后端 db_subscribe_mod 已在新订阅时清理同 mod+版本+hash 的旧 failed/cancelled 行，
+      // 这里对既有数据做展示层去重，不回写 SQLite。
+      const latestById = new Map()
+      for (const r of rows) {
+        const key = `${r.modKey}|${r.version}|${r.langCode || ''}`
+        const prev = latestById.get(key)
+        if (!prev || r.id > prev.id) latestById.set(key, r)
+      }
+      const deduped = [...latestById.values()].sort((a, b) => b.id - a.id)
+      setTasks(deduped)
     } catch (e) {
       console.warn('[SubscriptionRecords] 查询任务失败:', e)
     } finally {
@@ -304,6 +324,16 @@ export function SubscriptionRecords() {
                     disabled={!task.modKey}
                   />
                 </Tooltip>
+                {task.status !== 'uninstalled' && (
+                  <Tooltip content={t('subscriptions.viewInLocalMods')} relationship="label">
+                    <Button
+                      size="small"
+                      appearance="subtle"
+                      icon={<BoxMultiple24Regular />}
+                      onClick={() => handleViewLocalMods(task.category, task.modKey)}
+                    />
+                  </Tooltip>
+                )}
                 {isRunning(task.status) && (
                   <Button
                     size="small"

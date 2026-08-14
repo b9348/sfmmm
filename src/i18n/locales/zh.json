@@ -475,6 +475,7 @@
     "empty": "还没有订阅记录",
     "cancel": "取消下载",
     "openDir": "打开目录",
+    "viewInLocalMods": "在本地模组中查看",
     "cancelledNote": "已取消",
     "status": {
       "pending": "等待中",

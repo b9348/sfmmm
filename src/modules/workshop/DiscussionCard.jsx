@@ -62,7 +62,7 @@ const useStyles = makeStyles({
     lineHeight: '1.4',
   },
   thumb: {
-    width: '100%',
+    maxWidth: '33.33%',
     maxHeight: '140px',
     objectFit: 'cover',
     borderRadius: '6px',

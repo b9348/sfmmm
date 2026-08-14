@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   Card, Text, Button, Spinner,
+  Menu, MenuTrigger, MenuPopover, MenuList, MenuItem,
   makeStyles, tokens,
 } from '@fluentui/react-components'
 import {
@@ -21,6 +22,19 @@ function isOwnItem(item, user) {
   if (!user?.user_id) return false
   if (item?.author_id != null) return Number(item.author_id) === Number(user.user_id)
   return item?.author_name === user.username
+}
+
+// 判断当前用户是否有权删除评论/回复：
+// - 本人（作者）永远可删；
+// - ownerId（帖子楼主）可删自己帖下的所有一楼与楼中楼；
+// - 楼中楼场景下，一楼作者（层主）可删自己一楼收到的回复
+function canDeleteItem(item, user, ownerId, topComment) {
+  if (!user?.user_id) return false
+  if (isOwnItem(item, user)) return true
+  const uid = Number(user.user_id)
+  if (ownerId != null && Number(ownerId) === uid) return true
+  if (topComment && Number(topComment.author_id) === uid) return true
+  return false
 }
 
 // 解析评论内容中的 pending 图片并上传；
@@ -64,8 +78,8 @@ const useStyles = makeStyles({
     whiteSpace: 'pre-wrap',
     wordBreak: 'break-word',
     lineHeight: 1.4,
-    maxHeight: '80px',
-    overflow: 'hidden',
+    maxHeight: '240px',
+    overflowY: 'auto',
   },
 })
 
@@ -79,8 +93,9 @@ const useStyles = makeStyles({
  *   api.del({ comment_id, author_id })
  * @param {number|string} targetId 评论挂载的实体 ID（mod_id / discussion_id）
  * @param {string} [folderPrefix='sfm'] 图床目录前缀（mod='sfm'，讨论区='sfmmm/discourse'）
+ * @param {number|string} [ownerId] 内容楼主 ID（讨论区为帖子作者）：楼主可删除帖下所有一楼与楼中楼；同时楼中楼的层主（一楼作者）可删除自己一楼收到的回复
  */
-export default function CommentSection({ api, targetId, folderPrefix = 'sfm', scrollToCommentId }) {
+export default function CommentSection({ api, targetId, folderPrefix = 'sfm', scrollToCommentId, ownerId }) {
   const { t } = useTranslation()
   const styles = useStyles()
   const { user, isLoggedIn } = useAuth()
@@ -586,8 +601,22 @@ export default function CommentSection({ api, targetId, folderPrefix = 'sfm', sc
                       setEditText(c.content)
                     }} />
                   )}
-                  {isOwnItem(c, user) && (
-                    <Button size="small" appearance="subtle" icon={<Delete24Regular />} onClick={() => handleDelete(c.id)} />
+                  {canDeleteItem(c, user, ownerId, null) && (
+                    <Menu>
+                      <MenuTrigger disableButtonEnhancement>
+                        <Button size="small" appearance="subtle" icon={<Delete24Regular />} />
+                      </MenuTrigger>
+                      <MenuPopover>
+                        <MenuList>
+                          <MenuItem onClick={() => handleDelete(c.id)}>
+                            {t('workshop.confirmDelete')}
+                          </MenuItem>
+                          <MenuItem>
+                            {t('workshop.cancel')}
+                          </MenuItem>
+                        </MenuList>
+                      </MenuPopover>
+                    </Menu>
                   )}
                   {editingId === c.id && (
                     <>
@@ -644,8 +673,22 @@ export default function CommentSection({ api, targetId, folderPrefix = 'sfm', sc
                               setEditText(r.content)
                             }} />
                           )}
-                          {isOwnItem(r, user) && (
-                            <Button size="small" appearance="subtle" icon={<Delete24Regular />} onClick={() => handleDelete(r.id)} />
+                          {canDeleteItem(r, user, ownerId, c) && (
+                            <Menu>
+                              <MenuTrigger disableButtonEnhancement>
+                                <Button size="small" appearance="subtle" icon={<Delete24Regular />} />
+                              </MenuTrigger>
+                              <MenuPopover>
+                                <MenuList>
+                                  <MenuItem onClick={() => handleDelete(r.id)}>
+                                    {t('workshop.confirmDelete')}
+                                  </MenuItem>
+                                  <MenuItem>
+                                    {t('workshop.cancel')}
+                                  </MenuItem>
+                                </MenuList>
+                              </MenuPopover>
+                            </Menu>
                           )}
                           {editingId === r.id && (
                             <>
@@ -728,7 +771,7 @@ export default function CommentSection({ api, targetId, folderPrefix = 'sfm', sc
                       return quotedContent ? (
                         <div className={styles.quoteBlock}>
                           <Text weight="semibold" size={200}>{replyTo.authorName}</Text>
-                          <div>{quotedContent}</div>
+                          <MarkdownContent markdown={quotedContent} onImageClick={setLightboxSrc} />
                         </div>
                       ) : null
                     })()}

@@ -148,7 +148,6 @@ export function DiscussionDetailPage({ discussion, onBack, scrollToCommentId, on
 
   const handleDelete = async () => {
     if (!canEdit || deleting) return
-    if (!window.confirm(t('discussion.deleteConfirm'))) return
     setDeleting(true)
     try {
       await deleteDiscussion({ author_id: user.user_id, discussion_id: detail.id })
@@ -248,6 +247,7 @@ export function DiscussionDetailPage({ discussion, onBack, scrollToCommentId, on
           api={discussionCommentApi}
           targetId={detail.id}
           folderPrefix="sfmmm/discourse"
+          ownerId={detail.author_id}
           scrollToCommentId={scrollToCommentId}
         />
       </div>
@@ -264,7 +264,12 @@ export function DiscussionDetailPage({ discussion, onBack, scrollToCommentId, on
         },
         ...(canEdit ? [
           { key: 'edit', icon: <Edit24Regular />, appearance: 'outline', onClick: () => setEditing(true), label: t('discussion.edit') },
-          { key: 'delete', icon: <Delete24Regular />, appearance: 'outline', onClick: handleDelete, disabled: deleting, label: t('discussion.delete') },
+          { key: 'delete', icon: <Delete24Regular />, appearance: 'outline', disabled: deleting, label: t('discussion.delete'),
+            menu: {
+              confirmLabel: t('workshop.confirmDelete'),
+              cancelLabel: t('workshop.cancel'),
+              onConfirm: handleDelete,
+            } },
         ] : []),
       ]} />
 
