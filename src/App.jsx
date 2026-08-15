@@ -1,4 +1,5 @@
-import { useState, useEffect, useReducer } from 'react'
+import { useState, useEffect, useReducer, useRef } from 'react'
+import { listen } from '@tauri-apps/api/event'
 import { FluentProvider, webLightTheme, webDarkTheme, Dialog, DialogSurface, DialogBody, DialogTitle, DialogContent, DialogActions, DialogTrigger, Button, Text, Toaster } from '@fluentui/react-components'
 import { makeStyles, tokens } from '@fluentui/react-components'
 import { TabNavigation, WelcomeScreen, TitleBar } from './components'
@@ -8,7 +9,8 @@ import { UserNavProvider } from './contexts/UserNavProvider.jsx'
 import { NotificationProvider } from './contexts/NotificationContext'
 import { usePersistUI } from './hooks/usePersistUI'
 import { getConfigs, setConfig } from './services/dbHelper'
-import { checkVersion, applyUpdate } from './services/updateApi'
+import { checkVersion, applyUpdate, prepareUpdate, getUpdateStatus, armPendingUpdate } from './services/updateApi'
+import { isInBackoff, canAutoApply } from './services/updatePolicy'
 import { uninstallMod } from './services/installMod'
 import { installExternalLinkInterceptor } from './utils/externalLinks'
 import { useTranslation } from 'react-i18next'
@@ -69,6 +71,14 @@ function App() {
   const { sidebarCollapsed, toggleSidebar } = usePersistUI()
   const [state, dispatch] = useReducer(appReducer, initialState)
   const [updateInfo, setUpdateInfo] = useState(null)
+  // 启动自动应用进行中的内存标志：串行化启动编排（检测/自动下载）与自动应用流程，
+  // 避免二者对 pending_update 的 TOCTOU 竞态（自动应用已接管时不再写回标志/发起下载）
+  const applyingRef = useRef(false)
+  // 启动编排发起的自动下载任务 id：全局 update-progress 监听据此区分自动/手动任务
+  // （手动下载失败不武装自动更新退避，手动下载完成也不强制安排下次启动应用）
+  const autoTaskIdRef = useRef(null)
+  // 最近一次检测到的最新版本：全局监听在 ready 时复核安装包版本仍为最新才提升待应用
+  const latestVersionRef = useRef('')
   // 主题模式：'light' | 'dark' | 'system'。默认跟随系统，启动后读取持久化配置覆盖。
   // 通过 class 名驱动 WinNavigationView 的自定义 CSS 变量，Fluent 组件则切换 webDarkTheme。
   const [themeMode, setThemeMode] = useState('system')
@@ -109,50 +119,143 @@ function App() {
     return installExternalLinkInterceptor()
   }, [])
 
-  // 启动时检测更新（仅提示，不自动安装）
+  // 启动时静默自动更新编排（单一入口，串行执行避免与全局监听竞态）：
+  // 1) 检测更新；2) 已有待应用更新时，仅当安装包就绪、文件在盘且版本仍为当前
+  // 最新版才自动应用（防陈旧提升：旧版残留不被静默安装）；3) 否则按需用默认源
+  // 静默下载，就绪后由全局监听写入 pending_update，下次启动自动应用
   useEffect(() => {
     let cancelled = false
-    const doCheck = async () => {
+    const startup = async () => {
       try {
         const info = await checkVersion(APP_VERSION)
         if (cancelled) return
         setUpdateInfo(info)
+        latestVersionRef.current = info.latestVersion || ''
+
+        const cfg = await getConfigs(['initialized', 'pending_update', 'auto_update_fail_at'])
+        if (cancelled) return
+        // 首次运行时不自动下载/自动应用，避免在欢迎屏/设置流程中退出
+        if (cfg.initialized !== 'true') return
+
+        // 失败退避：自动下载/自动应用最近失败过（24h 内）则不再自动发起，
+        // 避免更新源不可达/安装反复失败时每次启动都重试；用户手动"检测更新"
+        // 会重置该时间戳（见 GameSettings.handleCheckUpdate）。同时约束自动应用
+        // 与自动下载两条路径（此处为启动编排唯一入口）
+        if (isInBackoff(cfg.auto_update_fail_at)) {
+          console.warn('[Update] 自动更新失败退避中（24h），跳过自动应用/下载；可在设置页手动检测更新')
+          return
+        }
+
+        // 已有待应用更新：仅当安装包就绪、文件在盘且版本仍为当前最新版才自动应用
+        if (cfg.pending_update === 'true') {
+          if (info.hasUpdate && info.updateUrl) {
+            const st = await getUpdateStatus()
+            if (cancelled) return
+            if (canAutoApply(st, info.latestVersion)) {
+              // 关键：应用更新前先清除 pending_update 标志并置 applyingRef。
+              // applyUpdate() 会调用 app_handle.exit(0) 终止当前进程，由 bat 脚本
+              // 静默安装后重启；否则重启后的新进程会再次触发 applyUpdate()，
+              // 形成"白屏 → 退出 → bat 弹窗 → 重启 → 白屏"的死循环。
+              applyingRef.current = true
+              try {
+                await setConfig('pending_update', 'false')
+                await applyUpdate()
+                return // 进程将退出
+              } catch (e) {
+                console.warn('[Update] 自动应用待更新失败:', e)
+                // 失败后复位 applyingRef（含 setConfig 拒绝/applyUpdate 失败）：
+                // 本会话后续下载（全局 update-progress 监听）仍能正常写回
+                // pending_update，避免静默更新被永久抑制
+                applyingRef.current = false
+                // 记录失败退避时间戳，24h 内不再自动发起下载/提升待应用
+                setConfig('auto_update_fail_at', new Date().toISOString()).catch((failErr) => {
+                  console.warn('[Update] 记录失败退避失败:', failErr)
+                })
+                // 应用失败已记录退避：本会话不再回落到自动下载，避免同会话立即
+                // 重新下载并再次武装 pending_update；下次启动由上方退避检查统一拦截
+                return
+              }
+            }
+          } else if (info.error) {
+            // 更新源故障（图床不可达/清单异常）：无法确认是否仍有更新，保留
+            // pending_update 待下次启动重试——瞬态故障不能误删有效安装包的待应用状态
+            console.warn('[Update] 检测更新源失败，保留待应用状态:', info.error)
+            return
+          }
+          // 服务器明确确认无更新（或安装包失效）：清残留标志，回落重新下载
+          await setConfig('pending_update', 'false')
+        }
+
+        // 静默自动下载：检测到新版本时自动用默认源下载
+        if (info.hasUpdate && info.updateUrl) {
+          try {
+            const st = await getUpdateStatus()
+            if (cancelled) return
+            // ready 是否可信取决于"安装包文件确实在盘上"且其记录版本 === 当前最新版：
+            // - 就绪、文件在、版本匹配：直接安排下次启动应用，不重复下载
+            // - 就绪、文件在、版本未知（migration 16 遗留行）或版本不匹配（过期
+            //   残留/其他渠道旧版）：回落重新下载当前最新版，避免遗留安装包阻塞
+            //   自动更新管线
+            // - 文件缺失或任务失败/无任务：重新下载当前最新版
+            if (st && st.status === 'ready' && st.installerExists) {
+              if (st.version === info.latestVersion) {
+                if (applyingRef.current) return
+                await setConfig('pending_update', 'true')
+              } else {
+                // 版本未知或版本不匹配：重新下载当前最新版
+                if (applyingRef.current) return
+                const res = await prepareUpdate(info.updateUrl, info.latestVersion, 8)
+                autoTaskIdRef.current = res?.taskId ?? null
+              }
+            } else {
+              // 无任务 / 失败 / 进行中 / 安装包缺失：发起（或由 Rust 端去重复用）
+              // 默认源后台下载任务，并记录自动任务 id 供全局监听识别
+              if (applyingRef.current) return
+              const res = await prepareUpdate(info.updateUrl, info.latestVersion, 8)
+              autoTaskIdRef.current = res?.taskId ?? null
+            }
+          } catch (e) {
+            console.warn('[Update] 静默自动下载启动失败:', e.message)
+          }
+        }
       } catch (e) {
         setUpdateInfo({ hasUpdate: false, error: e.message })
       }
     }
-    doCheck()
+    startup()
     return () => { cancelled = true }
   }, [])
 
-  // 启动时检查是否有待更新安装包，有则自动应用（仅已完成首次设置后）
+  // 静默自动更新：全局监听下载进度。仅处理启动编排自动发起的任务（taskId 匹配）：
+  // - ready：经 getUpdateStatus 复核安装包就绪、文件在盘且版本仍为最新版后才写入
+  //   pending_update（防陈旧提升，不绕过启动编排的版本校验）
+  // - failed：记录失败退避时间戳（手动下载失败不压制自动更新，由设置页展示错误）
   useEffect(() => {
-    (async () => {
-      try {
-        const cfg = await getConfigs(['pending_update', 'initialized'])
-
-        // 首次运行时不自动应用更新，避免在欢迎屏/设置流程中退出
-        if (cfg.initialized !== 'true') return
-        if (cfg.pending_update !== 'true') return
-
-        // 关键：应用更新前先清除 pending_update 标志。
-        // applyUpdate() 会调用 app_handle.exit(0) 终止当前进程，
-        // 由 bat 脚本静默安装后重启。若不在此清标志，重启后的新进程
-        // 仍会读到 pending_update='true' 并再次触发 applyUpdate()，
-        // 形成"白屏 → 退出 → bat 弹窗 → 重启 → 白屏"的死循环。
-        await setConfig('pending_update', 'false')
-
-        await applyUpdate()
-      } catch (e) {
-        console.warn('[Update] 自动应用待更新失败:', e)
-        // 失败后重置标志，避免每次启动都重试失败的更新
-        try {
-          await setConfig('pending_update', 'false')
-        } catch (clearErr) {
-          console.warn('[Update] 清除 pending_update 失败:', clearErr)
-        }
+    let cancelled = false
+    let unlisten = null
+    listen('update-progress', (ev) => {
+      const payload = ev.payload || {}
+      // 自动应用进行中（即将退出进程）时不再写回，避免残留标志
+      if (applyingRef.current) return
+      // 只处理自动任务；手动下载（设置页发起）由 GameSettings 自身监听处理
+      if (payload.taskId !== autoTaskIdRef.current) return
+      if (payload.status === 'ready') {
+        // 复用共享提升门禁（armPendingUpdate：版本 + 安装包在盘校验 + 写
+        // pending_update + 清退避），与设置页 ready 分支行为一致，不重复内联逻辑
+        armPendingUpdate(latestVersionRef.current).catch((e) => console.warn('[Update] 复核就绪状态失败:', e))
+      } else if (payload.status === 'failed') {
+        // 仅自动任务失败记录退避时间戳，24h 内启动编排不再自动发起下载
+        setConfig('auto_update_fail_at', new Date().toISOString()).catch((e) => {
+          console.warn('[Update] 记录失败退避失败:', e)
+        })
       }
-    })()
+    }).then((fn) => {
+      // listen() 异步 resolve：若组件已卸载（StrictMode 双挂载/热更新），
+      // 立即注销返回的 unlisten，避免首个监听器泄漏（重复触发 ready 写入）
+      if (cancelled) fn()
+      else unlisten = fn
+    }).catch((e) => console.warn('[Update] 监听更新进度失败:', e))
+    return () => { cancelled = true; unlisten?.() }
   }, [])
 
   useEffect(() => {

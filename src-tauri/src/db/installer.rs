@@ -496,10 +496,16 @@ async fn run_update_download_task(app_handle: tauri::AppHandle, task_id: i64, ur
 pub async fn db_prepare_update(
     app_handle: tauri::AppHandle,
     url: String,
+    version: Option<String>,
     threads: Option<u32>,
 ) -> Result<serde_json::Value, String> {
     let threads = threads.unwrap_or(8).clamp(1, 16);
+    let version = version.unwrap_or_default();
     let conn = open_sqlite(&app_handle)?;
+    // 去重复用任意存活任务（不区分 URL）：所有下载任务都写同一个目标文件
+    // installer_path()（sfmmm_update.exe），若对不同 URL 各自新建任务会导致两个
+    // 后台任务并发截断/写入同一文件，安装包损坏。因此只要本进程有存活任务就
+    // 复用（单一写入者），不新建并发任务。
     let existing: Option<i64> = conn
         .query_row(
             "SELECT id FROM update_tasks
@@ -510,7 +516,18 @@ pub async fn db_prepare_update(
         )
         .ok();
     let (task_id, is_new) = if let Some(id) = existing.filter(|&id| task_alive(id)) {
-        // 本进程确实在后台跑：复用，不重下
+        // 本进程确实在后台跑：复用，不重下。仅当复用任务尚未开始下载
+        // （status='pending'）且 URL 一致时才同步版本——已进入 downloading 的
+        // 任务正在写文件，重标版本会让 ready 行声称是最新版本而安装包实际是
+        // 旧构建（前端据此静默安装旧版）；保留原版本则前端版本门会触发重新下载
+        if !version.is_empty() {
+            if let Err(e) = conn.execute(
+                "UPDATE update_tasks SET version = ? WHERE id = ? AND url = ? AND status = 'pending'",
+                rusqlite::params![version, id, url],
+            ) {
+                log::warn!("[update] 同步复用任务版本失败: {e}");
+            }
+        }
         (id, false)
     } else {
         // 无进行中任务，或上次进程残留的运行态行（句柄表为空，无人接管）——
@@ -520,8 +537,8 @@ pub async fn db_prepare_update(
         }
         let id = conn
             .query_row(
-                "INSERT INTO update_tasks (url, status) VALUES (?, 'pending') RETURNING id",
-                rusqlite::params![url],
+                "INSERT INTO update_tasks (url, version, status) VALUES (?, ?, 'pending') RETURNING id",
+                rusqlite::params![url, version],
                 |r| r.get(0),
             )
             .map_err(|e| format!("写入任务记录失败: {e}"))?;
@@ -543,6 +560,42 @@ pub async fn db_prepare_update(
     }
 
     Ok(serde_json::json!({ "taskId": task_id }))
+}
+
+/// 将 update_tasks 行映射为前端状态 JSON。
+/// 参数顺序与 SELECT 列序（id, url, version, status, percent, stage, error,
+/// created_at, updated_at, finished_at）一一对应，抽成纯函数便于单测列序不漂移。
+fn status_row_json(
+    id: i64,
+    url: &str,
+    version: &str,
+    status: &str,
+    percent: i64,
+    stage: &str,
+    error: &str,
+    created_at: &str,
+    updated_at: &str,
+    finished_at: &str,
+) -> serde_json::Value {
+    serde_json::json!({
+        "id": id,
+        "url": url,
+        "version": version,
+        "status": status,
+        "percent": percent,
+        "stage": stage,
+        "error": error,
+        "createdAt": created_at,
+        "updatedAt": updated_at,
+        "finishedAt": finished_at,
+    })
+}
+
+/// 清除 config 表中的待应用更新标志（单一写入点，消除与前端 ready 事件异步写入的竞态）
+fn clear_pending_update(conn: &Connection) -> Result<(), String> {
+    conn.execute("DELETE FROM config WHERE `key` = 'pending_update'", [])
+        .map(|_| ())
+        .map_err(|e| format!("清除 pending_update 标志失败: {e}"))
 }
 
 /// 查询最近一次更新下载任务状态（设置页挂载时恢复进行中进度/错误/已就绪）。
@@ -571,21 +624,22 @@ pub async fn db_get_update_status(
     }
     let row: Option<serde_json::Value> = conn
         .query_row(
-            "SELECT id, url, status, percent, stage, error, created_at, updated_at, finished_at
+            "SELECT id, url, version, status, percent, stage, error, created_at, updated_at, finished_at
              FROM update_tasks ORDER BY id DESC LIMIT 1",
             [],
             |r| {
-                Ok(serde_json::json!({
-                    "id": r.get::<_, i64>(0)?,
-                    "url": r.get::<_, String>(1)?,
-                    "status": r.get::<_, String>(2)?,
-                    "percent": r.get::<_, i64>(3)?,
-                    "stage": r.get::<_, String>(4)?,
-                    "error": r.get::<_, String>(5)?,
-                    "createdAt": r.get::<_, String>(6)?,
-                    "updatedAt": r.get::<_, String>(7)?,
-                    "finishedAt": r.get::<_, String>(8)?,
-                }))
+                Ok(status_row_json(
+                    r.get::<_, i64>(0)?,
+                    &r.get::<_, String>(1)?,
+                    &r.get::<_, String>(2)?,
+                    &r.get::<_, String>(3)?,
+                    r.get::<_, i64>(4)?,
+                    &r.get::<_, String>(5)?,
+                    &r.get::<_, String>(6)?,
+                    &r.get::<_, String>(7)?,
+                    &r.get::<_, String>(8)?,
+                    &r.get::<_, String>(9)?,
+                ))
             },
         )
         .optional()
@@ -599,25 +653,29 @@ pub async fn db_get_update_status(
                 v["status"] = serde_json::json!("ready");
                 v["percent"] = serde_json::json!(100);
                 v["stage"] = serde_json::json!("done");
-                Ok(v)
             } else if v.get("status").and_then(|s| s.as_str()) == Some("failed") {
                 // 失败的过期残留（安装包不存在，如网络失败后已清理）：
                 // 直接删除任务记录并返回 null，避免每次打开设置页都显示过期的下载失败错误
                 if let Some(id) = v.get("id").and_then(|x| x.as_i64()) {
                     let _ = conn.execute("DELETE FROM update_tasks WHERE id = ?", rusqlite::params![id]);
                 }
-                Ok(serde_json::Value::Null)
-            } else {
-                Ok(v)
+                return Ok(serde_json::Value::Null);
             }
+            // 供前端判断"就绪安装包是否确实在盘上"：ready 任务行可能是残留
+            // （安装包已被上次 bat 安装成功后删除/安装失败清理），文件缺失时
+            // 前端应重新下载而非提升 pending_update，避免对不存在的包重复 applyUpdate
+            v["installerExists"] = serde_json::json!(has_installer);
+            Ok(v)
         }
         None if has_installer => Ok(serde_json::json!({
             "id": 0,
             "url": "",
+            "version": "",
             "status": "ready",
             "percent": 100,
             "stage": "done",
             "error": "",
+            "installerExists": true,
         })),
         None => Ok(serde_json::Value::Null),
     }
@@ -652,27 +710,31 @@ pub async fn db_apply_update(app_handle: tauri::AppHandle) -> Result<String, Str
         .map_err(|e| format!("无法获取当前可执行路径: {}", e))?;
 
     // 创建临时 bat 脚本：等待当前进程退出 → 静默升级 → 启动新版本
+    // 注意：bat 内容必须保持纯 ASCII。cmd.exe 按系统 ANSI 代码页（中文系统为 GBK）
+    // 读取 bat 文件，若把含中文的路径直接写入内容（UTF-8 字节）会被 GBK 误读成乱码
+    // （如 "初\" → "鍒濆"），导致安装包路径失效、更新失败。因此路径一律通过命令行
+    // 参数（%~1/%~2）传入——Windows 命令行是 UTF-16 宽字符，天然支持中文路径，
+    // 不受代码页影响（用户目录为中文用户名时同样成立）。
     let bat_path = std::env::temp_dir().join("sfmmm_restart_update.bat");
     // /S  = NSIS 静默模式
     // /UPDATE = Tauri NSIS 模板约定的升级参数：跳过"卸载旧版本/请勿卸载"询问页，
     //           直接覆盖安装，保留 %APPDATA%\com.sfmmm.app 下的 sqlite 数据
-    let bat_content = format!(
-        "@echo off\r\n\
-         rem 等待当前应用完全退出\r\n\
-         ping 127.0.0.1 -n 5 > nul\r\n\r\n\
-         rem 静默升级（不卸载旧版本，直接覆盖）\r\n\
-         \"{}\" /S /UPDATE\r\n\r\n\
-         rem 启动更新后的应用\r\n\
-         start \"\" \"{}\"\r\n\r\n\
-         rem 删除更新包，避免残留导致下次启动仍提示可更新\r\n\
-         del \"{}\" > nul 2>&1\r\n\r\n\
-         rem 删除自身\r\n\
-         del \"{}\" > nul 2>&1\r\n",
-        path.display(),
-        current_exe.display(),
-        path.display(),
-        bat_path.display(),
-    );
+    let bat_content = "\
+@echo off\r\n\
+rem wait for the current app to fully exit\r\n\
+ping 127.0.0.1 -n 5 > nul\r\n\
+\r\n\
+rem silently update (overwrite install, keep app data)\r\n\
+\"%~1\" /S /UPDATE\r\n\
+\r\n\
+rem launch the updated app\r\n\
+start \"\" \"%~2\"\r\n\
+\r\n\
+rem remove the installer package to avoid re-prompting on next start\r\n\
+del \"%~1\" > nul 2>&1\r\n\
+\r\n\
+rem remove this script\r\n\
+del \"%~f0\" > nul 2>&1\r\n";
     std::fs::write(&bat_path, &bat_content)
         .map_err(|e| format!("创建更新脚本失败: {}", e))?;
 
@@ -682,18 +744,152 @@ pub async fn db_apply_update(app_handle: tauri::AppHandle) -> Result<String, Str
     let mut cmd = {
         use std::os::windows::process::CommandExt;
         let mut c = std::process::Command::new(&bat_path);
+        c.arg(&path).arg(&current_exe);
         c.creation_flags(CREATE_NO_WINDOW);
         c
     };
     #[cfg(not(windows))]
-    let mut cmd = std::process::Command::new(&bat_path);
+    let mut cmd = {
+        let mut c = std::process::Command::new(&bat_path);
+        c.arg(&path).arg(&current_exe);
+        c
+    };
 
     cmd.spawn()
         .map_err(|e| format!("启动更新脚本失败: {}", e))?;
+
+    // 同步清除待更新标志（单一写入点，消除与前端 ready 事件异步写入 pending_update
+    // 的竞态）：走到 spawn 成功这一步即代表更新已确定要执行，此时才消费标志并退出，
+    // 避免新进程读到残留标志对已删除的安装包重复 applyUpdate（bat 安装成功后 del 包）。
+    // 注意必须在 spawn 成功之后清理：若 bat 写入/启动失败（返回 Err），标志保留，
+    // 下次启动仍可重试自动应用，而不是白白丢掉一个已就绪的有效安装包。
+    match open_sqlite(&app_handle) {
+        Ok(conn) => {
+            if let Err(e) = clear_pending_update(&conn) {
+                log::warn!("[update] {e}");
+            }
+        }
+        Err(e) => log::warn!("[update] 打开 SQLite 清除 pending_update 标志失败: {e}"),
+    }
 
     // 退出当前应用，避免安装程序无法覆盖运行中的 exe
     app_handle.exit(0);
 
     // 注意：exit 会终止进程，因此 Ok 返回值不会到达前端
     Ok("更新程序已启动，应用将自动更新并重启".into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rusqlite::Connection;
+
+    /// 构造与 lib.rs migration 14（create_update_tasks）一致的 update_tasks 表结构
+    fn create_update_tasks_without_version(conn: &Connection) {
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS update_tasks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                url TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'pending',
+                percent INTEGER DEFAULT 0,
+                stage TEXT DEFAULT '',
+                error TEXT DEFAULT '',
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                finished_at TEXT DEFAULT ''
+            );",
+        )
+        .unwrap();
+    }
+
+    /// 构造与 lib.rs migration 2（ensure_tables_exist）一致的 config 表结构
+    fn create_config_table(conn: &Connection) {
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS config (
+                id INTEGER PRIMARY KEY,
+                `key` TEXT NOT NULL UNIQUE,
+                value TEXT
+            );",
+        )
+        .unwrap();
+    }
+
+    /// migration 16 契约：ALTER TABLE 新增 version 列后，插入/读取 version 往返一致
+    #[test]
+    fn migration16_version_column_roundtrips() {
+        let conn = Connection::open_in_memory().unwrap();
+        create_update_tasks_without_version(&conn);
+        // 执行 migration 16 的 SQL
+        conn.execute_batch("ALTER TABLE update_tasks ADD COLUMN version TEXT DEFAULT ''")
+            .unwrap();
+
+        conn.execute(
+            "INSERT INTO update_tasks (url, version, status) VALUES ('https://example.com/setup.exe', '1.2.3', 'pending')",
+            [],
+        )
+        .unwrap();
+        let ver: String = conn
+            .query_row("SELECT version FROM update_tasks WHERE id = 1", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(ver, "1.2.3");
+    }
+
+    /// status_row_json 列序映射：SELECT 10 列的索引 → JSON 字段一一对应
+    #[test]
+    fn status_row_json_maps_select_columns_in_order() {
+        let conn = Connection::open_in_memory().unwrap();
+        create_update_tasks_without_version(&conn);
+        conn.execute_batch("ALTER TABLE update_tasks ADD COLUMN version TEXT DEFAULT ''")
+            .unwrap();
+        conn.execute(
+            "INSERT INTO update_tasks (url, version, status, percent, stage, error) VALUES ('https://example.com/setup.exe', '2.0.0', 'ready', 100, 'done', '')",
+            [],
+        )
+        .unwrap();
+
+        let v: serde_json::Value = conn
+            .query_row(
+                "SELECT id, url, version, status, percent, stage, error, created_at, updated_at, finished_at
+                 FROM update_tasks ORDER BY id DESC LIMIT 1",
+                [],
+                |r| {
+                    Ok(status_row_json(
+                        r.get::<_, i64>(0)?,
+                        &r.get::<_, String>(1)?,
+                        &r.get::<_, String>(2)?,
+                        &r.get::<_, String>(3)?,
+                        r.get::<_, i64>(4)?,
+                        &r.get::<_, String>(5)?,
+                        &r.get::<_, String>(6)?,
+                        &r.get::<_, String>(7)?,
+                        &r.get::<_, String>(8)?,
+                        &r.get::<_, String>(9)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(v["version"], "2.0.0");
+        assert_eq!(v["status"], "ready");
+        assert_eq!(v["percent"], 100);
+        assert_eq!(v["stage"], "done");
+        assert_eq!(v["url"], "https://example.com/setup.exe");
+    }
+
+    /// clear_pending_update 删除 config 表中的待应用标志
+    #[test]
+    fn clear_pending_update_deletes_flag() {
+        let conn = Connection::open_in_memory().unwrap();
+        create_config_table(&conn);
+        conn.execute(
+            "INSERT INTO config (`key`, value) VALUES ('pending_update', 'true')",
+            [],
+        )
+        .unwrap();
+        clear_pending_update(&conn).unwrap();
+
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM config WHERE `key` = 'pending_update'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 0);
+    }
 }

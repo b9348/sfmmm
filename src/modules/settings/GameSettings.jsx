@@ -27,7 +27,7 @@ import { open as openUrl } from '@tauri-apps/plugin-shell'
 import { getConfig, setConfig } from '../../services/dbHelper'
 import { Acknowledgments } from './Acknowledgments'
 import i18n from '../../i18n'
-import { checkVersion, checkGitHubUpdate, prepareUpdate, applyUpdate, getUpdateStatus, compareVersions } from '../../services/updateApi'
+import { checkVersion, checkGitHubUpdate, prepareUpdate, applyUpdate, getUpdateStatus, compareVersions, armPendingUpdate } from '../../services/updateApi'
 import APP_VERSION from '../../version.js'
 
 const useStyles = makeStyles({
@@ -154,8 +154,8 @@ export function GameSettings({ config, onConfigChange, appUpdateInfo }) {
   // 离开设置页后更新下载仍由 Rust 后台任务执行（与订阅下载同模式）：
   // 挂载时查询持久化状态恢复 UI；下载期间监听全局 "update-progress" 事件刷新进度。
   // 恢复以 DB 为准（同订阅记录页 refresh() 语义）：只要任务状态是 ready 就切
-  // "重启并更新"，不依赖 pending_update 等前端杂项标志——该标志只负责"下次启动
-  // 自动应用"，由 App.jsx 启动流程消费，二者互不干扰。
+  // "重启并更新"。pending_update 由 App.jsx 全局监听在 ready 时自动写入，负责
+  // "下次启动自动应用"，二者互不干扰。
   useEffect(() => {
     let cancelled = false
     let unlistenFn = null
@@ -195,8 +195,16 @@ export function GameSettings({ config, onConfigChange, appUpdateInfo }) {
         setDownloadError('')
         setDownloadSpeed(0)
         setPrepared(true)
-        setPendingUpdate(false)
-        saveConfig({ pending_update: 'false' })
+        // 复用共享提升门禁（armPendingUpdate：版本 + 安装包在盘校验 + 写
+        // pending_update + 清退避），与 App.jsx 全局监听行为一致：仅当记录版本
+        // === 当前最新版才安排下次启动自动应用，陈旧下载不自动武装（防下次启动
+        // 被版本门禁判废后整包重下）；"稍后"按钮语义不变
+        armPendingUpdate(updateInfo?.latestVersion || '').then((armed) => {
+          if (armed) {
+            setPendingUpdate(true)
+            saveConfig({ pending_update: 'true' })
+          }
+        }).catch((e) => console.warn('[Update] 提升待应用失败:', e))
       } else if (payload.status === 'failed') {
         setDownloading(false)
         setDownloadStage('')
@@ -261,6 +269,11 @@ export function GameSettings({ config, onConfigChange, appUpdateInfo }) {
     } finally {
       setChecking(false)
     }
+    // 用户手动检测 = 显式解除自动更新失败退避（fire-and-forget：写失败只告警，
+    // 不能把一次成功的版本检测误报为"检测失败"并隐藏更新入口）
+    setConfig('auto_update_fail_at', '').catch((e) => {
+      console.warn('[Update] 清除失败退避失败:', e)
+    })
   }
 
   const handleDownloadUpdate = async () => {
@@ -272,7 +285,7 @@ export function GameSettings({ config, onConfigChange, appUpdateInfo }) {
     try {
       // 创建后台下载任务后立即返回；下载在 Rust 执行，进度由 update-progress 事件回传，
       // 离开设置页也不中断，重进页面通过 getUpdateStatus() 恢复
-      const res = await prepareUpdate(updateInfo.updateUrl, 8)
+      const res = await prepareUpdate(updateInfo.updateUrl, updateInfo.latestVersion, 8)
       taskIdRef.current = res?.taskId ?? null
     } catch (e) {
       console.error('[Update] 创建下载任务失败:', e)
@@ -299,7 +312,7 @@ export function GameSettings({ config, onConfigChange, appUpdateInfo }) {
       setDownloading(true)
       setDownloadProgress(0)
       setDownloadStage('downloading')
-      const res = await prepareUpdate(data.updateUrl, 8)
+      const res = await prepareUpdate(data.updateUrl, data.version, 8)
       taskIdRef.current = res?.taskId ?? null
     } catch (e) {
       console.error('[Update] GitHub 下载失败:', e)
@@ -311,6 +324,9 @@ export function GameSettings({ config, onConfigChange, appUpdateInfo }) {
 
   const handleApplyUpdate = async () => {
     try {
+      // 手动立即应用时同步消费 pending_update：避免安装完成后下次启动
+      // 又对已删除的安装包重复执行 applyUpdate（与 App 启动自动应用同语义）
+      await saveConfig({ pending_update: 'false' })
       await applyUpdate()
     } catch (e) {
       console.error('[Update] 启动更新失败:', e)

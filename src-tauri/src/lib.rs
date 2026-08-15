@@ -1388,6 +1388,15 @@ pub fn run() {
             );",
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 16,
+            description: "add_version_to_update_tasks",
+            // 记录下载任务对应的目标版本：静默自动更新时，前端据此判断 ready 安装包
+            // 是否仍对应当前最新版（避免把过期/残留的旧版安装包自动提升为待应用，
+            // 也避免对其他渠道下载的旧版安装包重复覆盖）。旧行默认空串，视为未知。
+            sql: "ALTER TABLE update_tasks ADD COLUMN version TEXT DEFAULT ''",
+            kind: MigrationKind::Up,
+        },
     ];
 
     tauri::Builder::default()

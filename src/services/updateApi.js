@@ -3,6 +3,7 @@
  */
 
 import { invoke } from '@tauri-apps/api/core'
+import { setConfig } from './dbHelper'
 
 // 版本清单固定 URL（图床公开文件，CI 发版时删旧传新维护；无需认证）
 // 构建时通过环境变量注入，例如：VITE_LATEST_URL=https://img.b9349.dpdns.org/file/sfm/installer/latest.json
@@ -55,20 +56,26 @@ export async function checkForUpdates() {
     if (data && data.version) {
       return data
     }
-    return null
+    // 清单格式异常（CDN 错误页 200 等）：与"无更新"区分，标记 error 供上层决策
+    return { error: '版本清单格式异常' }
   } catch (e) {
+    // 网络故障（图床被墙/超时）：不能当作"无更新"，标记 error 保留 pending_update
     console.warn('[Update] 检测更新失败:', e.message)
-    return null
+    return { error: e.message }
   }
 }
 
 /**
  * 检测是否有新版本
+ * 返回 error 字段表示更新源故障（区别于"确认无更新"），调用方据此保留待应用状态
  */
 export async function checkVersion(currentVersion) {
   const latest = await checkForUpdates()
   if (!latest) {
     return { hasUpdate: false, latestVersion: null, updateUrl: null }
+  }
+  if (latest.error) {
+    return { hasUpdate: false, latestVersion: null, updateUrl: null, error: latest.error }
   }
   const hasUpdate = compareVersions(latest.version, currentVersion) > 0
   return {
@@ -108,11 +115,12 @@ export async function checkGitHubUpdate(owner = GH_OWNER, repo = GH_REPO) {
  * 状态用 getUpdateStatus() 查询恢复）。服务端支持 Range 时按
  * threads 分块并行下载（默认 8 线程），不支持则自动回退单流。
  * @param {string} url - 安装包下载地址
+ * @param {string} version - 本次下载对应的目标版本（写库，供静默自动更新校验）
  * @param {number} threads - 分块下载线程数（默认 8）
  * @returns {Promise<{taskId: number}>}
  */
-export async function prepareUpdate(url, threads = 8) {
-  return await invoke('db_prepare_update', { url, threads })
+export async function prepareUpdate(url, version = '', threads = 8) {
+  return await invoke('db_prepare_update', { url, version, threads })
 }
 
 /**
@@ -121,6 +129,48 @@ export async function prepareUpdate(url, threads = 8) {
  */
 export async function getUpdateStatus() {
   return await invoke('db_get_update_status')
+}
+
+/**
+ * 下载就绪后统一"提升待应用"（App 全局监听与设置页 ready 分支共用同一门禁，
+ * 消除手动/自动两条路径的逻辑分歧）：
+ * 仅当任务行就绪、安装包确实在盘上且记录版本 === 当前最新版时才写入
+ * pending_update='true'（防陈旧提升——旧版/未知版本安装包不自动应用），
+ * 并顺带清除失败退避时间戳（下载成功即视为网络恢复）。
+ * 跳过提升时记录具体原因日志，避免"静默不武装"导致下次启动不自动应用却无提示。
+ * @param {string} latestVersion - 当前最新版本号（调用方无可靠参照时传空串，
+ *                                 此时不提升并记录日志，防止基于陈旧 UI 状态误武装）
+ * @returns {Promise<boolean>} 是否成功提升
+ */
+export async function armPendingUpdate(latestVersion) {
+  const st = await getUpdateStatus()
+  if (!st) {
+    console.warn('[Update] 跳过提升待应用：无任务记录')
+    return false
+  }
+  if (st.status !== 'ready') {
+    console.warn(`[Update] 跳过提升待应用：任务状态非就绪（${st.status}）`)
+    return false
+  }
+  if (!st.installerExists) {
+    console.warn('[Update] 跳过提升待应用：安装包不在盘上（可能已被消费/清理）')
+    return false
+  }
+  if (!st.version || !latestVersion || st.version !== latestVersion) {
+    console.warn(`[Update] 跳过提升待应用：安装包版本 ${st.version || '未知'} 与最新版 ${latestVersion || '未知'} 不一致`)
+    return false
+  }
+  try {
+    await setConfig('pending_update', 'true')
+  } catch (e) {
+    console.warn('[Update] 写入待更新状态失败:', e)
+    return false
+  }
+  // 下载成功：清除失败退避（fire-and-forget，写失败仅告警）
+  setConfig('auto_update_fail_at', '').catch((e) => {
+    console.warn('[Update] 清除失败退避失败:', e)
+  })
+  return true
 }
 
 /**
