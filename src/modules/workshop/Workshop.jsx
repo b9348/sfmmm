@@ -6,6 +6,7 @@ import { BrowseMods } from './BrowseMods'
 import { MyMods } from './MyMods'
 import { Discussion } from './Discussion'
 import SubscriptionRecords from '../subscribe/SubscriptionRecords'
+import { useTabPrefetch } from '../../hooks/useTabPrefetch'
 
 const useStyles = makeStyles({
   root: {
@@ -32,6 +33,9 @@ const useStyles = makeStyles({
   },
 })
 
+// tab 顺序即预加载链：当前 tab 激活时预挂载下一个（云→讨论→我的→订阅）
+const TABS = ['browse', 'discuss', 'my', 'records']
+
 export function Workshop({ initialModId, initialCommentId, onConsumeNavTarget }) {
   const { t } = useTranslation()
   const styles = useStyles()
@@ -44,6 +48,8 @@ export function Workshop({ initialModId, initialCommentId, onConsumeNavTarget })
     return m && ['browse', 'my', 'records', 'discuss'].includes(m[1]) ? m[1] : 'browse'
   }
   const [subTab, setSubTab] = useState(getInitialTab)
+  // 预加载链：当前 tab 激活时预挂载下一个 tab（云→讨论→我的→订阅），切换即时展示
+  const { mounted } = useTabPrefetch(subTab, TABS)
 
   const handleTabSelect = (_, d) => {
     setSubTab(d.value)
@@ -92,18 +98,24 @@ export function Workshop({ initialModId, initialCommentId, onConsumeNavTarget })
       </TabList>
 
       <div className={styles.content}>
-        <div className={`${styles.tabContent}${subTab !== 'browse' ? ` ${styles.tabHidden}` : ''}`}>
-          <BrowseMods initialModId={initialModId} initialCommentId={initialCommentId} onConsumeNavTarget={onConsumeNavTarget} />
-        </div>
-        <div className={`${styles.tabContent}${subTab !== 'discuss' ? ` ${styles.tabHidden}` : ''}`}>
-          <Discussion />
-        </div>
-        <div className={`${styles.tabContent}${subTab !== 'my' ? ` ${styles.tabHidden}` : ''}`}>
-          <MyMods />
-        </div>
-        <div className={`${styles.tabContent}${subTab !== 'records' ? ` ${styles.tabHidden}` : ''}`}>
-          <SubscriptionRecords />
-        </div>
+        {TABS.map((tab) => {
+          // 未挂载（含未预加载）的 tab 不渲染；已挂载的保持挂载，仅切换显隐
+          if (!mounted.has(tab)) return null
+          const visible = tab === subTab
+          let content
+          if (tab === 'browse') content = <BrowseMods active={visible} initialModId={initialModId} initialCommentId={initialCommentId} onConsumeNavTarget={onConsumeNavTarget} />
+          else if (tab === 'discuss') content = <Discussion active={visible} />
+          else if (tab === 'my') content = <MyMods active={visible} />
+          else content = <SubscriptionRecords active={visible} />
+          return (
+            <div
+              key={tab}
+              className={`${styles.tabContent}${visible ? '' : ` ${styles.tabHidden}`}`}
+            >
+              {content}
+            </div>
+          )
+        })}
       </div>
     </div>
   )

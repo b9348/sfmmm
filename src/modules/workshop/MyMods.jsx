@@ -994,7 +994,7 @@ export function EditModPage({ mod: initialMod, onClose, onUpdated }) {
   )
 }
 
-export function MyMods() {
+export function MyMods({ active = true }) {
   const styles = useStyles()
   const { t } = useTranslation()
   const { user, isLoggedIn } = useAuth()
@@ -1027,12 +1027,25 @@ export function MyMods() {
     }
   }, [user])
 
+  // 挂载即拉取：Workshop 用 useTabPrefetch 只挂载当前 + 预加载的下一个 tab（非全挂载），
+  // 预加载目标在后台提前请求，切换即时展示；避免冷启动多个页面查询挤在唯一连接上排队
   useEffect(() => {
     if (isLoggedIn && !initialFetch.current) {
       initialFetch.current = true
       fetchMods()
     }
   }, [isLoggedIn, fetchMods])
+
+  // 常驻挂载下，从隐藏回到可见（再次进入该 tab）时重新拉取，避免列表数据过期；
+  // 首次展示（预加载目标）不重复拉取，直接呈现预加载结果
+  const wasShown = useRef(false)
+  useEffect(() => {
+    if (!active || !isLoggedIn) return
+    if (wasShown.current) {
+      fetchMods()
+    }
+    wasShown.current = true
+  }, [active, isLoggedIn, fetchMods])
 
   const handleEdit = async (mod) => {
     try {

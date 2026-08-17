@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
@@ -126,7 +126,7 @@ function isRunning(status) {
 // （dll/folder/composite 都在 BepInEx/plugins 下 → mods；v1/v2 各自对应）
 const LOCAL_TAB_BY_CATEGORY = { v1: 'v1', v2: 'v2' }
 
-export function SubscriptionRecords() {
+export function SubscriptionRecords({ active = true }) {
   const { t } = useTranslation()
   const styles = useStyles()
   const { openMod, openLocalMods } = useUserNav()
@@ -201,6 +201,8 @@ export function SubscriptionRecords() {
     }
   }, [])
 
+  // 挂载即拉取并监听全局进度：Workshop 用 useTabPrefetch 只挂载当前 + 预加载的下一个 tab，
+  // 预加载目标在后台提前请求，切换即时展示；避免冷启动多个页面查询挤在唯一连接上排队
   useEffect(() => {
     refresh()
     // 全局进度事件：后台任务 emit 广播，此页刷新对应行进度
@@ -232,6 +234,17 @@ export function SubscriptionRecords() {
       .catch(() => {})
     return () => { if (unlistenFn) unlistenFn() }
   }, [refresh])
+
+  // 常驻挂载下，从隐藏回到可见（再次进入该 tab）时重新拉取，避免列表数据过期；
+  // 首次展示（预加载目标）不重复拉取，直接呈现预加载结果
+  const wasShown = useRef(false)
+  useEffect(() => {
+    if (!active) return
+    if (wasShown.current) {
+      refresh()
+    }
+    wasShown.current = true
+  }, [active, refresh])
 
   const cancelTask = async (taskId) => {
     try {

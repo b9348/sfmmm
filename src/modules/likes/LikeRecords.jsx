@@ -186,10 +186,11 @@ export function LikeRecords({ panel, visible = true }) {
     ])
     setLikedMods(likedCached)
     setRatedMods(ratedCached)
-    // 缓存为空时（首次使用）查一次库填充
-    if (likedCached.length === 0) refreshLiked()
-    if (ratedCached.length === 0) refreshRated()
-  }, [refreshLiked, refreshRated])
+    // 缓存为空时（首次使用）查一次库填充；隐藏的 panel 不查远程库，
+    // 避免单栏模式下无用查询（panel='liked' 时评分栏隐藏，panel='rated' 时点赞栏隐藏）
+    if (panel !== 'rated' && likedCached.length === 0) refreshLiked()
+    if (panel !== 'liked' && ratedCached.length === 0) refreshRated()
+  }, [panel, refreshLiked, refreshRated])
 
   // 首次挂载：只读 SQLite 缓存，避免每次查远程库
   useEffect(() => {

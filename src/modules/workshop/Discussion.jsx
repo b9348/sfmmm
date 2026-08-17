@@ -68,7 +68,7 @@ const useStyles = makeStyles({
  * 讨论区：单一帖子流（投票帖在卡片上以徽标区分），不设内部 tab；
  * 详情使用 #/discuss/<id>?comment=<cid> hash（「我的」历史跳转定位用）。
  */
-export function Discussion() {
+export function Discussion({ active = true }) {
   const { t } = useTranslation()
   const styles = useStyles()
   const { user, isLoggedIn } = useAuth()
@@ -223,12 +223,24 @@ export function Discussion() {
   }, [search, sortBy, sortOrder, peek, fetchPage, fetchFresh, prefetch])
 
   const initialFetch = useRef(false)
+  // 挂载即拉取：Workshop 用 useTabPrefetch 只挂载当前 + 预加载的下一个 tab（非全挂载），
+  // 预加载目标在后台提前请求，切换即时展示；避免冷启动多个页面查询挤在唯一连接上排队
   useEffect(() => {
-    if (!initialFetch.current) {
-      initialFetch.current = true
-      fetchList(1)
-    }
+    if (initialFetch.current) return
+    initialFetch.current = true
+    fetchList(1)
   }, [fetchList])
+
+  // 常驻挂载下，从隐藏回到可见（再次进入该 tab）时强制刷新，避免列表数据过期；
+  // 首次展示（预加载目标）不重复拉取，直接呈现预加载结果
+  const wasShown = useRef(false)
+  useEffect(() => {
+    if (!active) return
+    if (wasShown.current) {
+      fetchList(1, search, sortBy, sortOrder, { force: true })
+    }
+    wasShown.current = true
+  }, [active, fetchList, search, sortBy, sortOrder])
 
   // 时间正/倒序持久化到 sqlite config 表（个性化浏览习惯，跨会话保持）
   useEffect(() => {

@@ -56,7 +56,7 @@ const useStyles = makeStyles({
   },
   })
 
-export function BrowseMods({ initialModId, initialCommentId, onConsumeNavTarget }) {
+export function BrowseMods({ initialModId, initialCommentId, onConsumeNavTarget, active = true }) {
   const onConsumeRef = useRef(onConsumeNavTarget)
   useEffect(() => { onConsumeRef.current = onConsumeNavTarget }, [onConsumeNavTarget])
   const styles = useStyles()
@@ -273,12 +273,24 @@ export function BrowseMods({ initialModId, initialCommentId, onConsumeNavTarget 
     saveItemsPerRow(next)
   }, [saveItemsPerRow])
 
+  // 挂载即拉取：Workshop 用 useTabPrefetch 只挂载当前 + 预加载的下一个 tab（非全挂载），
+  // 预加载目标在后台提前请求，切换即时展示；避免冷启动多个页面查询挤在唯一连接上排队
   useEffect(() => {
-    if (!initialFetch.current) {
-      initialFetch.current = true
-      fetchMods(page)
-    }
+    if (initialFetch.current) return
+    initialFetch.current = true
+    fetchMods(page)
   }, [fetchMods, page])
+
+  // 常驻挂载下，从隐藏回到可见（再次进入该 tab）时强制刷新，避免列表数据过期；
+  // 首次展示（预加载目标）不重复拉取，直接呈现预加载结果
+  const wasShown = useRef(false)
+  useEffect(() => {
+    if (!active) return
+    if (wasShown.current) {
+      fetchMods(page, search, categoryFilter, sortBy, sortOrder, { force: true })
+    }
+    wasShown.current = true
+  }, [active, fetchMods, page, search, categoryFilter, sortBy, sortOrder])
 
   // 详情页以覆盖层形式渲染在列表上方，列表保持挂载：
   // 返回时不会重载数据，滚动位置与图片缓存都得以保留。

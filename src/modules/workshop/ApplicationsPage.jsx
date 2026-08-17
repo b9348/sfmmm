@@ -193,26 +193,28 @@ export default function ApplicationsPage({ onNavigate, panel, visible = true }) 
     }
   }, [user, notifPage])
 
+  // 挂载即拉取（预加载设计），但按 panel 裁剪：apps 面板不需要通知查询，notifs 面板不需要申请查询，
+  // 避免当前面板 + 预加载面板同时把无用查询挤进唯一数据库连接排队
   useEffect(() => {
-    if (isLoggedIn && user) {
+    if (isLoggedIn && user && panel !== 'notifs') {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       fetchPendingApps()
     }
-  }, [isLoggedIn, user, fetchPendingApps])
+  }, [isLoggedIn, user, panel, fetchPendingApps])
 
   useEffect(() => {
-    if (isLoggedIn && user) {
+    if (isLoggedIn && user && panel !== 'apps') {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       fetchNotifs()
     }
-  }, [isLoggedIn, user, fetchNotifs])
+  }, [isLoggedIn, user, panel, fetchNotifs])
 
-  // 每次打开页面时刷新侧边栏未读计数
+  // 未读计数只需当前可见面板刷新（预加载面板不可见，避免重复查询）
   useEffect(() => {
-    if (isLoggedIn && user) {
+    if (visible && isLoggedIn && user) {
       refreshUnread(user.user_id)
     }
-  }, [isLoggedIn, user, refreshUnread])
+  }, [visible, isLoggedIn, user, refreshUnread])
 
   // 常驻挂载下，从隐藏回到可见（再次进入该 tab）时重新拉取，避免列表/未读状态过期；
   // 首次展示（预加载目标）不重复拉取，直接呈现预加载结果
@@ -220,12 +222,14 @@ export default function ApplicationsPage({ onNavigate, panel, visible = true }) 
   useEffect(() => {
     if (!visible || !isLoggedIn || !user) return
     if (wasShown.current) {
-      fetchPendingApps()
-      fetchNotifs()
+      // 有意行为：回到可见 tab 时按 panel 刷新对应数据；与挂载 effect 同规则豁免
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      if (panel !== 'notifs') fetchPendingApps()
+      if (panel !== 'apps') fetchNotifs()
       refreshUnread(user.user_id)
     }
     wasShown.current = true
-  }, [visible, isLoggedIn, user, fetchPendingApps, fetchNotifs, refreshUnread])
+  }, [visible, isLoggedIn, user, panel, fetchPendingApps, fetchNotifs, refreshUnread])
 
   const handleApprove = async (appId) => {
     try {
