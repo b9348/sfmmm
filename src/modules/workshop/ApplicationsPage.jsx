@@ -60,6 +60,7 @@ const useStyles = makeStyles({
     overflow: 'auto',
   },
   card: {
+    position: 'relative',
     padding: '12px',
     marginBottom: '8px',
     cursor: 'pointer',
@@ -68,10 +69,25 @@ const useStyles = makeStyles({
       boxShadow: tokens.shadow4,
     },
   },
+  unreadDot: {
+    width: '8px',
+    height: '8px',
+    borderRadius: '50%',
+    backgroundColor: tokens.colorBrandBackground,
+    flexShrink: 0,
+  },
+  cardRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '10px',
+    minWidth: 0,
+  },
   cardContent: {
     display: 'flex',
     flexDirection: 'column',
     gap: '4px',
+    flex: 1,
+    minWidth: 0,
   },
   metaText: {
     fontSize: tokens.fontSizeSmall,
@@ -359,7 +375,9 @@ export default function ApplicationsPage({ onNavigate, panel, visible = true }) 
                 // mod 通知走原有详情跳转；讨论区通知跳转到讨论详情对应楼层
                 onNavigate?.(n.entity || 'mod', n.target_id, n.comment_id)
               }}>
-                <div className={styles.cardContent}>
+                <div className={styles.cardRow}>
+                  {!n.is_read && <span className={styles.unreadDot} aria-hidden="true" />}
+                  <div className={styles.cardContent}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
                     <Badge appearance="outline" size="small">
                       {n.type === 'new_like' ? t('workshop.notifLike') : n.type === 'new_comment' ? t('workshop.notifComment') : t('workshop.notifReply')}
@@ -404,6 +422,7 @@ export default function ApplicationsPage({ onNavigate, panel, visible = true }) 
                   ) : n.created_at && (
                     <Text size="small" className={styles.metaText}>{n.created_at}</Text>
                   )}
+                  </div>
                 </div>
               </Card>
               )

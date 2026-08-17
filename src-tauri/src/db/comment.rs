@@ -26,32 +26,46 @@ pub async fn db_add_comment(
             None => return Ok(ApiResponse::err("Mod not found")),
         };
 
+        let mut parent_author: Option<u64> = None;
         if let Some(pid) = parent_id {
-            let parent: Option<(u64, u64)> = conn.exec_first(
-                "SELECT id, mod_id FROM mod_comments WHERE id = ?", (pid,)
+            let parent: Option<(u64, u64, u64)> = conn.exec_first(
+                "SELECT id, mod_id, author_id FROM mod_comments WHERE id = ?", (pid,)
             ).map_err(|e| e.to_string())?;
             match parent {
-                Some((_, mid)) if mid == mod_id => {}
+                Some((_, mid, paid)) if mid == mod_id => { parent_author = Some(paid); }
                 Some(_) => return Ok(ApiResponse::err("Parent comment does not belong to this mod")),
                 None => return Ok(ApiResponse::err("Parent comment not found")),
             }
         }
 
         let enc_content = encrypt_str(&content)?;
-        conn.exec_drop(
+        let mut tx = conn.start_transaction(TxOpts::default()).map_err(|e| e.to_string())?;
+        tx.exec_drop(
             "INSERT INTO mod_comments (mod_id, author_id, parent_id, content) VALUES (?, ?, ?, ?)",
             (mod_id, author_id, parent_id, &enc_content),
         ).map_err(|e| e.to_string())?;
 
-        let new_id = conn.last_insert_id();
+        let new_id = tx.last_insert_id();
 
-        if mod_author_id != author_id {
-            let notif_type = if parent_id.is_some() { "new_reply" } else { "new_comment" };
-            conn.exec_drop(
+        // 通知写入：楼中楼回复时通知被回复的评论作者（而非仅 mod 作者），
+        // 同时保留对 mod 作者的提醒；两方去重、排除自己
+        let mut recipients: Vec<u64> = Vec::new();
+        if let Some(pa) = parent_author {
+            if pa != author_id {
+                recipients.push(pa);
+            }
+        }
+        if mod_author_id != author_id && !recipients.contains(&mod_author_id) {
+            recipients.push(mod_author_id);
+        }
+        let notif_type = if parent_id.is_some() { "new_reply" } else { "new_comment" };
+        for uid in recipients {
+            tx.exec_drop(
                 "INSERT INTO mod_notifications (user_id, mod_id, type, comment_id) VALUES (?, ?, ?, ?)",
-                (mod_author_id, mod_id, notif_type, new_id),
+                (uid, mod_id, notif_type, new_id),
             ).map_err(|e| e.to_string())?;
         }
+        tx.commit().map_err(|e| e.to_string())?;
 
         Ok(ApiResponse::ok_val(serde_json::json!({
             "comment_id": new_id,
