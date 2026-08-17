@@ -16,9 +16,23 @@ function extractError(e) {
 
 // ── 通用请求包装 ──
 
+// 单次 db_* 调用的前端超时：即使 Rust 侧因排队/慢查询迟迟不返回，
+// 也限时结束 loading 并报错，避免离开页面后遗留的查询让新页面一直转圈
+const DB_CALL_TIMEOUT_MS = 30_000
+
+function withTimeout(promise, ms) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`请求超时（超过 ${ms / 1000} 秒）`)), ms)
+    promise.then(
+      (v) => { clearTimeout(timer); resolve(v) },
+      (e) => { clearTimeout(timer); reject(e) },
+    )
+  })
+}
+
 async function dbCall(command, args = {}) {
   try {
-    const result = await invoke(command, args)
+    const result = await withTimeout(invoke(command, args), DB_CALL_TIMEOUT_MS)
     if (!result.success) {
       const err = new Error(result.message || '操作失败')
       throw err

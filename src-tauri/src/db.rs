@@ -42,6 +42,10 @@ const DB_POOL_MIN: usize = 0;
 const DB_POOL_MAX: usize = 1;
 const IDLE_TIMEOUT_SECS: i64 = 60;
 const IDLE_CHECK_INTERVAL_SECS: u64 = 10;
+// 连接/读写超时：免费库偶发慢查询或连接失联时，限时释放唯一连接，避免后续 db_* 调用永久排队
+const CONNECT_TIMEOUT_SECS: u64 = 5;
+const IO_TIMEOUT_SECS: u64 = 20;
+const CALL_TIMEOUT_SECS: u64 = 30;
 
 pub(crate) fn semver_cmp(a: &str, b: &str) -> i32 {
     let parse = |s: &str| -> Vec<u32> {
@@ -136,7 +140,12 @@ impl ManagedPool {
                     .get_pool_opts()
                     .clone()
                     .with_constraints(PoolConstraints::new(DB_POOL_MIN, DB_POOL_MAX).unwrap_or_default());
-                let opts: Opts = OptsBuilder::from_opts(opts).pool_opts(pool_opts).into();
+                let opts: Opts = OptsBuilder::from_opts(opts)
+                    .pool_opts(pool_opts)
+                    .tcp_connect_timeout(Some(Duration::from_secs(CONNECT_TIMEOUT_SECS)))
+                    .read_timeout(Some(Duration::from_secs(IO_TIMEOUT_SECS)))
+                    .write_timeout(Some(Duration::from_secs(IO_TIMEOUT_SECS)))
+                    .into();
                 let new_pool = Pool::new(opts).map_err(|e| e.to_string())?;
                 *guard = Some(new_pool);
             }
@@ -172,11 +181,12 @@ where
     R: Send + 'static,
 {
     let pool = state.pool.clone();
-    tokio::task::spawn_blocking(move || {
+    tokio::time::timeout(Duration::from_secs(CALL_TIMEOUT_SECS), tokio::task::spawn_blocking(move || {
         let mut conn = pool.get_conn()?;
         f(&mut conn)
-    })
+    }))
     .await
+    .map_err(|_| format!("数据库请求超时（超过 {} 秒），请稍后重试", CALL_TIMEOUT_SECS))?
     .map_err(|e| e.to_string())?
 }
 
@@ -186,11 +196,12 @@ where
     R: Send + 'static,
 {
     let pool = pool.clone();
-    tokio::task::spawn_blocking(move || {
+    tokio::time::timeout(Duration::from_secs(CALL_TIMEOUT_SECS), tokio::task::spawn_blocking(move || {
         let mut conn = pool.get_conn()?;
         f(&mut conn)
-    })
+    }))
     .await
+    .map_err(|_| format!("数据库请求超时（超过 {} 秒），请稍后重试", CALL_TIMEOUT_SECS))?
     .map_err(|e| e.to_string())?
 }
 
