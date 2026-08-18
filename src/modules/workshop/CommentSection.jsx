@@ -300,8 +300,9 @@ export default function CommentSection({ api, targetId, folderPrefix = 'sfm', sc
     setSubmitting(true)
     try {
       // 1. 先创建回复，pending 图片先用占位文本替代
+      //    parent_id：所属一楼（扁平楼中楼模型）；reply_to_id：被回复的那条消息（供通知定位被回复人）
       const safeContent = stripPendingUrls(prefixedContent)
-      const res = await api.add({ targetId, author_id: user.user_id, content: safeContent, parent_id: topId })
+      const res = await api.add({ targetId, author_id: user.user_id, content: safeContent, parent_id: topId, reply_to_id: replyTo.parentId })
       const replyId = res.data.comment_id
 
       // 2. 上传图片并替换占位符

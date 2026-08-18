@@ -504,6 +504,7 @@
     "openDir": "打开目录",
     "viewInLocalMods": "在本地模组中查看",
     "cancelledNote": "已取消",
+    "gameDirInvalid": "请选择正确的游戏目录",
     "status": {
       "pending": "等待中",
       "downloading": "下载中",

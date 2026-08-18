@@ -3,6 +3,111 @@ use mysql::*;
 
 use crate::db::{decrypt_str, val_to_i64, val_to_string, with_conn, ApiResponse, DbState};
 
+/// 历史数据补录（一次性，幂等）：为楼中楼回复中被 @ 的用户补发漏掉的通知。
+///
+/// 背景：扁平楼中楼模型下 parent_id 统一为一楼 id，旧版通知只发层主与楼主，
+/// "回复楼中楼中的某条消息"时被回复人未入库。前端在内容前加 `@用户名 ` 前缀，
+/// 据此解密匹配被回复人；已有同 (user_id, comment_id) 通知的跳过（含层主/楼主
+/// 已收到的情况），补录为未读，created_at 以该评论的发送时间为准，从最新开始插入。
+/// 由 `cargo run --example backfill_reply_notifications` 触发执行。
+pub async fn backfill_reply_notifications(state: &DbState) -> Result<String, String> {
+    use std::collections::HashMap;
+
+    with_conn(state, move |conn: &mut PooledConn| {
+        // 用户名 → id 映射（username 确定性加密，逐行解密建立全量映射）
+        let mut name_to_id: HashMap<String, u64> = HashMap::new();
+        {
+            let mut rows: Vec<Vec<Value>> = Vec::new();
+            conn.exec_map("SELECT id, username FROM users", (), |row: Row| {
+                rows.push(row.unwrap());
+            }).map_err(|e| e.to_string())?;
+            for r in rows {
+                name_to_id.insert(
+                    decrypt_str(&val_to_string(r[1].clone())),
+                    val_to_i64(&r[0]) as u64,
+                );
+            }
+        }
+
+        // 提取 "@用户名 " 前缀指向的被回复人（用户名为字母数字，不含空格）
+        let mentioned = |content: &str| -> Option<u64> {
+            let rest = content.strip_prefix('@')?;
+            let name = rest.split(' ').next()?;
+            name_to_id.get(name).copied()
+        };
+
+        let mut inserted_mod: usize = 0;
+        let mut inserted_disc: usize = 0;
+        let mut skipped: usize = 0;
+
+        // mod 评论楼中楼（ORDER BY created_at DESC：从最新处开始插入）
+        {
+            let mut rows: Vec<Vec<Value>> = Vec::new();
+            conn.exec_map(
+                "SELECT id, mod_id, author_id, content, created_at FROM mod_comments
+                 WHERE parent_id IS NOT NULL ORDER BY created_at DESC",
+                (),
+                |row: Row| rows.push(row.unwrap()),
+            ).map_err(|e| e.to_string())?;
+            for r in rows {
+                let cid = val_to_i64(&r[0]) as u64;
+                let mod_id = val_to_i64(&r[1]) as u64;
+                let author = val_to_i64(&r[2]) as u64;
+                let content = decrypt_str(&val_to_string(r[3].clone()));
+                let created = val_to_string(r[4].clone());
+                let Some(target) = mentioned(&content) else { skipped += 1; continue };
+                if target == author { skipped += 1; continue; }
+                let exists: Option<(i64,)> = conn.exec_first(
+                    "SELECT 1 FROM mod_notifications WHERE user_id = ? AND comment_id = ? LIMIT 1",
+                    (target, cid),
+                ).map_err(|e| e.to_string())?;
+                if exists.is_some() { skipped += 1; continue; }
+                conn.exec_drop(
+                    "INSERT INTO mod_notifications (user_id, mod_id, type, comment_id, is_read, created_at)
+                     VALUES (?, ?, 'new_reply', ?, 0, ?)",
+                    (target, mod_id, cid, created),
+                ).map_err(|e| e.to_string())?;
+                inserted_mod += 1;
+            }
+        }
+
+        // 讨论区评论楼中楼（同上）
+        {
+            let mut rows: Vec<Vec<Value>> = Vec::new();
+            conn.exec_map(
+                "SELECT id, discussion_id, author_id, content, created_at FROM discussion_comments
+                 WHERE parent_id IS NOT NULL ORDER BY created_at DESC",
+                (),
+                |row: Row| rows.push(row.unwrap()),
+            ).map_err(|e| e.to_string())?;
+            for r in rows {
+                let cid = val_to_i64(&r[0]) as u64;
+                let disc_id = val_to_i64(&r[1]) as u64;
+                let author = val_to_i64(&r[2]) as u64;
+                let content = decrypt_str(&val_to_string(r[3].clone()));
+                let created = val_to_string(r[4].clone());
+                let Some(target) = mentioned(&content) else { skipped += 1; continue };
+                if target == author { skipped += 1; continue; }
+                let exists: Option<(i64,)> = conn.exec_first(
+                    "SELECT 1 FROM discussion_notifications WHERE user_id = ? AND comment_id = ? LIMIT 1",
+                    (target, cid),
+                ).map_err(|e| e.to_string())?;
+                if exists.is_some() { skipped += 1; continue; }
+                conn.exec_drop(
+                    "INSERT INTO discussion_notifications (user_id, discussion_id, type, comment_id, is_read, created_at)
+                     VALUES (?, ?, 'new_reply', ?, 0, ?)",
+                    (target, disc_id, cid, created),
+                ).map_err(|e| e.to_string())?;
+                inserted_disc += 1;
+            }
+        }
+
+        Ok(format!(
+            "补录完成：mod 通知 +{inserted_mod} 条，讨论区通知 +{inserted_disc} 条，跳过 {skipped} 条（无 @ 前缀 / 回复自己 / 已有通知）"
+        ))
+    }).await
+}
+
 #[tauri::command(rename_all = "snake_case")]
 pub async fn db_get_unread_count(
     state: tauri::State<'_, DbState>,

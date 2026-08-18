@@ -852,6 +852,7 @@ pub async fn db_add_discussion_comment(
     author_id: u64,
     content: String,
     parent_id: Option<u64>,
+    reply_to_id: Option<u64>,
 ) -> Result<ApiResponse, String> {
     with_conn(state.inner(), move |conn: &mut PooledConn| {
         let content = content.trim().to_string();
@@ -879,6 +880,20 @@ pub async fn db_add_discussion_comment(
             }
         }
 
+        // 被回复的楼中楼消息作者：楼中楼为扁平模型（parent_id 统一为一楼 id），
+        // "回复楼中楼中的某条消息"时被回复人由 reply_to_id 单独携带
+        let mut reply_to_author: Option<u64> = None;
+        if let Some(rtid) = reply_to_id {
+            let rt: Option<(u64, u64, u64)> = conn.exec_first(
+                "SELECT id, discussion_id, author_id FROM discussion_comments WHERE id = ?", (rtid,)
+            ).map_err(|e| e.to_string())?;
+            match rt {
+                Some((_, did, paid)) if did == discussion_id => { reply_to_author = Some(paid); }
+                Some(_) => return Ok(ApiResponse::err("Reply-target comment does not belong to this discussion")),
+                None => return Ok(ApiResponse::err("Reply-target comment not found")),
+            }
+        }
+
         let enc_content = encrypt_str(&content)?;
         let mut tx = conn.start_transaction(TxOpts::default()).map_err(|e| e.to_string())?;
         tx.exec_drop(
@@ -890,12 +905,14 @@ pub async fn db_add_discussion_comment(
             "UPDATE discussions SET comment_count = comment_count + 1 WHERE id = ?", (discussion_id,)
         ).map_err(|e| e.to_string())?;
 
-        // 通知写入：楼中楼回复时通知被回复的评论作者（而非仅帖子作者），
-        // 同时保留对帖子作者的提醒；两方去重、排除自己
+        // 通知写入：按所涉群体补全 —— 被回复人（reply_to）、层主（parent）、楼主（帖子作者），
+        // 三方去重、排除自己
         let mut recipients: Vec<u64> = Vec::new();
-        if let Some(pa) = parent_author {
-            if pa != author_id {
-                recipients.push(pa);
+        for cand in [reply_to_author, parent_author] {
+            if let Some(uid) = cand {
+                if uid != author_id && !recipients.contains(&uid) {
+                    recipients.push(uid);
+                }
             }
         }
         if disc_author_id != author_id && !recipients.contains(&disc_author_id) {

@@ -5,6 +5,7 @@ import { ArrowClockwise24Regular, ArrowDownload24Regular, Warning24Regular, Chec
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { stat } from '@tauri-apps/plugin-fs'
+import { localizeError } from '../../utils/localizeError'
 import { PREREQ_DOWNLOAD_POINTS, V1_PREREQ_MARKER, V2_PREREQ_MARKER, V2_PREREQ_FONT, RMMOSAIC_MARKER } from './prereqPoints'
 
 export { PREREQ_DOWNLOAD_POINTS, BEPINEX_URL, V1_PREREQ_URL, V2_PREREQ_URL, RMMOSAIC_URL } from './prereqPoints'
@@ -272,7 +273,7 @@ export function BepInExPrereqBanner({ gamePath, onInstalled, category = 'dll', p
           </Button>
         </div>
       )}
-      {error && <Text size="small" className={styles.prereqText} style={{ color: tokens.colorStatusDangerForeground1 }}>{error}</Text>}
+      {error && <Text size="small" className={styles.prereqText} style={{ color: tokens.colorStatusDangerForeground1 }}>{localizeError(t, error)}</Text>}
       <div className={styles.prereqRow}>
         <Button
           size="small"

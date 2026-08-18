@@ -81,11 +81,23 @@ pub(crate) fn read_game_path(app_handle: &tauri::AppHandle) -> Result<String, St
         )
         .map_err(|e| format!("读取 game_path 失败: {e}"))?;
     if path.is_empty() {
-        return Err("未配置游戏路径，请先在设置中配置".into());
+        return Err("GAME_DIR_INVALID".into());
     }
     let p = PathBuf::from(&path);
     if !p.is_dir() {
-        return Err(format!("游戏目录不存在: {path}"));
+        return Err("GAME_DIR_INVALID".into());
+    }
+    let data_dir = p.join("SecretFlasherManaka_Data");
+    if !data_dir.is_dir() {
+        return Err("GAME_DIR_INVALID".into());
+    }
+    let data_file = data_dir.join("data.unity3d");
+    let meta = data_file.metadata().map_err(|_| "GAME_DIR_INVALID".to_string())?;
+    if !meta.is_file() {
+        return Err("GAME_DIR_INVALID".into());
+    }
+    if meta.len() <= 2u64 * 1024 * 1024 * 1024 {
+        return Err("GAME_DIR_INVALID".into());
     }
     Ok(path)
 }

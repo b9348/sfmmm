@@ -378,8 +378,8 @@ export async function deleteImgbedFile(fileUrl) {
 
 // ── 评论系统 ──
 
-export async function addComment({ mod_id, author_id, content, parent_id }) {
-  const res = await dbCall('db_add_comment', { mod_id, author_id, content, parent_id: parent_id || null })
+export async function addComment({ mod_id, author_id, content, parent_id, reply_to_id }) {
+  const res = await dbCall('db_add_comment', { mod_id, author_id, content, parent_id: parent_id || null, reply_to_id: reply_to_id || null })
   return { success: true, data: res.data }
 }
 
@@ -610,8 +610,8 @@ export async function getPollResults({ poll_id, user_id }) {
 
 // ── 讨论区评论（镜像 mod 评论结构，供 CommentSection 泛化复用） ──
 
-export async function addDiscussionComment({ discussion_id, author_id, content, parent_id }) {
-  const res = await dbCall('db_add_discussion_comment', { discussion_id, author_id, content, parent_id: parent_id || null })
+export async function addDiscussionComment({ discussion_id, author_id, content, parent_id, reply_to_id }) {
+  const res = await dbCall('db_add_discussion_comment', { discussion_id, author_id, content, parent_id: parent_id || null, reply_to_id: reply_to_id || null })
   return { success: true, data: res.data }
 }
 

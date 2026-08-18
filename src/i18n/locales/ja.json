@@ -503,6 +503,7 @@
     "cancel": "ダウンロードをキャンセル",
     "openDir": "フォルダを開く",
     "cancelledNote": "キャンセル済み",
+    "gameDirInvalid": "正しいゲームディレクトリを選択してください",
     "status": {
       "pending": "待機中",
       "downloading": "ダウンロード中",

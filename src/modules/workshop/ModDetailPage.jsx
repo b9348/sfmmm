@@ -28,6 +28,7 @@ import { BackButton, FloatingActions, FileRow, UserLink } from '../../components
 import { RatingStarsInteractiveDisplay } from '../../components/common/RatingStars'
 import { LANGUAGES, LANG_LABELS } from '../../i18n/languages'
 import { formatSpeed } from '../../utils/formatSpeed'
+import { localizeError } from '../../utils/localizeError'
 
 function compareSemver(a, b) {
   const normalize = v => (v || '').replace(/^v/i, '')
@@ -115,7 +116,7 @@ export default function ModDetailPage({ mod, onBack, onEdit, scrollToCommentId }
   // 避免 CommentSection 的 fetchComments useCallback 在每次父级渲染时重建
   const modCommentApi = useMemo(() => ({
     list: (args) => getComments({ mod_id: args.targetId, page: args.page, page_size: args.page_size, sort_order: args.sort_order, reply_order: args.reply_order }),
-    add: (args) => addComment({ mod_id: args.targetId, author_id: args.author_id, content: args.content, parent_id: args.parent_id }),
+    add: (args) => addComment({ mod_id: args.targetId, author_id: args.author_id, content: args.content, parent_id: args.parent_id, reply_to_id: args.reply_to_id }),
     replies: (args) => getCommentReplies({ comment_id: args.comment_id, page: args.page, page_size: args.page_size, sort_order: args.sort_order }),
     edit: (args) => editComment({ comment_id: args.comment_id, author_id: args.author_id, content: args.content }),
     del: (args) => deleteComment({ comment_id: args.comment_id, author_id: args.author_id }),
@@ -687,7 +688,7 @@ export default function ModDetailPage({ mod, onBack, onEdit, scrollToCommentId }
                     )}
                     {subscribeProgress[f.lang_code].status === 'failed' && (
                       <Text size="small" style={{ color: tokens.colorPaletteRedForeground2 }}>
-                        {subscribeProgress[f.lang_code].error || t('workshop.installFailed', { defaultValue: '安装失败' })}
+                        {localizeError(t, subscribeProgress[f.lang_code].error) || t('workshop.installFailed', { defaultValue: '安装失败' })}
                       </Text>
                     )}
                   </div>

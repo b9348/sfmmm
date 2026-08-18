@@ -6,6 +6,7 @@ import { getDb } from '../../services/dbHelper'
 import { useUserNav } from '../../contexts/useUserNav'
 import { LANG_LABELS } from '../../i18n/languages'
 import { formatSpeed } from '../../utils/formatSpeed'
+import { localizeError } from '../../utils/localizeError'
 import {
   Card, Text, Button, Badge, ProgressBar, Tooltip,
   makeStyles, tokens,
@@ -327,7 +328,7 @@ export function SubscriptionRecords({ active = true }) {
                 )}
                 {task.status === 'failed' && task.error && (
                   <div className={styles.errorText}>
-                    <ErrorCircle24Regular style={{ fontSize: '12px', verticalAlign: 'middle' }} /> {task.error}
+                    <ErrorCircle24Regular style={{ fontSize: '12px', verticalAlign: 'middle' }} /> {localizeError(t, task.error)}
                   </div>
                 )}
                 {task.status === 'cancelled' && (

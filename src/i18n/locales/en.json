@@ -504,6 +504,7 @@
     "openDir": "Open folder",
     "viewInLocalMods": "View in Local Mods",
     "cancelledNote": "Cancelled",
+    "gameDirInvalid": "Please select the correct game directory",
     "status": {
       "pending": "Pending",
       "downloading": "Downloading",

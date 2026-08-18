@@ -26,6 +26,7 @@ import { useInstalledMods } from '../../hooks/useInstalledMods'
 import { LANG_LABELS } from '../../i18n/languages'
 import { RatingStarsDisplay } from '../../components/common/RatingStars'
 import { BEPINEX_URL } from '../../components/common/prereqPoints'
+import { localizeError } from '../../utils/localizeError'
 
 const useStyles = makeStyles({
   root: {
@@ -319,11 +320,11 @@ export function ModList({ config, onUninstall }) {
       // 命中进行中任务时返回 deduplicated=true，同样接管其进度
       bepInExTaskIdRef.current = result.taskId
     } catch (e) {
-      setError(String(e))
+      setError(localizeError(t, String(e)))
       setInstallingBepInEx(false)
       setBepInExStage('')
     }
-  }, [gamePath])
+  }, [gamePath, t])
 
   // 全局进度事件：后台任务 emit 广播，本页按 taskId 匹配刷新
   useEffect(() => {
@@ -340,13 +341,13 @@ export function ModList({ config, onUninstall }) {
       } else if (payload.status === 'failed' || payload.status === 'cancelled') {
         setInstallingBepInEx(false)
         setBepInExStage('')
-        setError(payload.error || String(payload.status))
+        setError(localizeError(t, payload.error || String(payload.status)))
       }
     })
       .then(fn => { unlistenFn = fn })
       .catch(() => {})
     return () => { if (unlistenFn) unlistenFn() }
-  }, [scanMods])
+  }, [scanMods, t])
 
   // 挂载时恢复进行中的后台任务（离开页面再回来，下载不中断）
   useEffect(() => {
@@ -361,12 +362,12 @@ export function ModList({ config, onUninstall }) {
           setBepInExProgress(task.percent ?? 0)
           setBepInExStage(task.stage || 'downloading')
         } else if (task.status === 'failed') {
-          setError(task.error || '')
+          setError(localizeError(t, task.error || ''))
         }
       })
       .catch(() => {})
     return () => { cancelled = true }
-  }, [])
+  }, [t])
 
   const activeDir = scanInfo?.activeDirs?.[0]
   const missingCoreFiles = scanInfo?.missingCoreFiles || []
@@ -398,7 +399,7 @@ export function ModList({ config, onUninstall }) {
       return (
         <div className={styles.emptyState}>
           <Text weight="semibold">{t('mods.scanFailed')}</Text>
-          <Text size="small" className={styles.emptyDetails} title={error}>{error}</Text>
+          <Text size="small" className={styles.emptyDetails} title={localizeError(t, error)}>{localizeError(t, error)}</Text>
           <Button size="small" icon={<ArrowClockwise24Regular />} onClick={scanMods}>{t('mods.reScan')}</Button>
         </div>
       )
