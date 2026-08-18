@@ -16,9 +16,9 @@ function extractError(e) {
 
 // ── 通用请求包装 ──
 
-// 单次 db_* 调用的前端超时：前端仅作兜底，应宽于后端查询超时（60s），
-// 让慢查询有机会在后端自行处理，而非前端抢先判错
-const DB_CALL_TIMEOUT_MS = 120_000
+// 单次 db_* 调用的前端超时：前端仅作兜底。后端已有 45s 软超时（含串行排队），
+// 超时会主动重置连接并返回错误，前端只需比 45s 略宽即可
+const DB_CALL_TIMEOUT_MS = 60_000
 
 function withTimeout(promise, ms) {
   return new Promise((resolve, reject) => {

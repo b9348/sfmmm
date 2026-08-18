@@ -43,9 +43,15 @@ const DB_POOL_MIN: usize = 0;
 const DB_POOL_MAX: usize = 1;
 const IDLE_TIMEOUT_SECS: i64 = 60;
 const IDLE_CHECK_INTERVAL_SECS: u64 = 10;
-// 连接/读写超时：免费库偶发慢查询或冷启动握手较慢，留足余量避免协议层超时导致连接被废、重新握手恶性循环
+// 连接/读写超时：TCP+MySQL 握手慢归 CONNECT_TIMEOUT 管；查一页数据正常 <1s，
+// read/write 15s 只为兜底偶发慢查询与半开（黑洞）连接，不再给病态场景留 60s 余量
 const CONNECT_TIMEOUT_SECS: u64 = 10;
-const IO_TIMEOUT_SECS: u64 = 60;
+const IO_TIMEOUT_SECS: u64 = 15;
+// 单次 db_* 调用总软超时（含串行锁排队时间）。超时后丢弃整个连接池强制重建：
+// 旧 spawn_blocking 任务不可取消、仍占着旧连接，但旧连接随旧池作废，
+// 后续查询拿新池新连接，互不卡死；旧任务由 IO 超时兜底自行结束。
+// 需大于最坏合法路径（握手 10s + ping 探活/重试两轮 IO 15s×2 = 40s），取 45s
+const CALL_SOFT_TIMEOUT_SECS: u64 = 45;
 
 pub(crate) fn semver_cmp(a: &str, b: &str) -> i32 {
     let parse = |s: &str| -> Vec<u32> {
@@ -88,6 +94,49 @@ struct ManagedPoolInner {
     serial: AsyncMutex<()>,
 }
 
+impl ManagedPoolInner {
+    /// 丢弃整个池（置 None，下次取连接时重建）。旧 Pool 句柄若仍被进行中的
+    /// spawn_blocking 任务持有，会随任务结束自然释放，不影响新池。
+    fn reset_pool(&self, reason: &str) {
+        let mut guard = self.pool.lock().unwrap_or_else(|e| e.into_inner());
+        if guard.is_some() {
+            println!("[ManagedPool] {}, dropping MySQL pool", reason);
+            *guard = None;
+            self.last_activity.store(0, Ordering::Relaxed);
+        }
+    }
+
+    /// 取当前池实例（无则按超时参数建新池），并刷新活跃时间戳。
+    /// 返回 Pool 的克隆（内部 Arc），与池槽位解耦：之后即使槽位被 reset_pool
+    /// 换成新池，本克隆对应的旧池仍独立存活，直到其所有引用结束。
+    fn current_pool(&self) -> Result<Pool, String> {
+        let mut guard = self.pool.lock().unwrap_or_else(|e| e.into_inner());
+        if guard.is_none() {
+            let opts = Opts::from_url(&self.db_url).map_err(|e| e.to_string())?;
+            let pool_opts = opts
+                .get_pool_opts()
+                .clone()
+                .with_constraints(PoolConstraints::new(DB_POOL_MIN, DB_POOL_MAX).unwrap_or_default());
+            let opts: Opts = OptsBuilder::from_opts(opts)
+                .pool_opts(pool_opts)
+                .tcp_connect_timeout(Some(Duration::from_secs(CONNECT_TIMEOUT_SECS)))
+                .read_timeout(Some(Duration::from_secs(IO_TIMEOUT_SECS)))
+                .write_timeout(Some(Duration::from_secs(IO_TIMEOUT_SECS)))
+                .into();
+            *guard = Some(Pool::new(opts).map_err(|e| e.to_string())?);
+        }
+        let pool = guard.as_ref().unwrap().clone();
+        self.last_activity.store(
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs() as i64,
+            Ordering::Relaxed,
+        );
+        Ok(pool)
+    }
+}
+
 impl ManagedPool {
     fn new(db_url: String) -> Self {
         Self {
@@ -123,48 +172,25 @@ impl ManagedPool {
                     .unwrap_or_default()
                     .as_secs() as i64;
                 if now - last > IDLE_TIMEOUT_SECS {
-                    let mut guard = inner.pool.lock().unwrap_or_else(|e| e.into_inner());
-                    if guard.is_some() {
-                        println!("[ManagedPool] idle over {}s, dropping MySQL pool", IDLE_TIMEOUT_SECS);
-                        *guard = None;
-                        inner.last_activity.store(0, Ordering::Relaxed);
-                    }
+                    inner.reset_pool(&format!("idle over {}s", IDLE_TIMEOUT_SECS));
                 }
             }
         });
     }
 
+    /// 取连接并 ping 探活：免费库按 wait_timeout 掐断的僵尸连接，ping 会毫秒级失败，
+    /// 不必等 read_timeout 才发现。ping 失败 → 弃池重建 → 从新池重试一次。
+    /// （半开黑洞连接 ping 仍可能吃满 IO 超时，由 read_timeout=15s 兜底。）
     pub fn get_conn(&self) -> Result<PooledConn, String> {
-        let inner = self.inner.clone();
-
-        let pool = {
-            let mut guard = inner.pool.lock().unwrap_or_else(|e| e.into_inner());
-            if guard.is_none() {
-                let opts = Opts::from_url(&inner.db_url).map_err(|e| e.to_string())?;
-                let pool_opts = opts
-                    .get_pool_opts()
-                    .clone()
-                    .with_constraints(PoolConstraints::new(DB_POOL_MIN, DB_POOL_MAX).unwrap_or_default());
-                let opts: Opts = OptsBuilder::from_opts(opts)
-                    .pool_opts(pool_opts)
-                    .tcp_connect_timeout(Some(Duration::from_secs(CONNECT_TIMEOUT_SECS)))
-                    .read_timeout(Some(Duration::from_secs(IO_TIMEOUT_SECS)))
-                    .write_timeout(Some(Duration::from_secs(IO_TIMEOUT_SECS)))
-                    .into();
-                let new_pool = Pool::new(opts).map_err(|e| e.to_string())?;
-                *guard = Some(new_pool);
-            }
-            let pool = guard.as_ref().unwrap().clone();
-            inner.last_activity.store(
-                SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_secs() as i64,
-                Ordering::Relaxed,
-            );
-            pool
-        };
-
+        let inner = &*self.inner;
+        let pool = inner.current_pool()?;
+        let mut conn = pool.get_conn().map_err(|e| e.to_string())?;
+        if conn.as_mut().ping().is_ok() {
+            return Ok(conn);
+        }
+        drop(conn);
+        inner.reset_pool("stale connection (ping failed)");
+        let pool = inner.current_pool()?;
         pool.get_conn().map_err(|e| e.to_string())
     }
 }
@@ -180,28 +206,46 @@ impl DbState {
     }
 }
 
+/// 查询串行化执行 + 软超时兜底：
+/// 1. 单连接（DB_POOL_MAX=1）下，所有 db_* 调用通过 async Mutex 排队，
+///    排队在 async 层发生，不占用 tokio blocking 线程；拿到锁后才 spawn_blocking
+///    执行 get_conn + 查询。
+/// 2. 软超时包住「排队 + 执行」整段。超时后 spawn_blocking 不可取消、仍占着
+///    旧连接，但 reset_pool 会丢弃整个池——旧连接随旧池作废，后续查询拿新池
+///    新连接，互不卡死；旧任务由 IO 超时（IO_TIMEOUT_SECS）兜底自行结束。
+async fn run_serial<F, R>(pool: ManagedPool, f: F) -> Result<R, String>
+where
+    F: FnOnce(&mut PooledConn) -> Result<R, String> + Send + 'static,
+    R: Send + 'static,
+{
+    let fut = async {
+        let _guard = pool.inner.serial.lock().await;
+        let pool_for_blocking = pool.clone();
+        tokio::task::spawn_blocking(move || {
+            let mut conn = pool_for_blocking.get_conn()?;
+            f(&mut conn)
+        })
+        .await
+        .map_err(|e| format!("数据库任务失败: {}", e))?
+    };
+    match tokio::time::timeout(Duration::from_secs(CALL_SOFT_TIMEOUT_SECS), fut).await {
+        Ok(r) => r,
+        Err(_) => {
+            pool.inner.reset_pool("call soft timeout");
+            Err(format!(
+                "数据库请求超时（超过 {} 秒），连接已重置，请稍后重试",
+                CALL_SOFT_TIMEOUT_SECS
+            ))
+        }
+    }
+}
+
 pub(crate) async fn with_conn<F, R>(state: &DbState, f: F) -> Result<R, String>
 where
     F: FnOnce(&mut PooledConn) -> Result<R, String> + Send + 'static,
     R: Send + 'static,
 {
-    let pool = state.pool.clone();
-    // 查询串行化：单连接（DB_POOL_MAX=1）下，所有 db_* 调用通过 async Mutex 排队。
-    // 排队在 async 层发生，不占用 tokio blocking 线程；拿到锁后才 spawn_blocking
-    // 执行 get_conn + 查询。
-    //
-    // 不用 tokio::time::timeout 包裹 spawn_blocking：timeout 丢弃 future 后
-    // spawn_blocking 任务不会被取消，仍占用连接，后续 get_conn 永久阻塞 → 死锁。
-    // mysql crate 的 read_timeout/write_timeout（IO_TIMEOUT_SECS）已经在协议层
-    // 兜底慢查询，这里不需要额外 timeout。
-    let _guard = pool.inner.serial.lock().await;
-    let pool_for_blocking = pool.clone();
-    tokio::task::spawn_blocking(move || {
-        let mut conn = pool_for_blocking.get_conn()?;
-        f(&mut conn)
-    })
-    .await
-    .map_err(|e| format!("数据库任务失败: {}", e))?
+    run_serial(state.pool.clone(), f).await
 }
 
 pub(crate) async fn with_conn_pool<F, R>(pool: &ManagedPool, f: F) -> Result<R, String>
@@ -209,15 +253,7 @@ where
     F: FnOnce(&mut PooledConn) -> Result<R, String> + Send + 'static,
     R: Send + 'static,
 {
-    let pool = pool.clone();
-    let _guard = pool.inner.serial.lock().await;
-    let pool_for_blocking = pool.clone();
-    tokio::task::spawn_blocking(move || {
-        let mut conn = pool_for_blocking.get_conn()?;
-        f(&mut conn)
-    })
-    .await
-    .map_err(|e| format!("数据库任务失败: {}", e))?
+    run_serial(pool.clone(), f).await
 }
 
 #[derive(Serialize)]
