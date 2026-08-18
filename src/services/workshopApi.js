@@ -16,9 +16,9 @@ function extractError(e) {
 
 // ── 通用请求包装 ──
 
-// 单次 db_* 调用的前端超时：即使 Rust 侧因排队/慢查询迟迟不返回，
-// 也限时结束 loading 并报错，避免离开页面后遗留的查询让新页面一直转圈
-const DB_CALL_TIMEOUT_MS = 30_000
+// 单次 db_* 调用的前端超时：前端仅作兜底，应宽于后端查询超时（60s），
+// 让慢查询有机会在后端自行处理，而非前端抢先判错
+const DB_CALL_TIMEOUT_MS = 120_000
 
 function withTimeout(promise, ms) {
   return new Promise((resolve, reject) => {

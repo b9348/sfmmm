@@ -349,6 +349,8 @@ struct SubscriptionProgress {
     stage: String,
     status: String,
     error: String,
+    // 实时下载速度（字节/秒），仅 downloading 阶段有意义；其它阶段 emit 0
+    speed: u64,
 }
 
 // ── 主任务体（spawn 执行）──────────────────────────────────
@@ -382,6 +384,7 @@ async fn run_subscribe_task(
                 stage: stage.into(),
                 status: "failed".into(),
                 error: err.into(),
+                speed: 0,
             },
         );
     }
@@ -411,7 +414,7 @@ async fn run_subscribe_task(
     }
     let _ = update_task_status(&app_handle, task_id, "downloading", 0, "downloading", None, &[("target_dir", &target_dir)]);
     let _ = app_handle.emit("subscription-progress", SubscriptionProgress {
-        task_id, mod_key: mod_key.clone(), percent: 0, stage: "downloading".into(), status: "downloading".into(), error: String::new(),
+        task_id, mod_key: mod_key.clone(), percent: 0, stage: "downloading".into(), status: "downloading".into(), error: String::new(), speed: 0,
     });
 
     // 3) 流式下载到临时文件
@@ -436,6 +439,9 @@ async fn run_subscribe_task(
     let mut stream = response.bytes_stream();
     use futures_util::StreamExt;
     let mut downloaded: u64 = 0;
+    // 节流上报 + 实时速度：每 400ms 计算一次增量速度并广播（与 installer.rs 同款）
+    let mut prev_bytes: u64 = 0;
+    let mut prev_time = tokio::time::Instant::now();
     while let Some(chunk) = stream.next().await {
         match chunk {
             Ok(c) => {
@@ -445,11 +451,22 @@ async fn run_subscribe_task(
                     return;
                 }
                 downloaded += c.len() as u64;
-                let percent = if total > 0 { (downloaded * 100 / total) as u32 } else { 0 };
-                let _ = update_task_status(&app_handle, task_id, "downloading", percent, "downloading", None, &[]);
-                let _ = app_handle.emit("subscription-progress", SubscriptionProgress {
-                    task_id, mod_key: mod_key.clone(), percent, stage: "downloading".into(), status: "downloading".into(), error: String::new(),
-                });
+                let now = tokio::time::Instant::now();
+                let elapsed = now.duration_since(prev_time).as_secs_f64();
+                if elapsed >= 0.4 {
+                    let speed = if elapsed > 0.0 {
+                        ((downloaded - prev_bytes) as f64 / elapsed) as u64
+                    } else {
+                        0
+                    };
+                    prev_bytes = downloaded;
+                    prev_time = now;
+                    let percent = if total > 0 { (downloaded * 100 / total) as u32 } else { 0 };
+                    let _ = update_task_status(&app_handle, task_id, "downloading", percent, "downloading", None, &[]);
+                    let _ = app_handle.emit("subscription-progress", SubscriptionProgress {
+                        task_id, mod_key: mod_key.clone(), percent, stage: "downloading".into(), status: "downloading".into(), error: String::new(), speed,
+                    });
+                }
             }
             Err(e) => {
                 fail(&app_handle, task_id, &mod_key, "downloading", &format!("下载中断: {e}")).await;
@@ -463,7 +480,7 @@ async fn run_subscribe_task(
     // 4) 解压
     let _ = update_task_status(&app_handle, task_id, "extracting", 100, "extracting", None, &[]);
     let _ = app_handle.emit("subscription-progress", SubscriptionProgress {
-        task_id, mod_key: mod_key.clone(), percent: 100, stage: "extracting".into(), status: "extracting".into(), error: String::new(),
+        task_id, mod_key: mod_key.clone(), percent: 100, stage: "extracting".into(), status: "extracting".into(), error: String::new(), speed: 0,
     });
     let bytes = match fs::read(&temp_path) {
         Ok(b) => b,
@@ -500,7 +517,7 @@ async fn run_subscribe_task(
     // 7) done
     let _ = update_task_status(&app_handle, task_id, "done", 100, "done", None, &[]);
     let _ = app_handle.emit("subscription-progress", SubscriptionProgress {
-        task_id, mod_key, percent: 100, stage: "done".into(), status: "done".into(), error: String::new(),
+        task_id, mod_key, percent: 100, stage: "done".into(), status: "done".into(), error: String::new(), speed: 0,
     });
     // 清理句柄
     if let Ok(mut m) = tasks().lock() {
@@ -783,6 +800,7 @@ pub async fn db_cancel_subscription(
                 stage: "cancelled".into(),
                 status: "cancelled".into(),
                 error: "用户取消".into(),
+                speed: 0,
             },
         );
         Ok(serde_json::json!({ "cancelled": true }))

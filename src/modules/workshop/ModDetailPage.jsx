@@ -27,6 +27,7 @@ import { getDb, getGamePath } from '../../services/dbHelper'
 import { BackButton, FloatingActions, FileRow, UserLink } from '../../components'
 import { RatingStarsInteractiveDisplay } from '../../components/common/RatingStars'
 import { LANGUAGES, LANG_LABELS } from '../../i18n/languages'
+import { formatSpeed } from '../../utils/formatSpeed'
 
 function compareSemver(a, b) {
   const normalize = v => (v || '').replace(/^v/i, '')
@@ -427,6 +428,7 @@ export default function ModDetailPage({ mod, onBack, onEdit, scrollToCommentId }
           stage: t(stageKey, { defaultValue: payload.stage }),
           status: payload.status,
           error: payload.error || '',
+          speed: payload.speed ?? 0,
         },
       }))
       // 任务终结：清活跃映射。done 时复用 checkInstalled 重查 SQLite 刷已安装态
@@ -675,6 +677,9 @@ export default function ModDetailPage({ mod, onBack, onEdit, scrollToCommentId }
                       {subscribeProgress[f.lang_code].stage}
                       {subscribeProgress[f.lang_code].percent > 0 && subscribeProgress[f.lang_code].status !== 'done'
                         ? ` ${subscribeProgress[f.lang_code].percent}%`
+                        : ''}
+                      {subscribeProgress[f.lang_code].status === 'downloading' && subscribeProgress[f.lang_code].speed > 0
+                        ? ` · ${formatSpeed(subscribeProgress[f.lang_code].speed)}`
                         : ''}
                     </Text>
                     {['pending', 'downloading', 'extracting', 'recording'].includes(subscribeProgress[f.lang_code].status) && (

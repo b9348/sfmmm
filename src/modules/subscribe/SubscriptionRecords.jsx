@@ -5,6 +5,7 @@ import { listen } from '@tauri-apps/api/event'
 import { getDb } from '../../services/dbHelper'
 import { useUserNav } from '../../contexts/useUserNav'
 import { LANG_LABELS } from '../../i18n/languages'
+import { formatSpeed } from '../../utils/formatSpeed'
 import {
   Card, Text, Button, Badge, ProgressBar, Tooltip,
   makeStyles, tokens,
@@ -226,6 +227,7 @@ export function SubscriptionRecords({ active = true }) {
           percent: payload.percent,
           stage: payload.stage,
           error: payload.error || next[idx].error,
+          speed: payload.speed ?? 0,
         }
         return next
       })
@@ -313,7 +315,12 @@ export function SubscriptionRecords({ active = true }) {
                   <Text className={styles.description}>{task.description}</Text>
                 )}
                 {isRunning(task.status) && (
-                  <ProgressBar value={task.percent / 100} />
+                  <>
+                    <ProgressBar value={task.percent / 100} />
+                    {task.stage === 'downloading' && task.speed > 0 && (
+                      <Text className={styles.rowMeta}>{formatSpeed(task.speed)}</Text>
+                    )}
+                  </>
                 )}
                 {task.status === 'done' && task.targetDir && (
                   <Text className={styles.rowMeta}>{task.targetDir}</Text>

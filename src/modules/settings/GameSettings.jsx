@@ -29,6 +29,7 @@ import { Acknowledgments } from './Acknowledgments'
 import i18n from '../../i18n'
 import { checkVersion, checkGitHubUpdate, prepareUpdate, applyUpdate, getUpdateStatus, compareVersions, armPendingUpdate } from '../../services/updateApi'
 import APP_VERSION from '../../version.js'
+import { formatSpeed } from '../../utils/formatSpeed'
 
 const useStyles = makeStyles({
   formGrid: {
@@ -72,14 +73,6 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground3,
   },
 })
-
-// 实时下载速度格式化：B/s / KB/s / MB/s
-function formatSpeed(bytesPerSec) {
-  if (!bytesPerSec || bytesPerSec <= 0) return ''
-  if (bytesPerSec >= 1024 * 1024) return (bytesPerSec / 1024 / 1024).toFixed(1) + ' MB/s'
-  if (bytesPerSec >= 1024) return Math.round(bytesPerSec / 1024) + ' KB/s'
-  return Math.round(bytesPerSec) + ' B/s'
-}
 
 export function GameSettings({ config, onConfigChange, appUpdateInfo }) {
   const { t, i18n: i18nInstance } = useTranslation()

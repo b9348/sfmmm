@@ -282,15 +282,22 @@ export function BrowseMods({ initialModId, initialCommentId, onConsumeNavTarget,
   }, [fetchMods, page])
 
   // 常驻挂载下，从隐藏回到可见（再次进入该 tab）时强制刷新，避免列表数据过期；
-  // 首次展示（预加载目标）不重复拉取，直接呈现预加载结果
+  // 首次展示（预加载目标）不重复拉取，直接呈现预加载结果。
+  // 实现要点：依赖数组仍包含 page/search/filter/sort（保证 effect 在这些值变化后
+  // 能读到最新值用于 force 刷新），但用 justBecameActive 守卫过滤掉非 active 边沿
+  // 的重跑——这样翻页时 fetchMods 内部 setPage 触发的 effect 重跑会直接 return，
+  // 不会绕过预取缓存额外重拉一次当前页。
   const wasShown = useRef(false)
+  const prevActiveRef = useRef(active)
   useEffect(() => {
-    if (!active) return
+    const justBecameActive = active && !prevActiveRef.current
+    prevActiveRef.current = active
+    if (!justBecameActive) return
     if (wasShown.current) {
       fetchMods(page, search, categoryFilter, sortBy, sortOrder, { force: true })
     }
     wasShown.current = true
-  }, [active, fetchMods, page, search, categoryFilter, sortBy, sortOrder])
+  }, [active, page, search, categoryFilter, sortBy, sortOrder, fetchMods])
 
   // 详情页以覆盖层形式渲染在列表上方，列表保持挂载：
   // 返回时不会重载数据，滚动位置与图片缓存都得以保留。

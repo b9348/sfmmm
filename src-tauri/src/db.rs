@@ -5,6 +5,7 @@ use sha2::{Digest, Sha256};
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use tokio::sync::Mutex as AsyncMutex;
 
 pub mod hash;
 pub mod installer;
@@ -42,10 +43,9 @@ const DB_POOL_MIN: usize = 0;
 const DB_POOL_MAX: usize = 1;
 const IDLE_TIMEOUT_SECS: i64 = 60;
 const IDLE_CHECK_INTERVAL_SECS: u64 = 10;
-// 连接/读写超时：免费库偶发慢查询或连接失联时，限时释放唯一连接，避免后续 db_* 调用永久排队
-const CONNECT_TIMEOUT_SECS: u64 = 5;
-const IO_TIMEOUT_SECS: u64 = 20;
-const CALL_TIMEOUT_SECS: u64 = 30;
+// 连接/读写超时：免费库偶发慢查询或冷启动握手较慢，留足余量避免协议层超时导致连接被废、重新握手恶性循环
+const CONNECT_TIMEOUT_SECS: u64 = 10;
+const IO_TIMEOUT_SECS: u64 = 60;
 
 pub(crate) fn semver_cmp(a: &str, b: &str) -> i32 {
     let parse = |s: &str| -> Vec<u32> {
@@ -82,6 +82,10 @@ struct ManagedPoolInner {
     db_url: String,
     last_activity: AtomicI64,
     checker_started: AtomicBool,
+    /// 查询串行锁：单连接（DB_POOL_MAX=1）下，所有 db_* 调用通过此锁排队，
+    /// 排队在 async 层发生，不占用 tokio blocking 线程，也不被 mysql crate 内部
+    /// 不可观测的 wait queue 阻塞。拿到锁后才 spawn_blocking 执行 get_conn + 查询。
+    serial: AsyncMutex<()>,
 }
 
 impl ManagedPool {
@@ -92,6 +96,7 @@ impl ManagedPool {
                 db_url,
                 last_activity: AtomicI64::new(0),
                 checker_started: AtomicBool::new(false),
+                serial: AsyncMutex::new(()),
             }),
         }
     }
@@ -181,13 +186,22 @@ where
     R: Send + 'static,
 {
     let pool = state.pool.clone();
-    tokio::time::timeout(Duration::from_secs(CALL_TIMEOUT_SECS), tokio::task::spawn_blocking(move || {
-        let mut conn = pool.get_conn()?;
+    // 查询串行化：单连接（DB_POOL_MAX=1）下，所有 db_* 调用通过 async Mutex 排队。
+    // 排队在 async 层发生，不占用 tokio blocking 线程；拿到锁后才 spawn_blocking
+    // 执行 get_conn + 查询。
+    //
+    // 不用 tokio::time::timeout 包裹 spawn_blocking：timeout 丢弃 future 后
+    // spawn_blocking 任务不会被取消，仍占用连接，后续 get_conn 永久阻塞 → 死锁。
+    // mysql crate 的 read_timeout/write_timeout（IO_TIMEOUT_SECS）已经在协议层
+    // 兜底慢查询，这里不需要额外 timeout。
+    let _guard = pool.inner.serial.lock().await;
+    let pool_for_blocking = pool.clone();
+    tokio::task::spawn_blocking(move || {
+        let mut conn = pool_for_blocking.get_conn()?;
         f(&mut conn)
-    }))
+    })
     .await
-    .map_err(|_| format!("数据库请求超时（超过 {} 秒），请稍后重试", CALL_TIMEOUT_SECS))?
-    .map_err(|e| e.to_string())?
+    .map_err(|e| format!("数据库任务失败: {}", e))?
 }
 
 pub(crate) async fn with_conn_pool<F, R>(pool: &ManagedPool, f: F) -> Result<R, String>
@@ -196,13 +210,14 @@ where
     R: Send + 'static,
 {
     let pool = pool.clone();
-    tokio::time::timeout(Duration::from_secs(CALL_TIMEOUT_SECS), tokio::task::spawn_blocking(move || {
-        let mut conn = pool.get_conn()?;
+    let _guard = pool.inner.serial.lock().await;
+    let pool_for_blocking = pool.clone();
+    tokio::task::spawn_blocking(move || {
+        let mut conn = pool_for_blocking.get_conn()?;
         f(&mut conn)
-    }))
+    })
     .await
-    .map_err(|_| format!("数据库请求超时（超过 {} 秒），请稍后重试", CALL_TIMEOUT_SECS))?
-    .map_err(|e| e.to_string())?
+    .map_err(|e| format!("数据库任务失败: {}", e))?
 }
 
 #[derive(Serialize)]
