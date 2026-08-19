@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import { useState, useEffect, useLayoutEffect, useCallback, useRef, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useEditor, EditorContent } from '@tiptap/react'
 import { nodeInputRule, nodePasteRule } from '@tiptap/core'
@@ -19,6 +19,7 @@ import {
   resolvePendingUrlForPreview,
   isPendingUrl,
 } from '../../services/imageApi'
+import './RichTextEditor.css'
 
 const useStyles = makeStyles({
   editor: {
@@ -203,6 +204,61 @@ const useContentStyles = makeStyles({
     },
     '& img': {
       maxWidth: '100%',
+    },
+    '& .rt-img-wrap': {
+      position: 'relative',
+      display: 'inline-block',
+      maxWidth: '100%',
+      verticalAlign: 'top',
+    },
+    '& .rt-img-placeholder': {
+      position: 'absolute',
+      left: 0,
+      top: 0,
+      right: 0,
+      bottom: 0,
+      display: 'block',
+      borderRadius: '4px',
+      backgroundColor: tokens.colorNeutralBackground3,
+      backgroundImage: 'linear-gradient(90deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.35) 50%, rgba(255,255,255,0) 100%)',
+      backgroundSize: '200% 100%',
+      animationName: 'rtImgShimmer',
+      animationDuration: '1.4s',
+      animationTimingFunction: 'ease-in-out',
+      animationIterationCount: 'infinite',
+      pointerEvents: 'none',
+    },
+    '& .rt-img-wrap img': {
+      display: 'block',
+      maxWidth: '100%',
+      borderRadius: '4px',
+      opacity: 0,
+      transitionProperty: 'opacity',
+      transitionDuration: '0.3s',
+      transitionTimingFunction: 'ease',
+      position: 'relative',
+      zIndex: 1,
+    },
+    '& .rt-img-wrap.rt-img-loading': {
+      width: '100%',
+      minHeight: '160px',
+    },
+    '& .rt-img-wrap.rt-img-loaded img': {
+      opacity: 1,
+    },
+    '& .rt-img-wrap.rt-img-loaded': {
+      minHeight: 0,
+    },
+    '& .rt-img-wrap.rt-img-loaded .rt-img-placeholder': {
+      display: 'none',
+    },
+    '& .rt-img-wrap.rt-img-error .rt-img-placeholder': {
+      backgroundImage: 'none',
+      animationName: 'none',
+      backgroundColor: tokens.colorNeutralBackground3,
+    },
+    '& .rt-img-wrap.rt-img-error': {
+      minHeight: '60px',
     },
   },
 })
@@ -472,8 +528,65 @@ export function MarkdownEditor({ value, onChange, placeholder, maxLength, disabl
   )
 }
 
+// 为容器内的 <img> 包裹占位骨架：加载前显示 shimmer 占位，加载完成后淡入替换占位图。
+// ref 指向渲染容器；deps 为内容依赖，内容变化时重新扫描包装新图片。
+function useProgressiveImages(ref, deps) {
+  // 用 useLayoutEffect：在浏览器 paint 前同步包裹图片并设置 loading 占位，
+  // 避免裸 img 先闪现一帧再变为占位图
+  useLayoutEffect(() => {
+    const root = ref.current
+    if (!root) return
+    const imgs = Array.from(root.querySelectorAll('img'))
+    const cleanups = []
+    for (const img of imgs) {
+      const parent = img.parentElement
+      let wrap
+      if (parent && parent.classList && parent.classList.contains('rt-img-wrap')) {
+        wrap = parent
+      } else {
+        wrap = document.createElement('span')
+        wrap.className = 'rt-img-wrap rt-img-loading'
+        const placeholder = document.createElement('span')
+        placeholder.className = 'rt-img-placeholder'
+        img.parentNode.insertBefore(wrap, img)
+        wrap.appendChild(placeholder)
+        wrap.appendChild(img)
+      }
+      wrap.classList.remove('rt-img-loaded', 'rt-img-error')
+      wrap.classList.add('rt-img-loading')
+      const markLoaded = () => {
+        wrap.classList.remove('rt-img-loading', 'rt-img-error')
+        wrap.classList.add('rt-img-loaded')
+      }
+      const markError = () => {
+        wrap.classList.remove('rt-img-loading', 'rt-img-loaded')
+        wrap.classList.add('rt-img-error')
+      }
+      if (img.complete) {
+        // 浏览器可能已加载完成（缓存图），直接定状态，避免再挂 load 监听永不触发
+        if (img.naturalWidth > 0) markLoaded()
+        else markError()
+      } else {
+        img.addEventListener('load', markLoaded, { once: true })
+        img.addEventListener('error', markError, { once: true })
+        cleanups.push(() => {
+          img.removeEventListener('load', markLoaded)
+          img.removeEventListener('error', markError)
+        })
+      }
+    }
+    return () => {
+      for (const fn of cleanups) fn()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, deps)
+}
+
 export function MarkdownContent({ markdown, onImageClick }) {
   const styles = useContentStyles()
+  const ref = useRef(null)
+
+  useProgressiveImages(ref, [markdown])
 
   if (!markdown) return null
 
@@ -488,6 +601,7 @@ export function MarkdownContent({ markdown, onImageClick }) {
 
   return (
     <div
+      ref={ref}
       className={styles.content}
       onClick={handleClick}
       dangerouslySetInnerHTML={{ __html: marked(markdown) }}
@@ -497,11 +611,15 @@ export function MarkdownContent({ markdown, onImageClick }) {
 
 export function RichTextContent({ html }) {
   const styles = useContentStyles()
+  const ref = useRef(null)
+
+  useProgressiveImages(ref, [html])
 
   if (!html) return null
 
   return (
     <div
+      ref={ref}
       className={styles.content}
       dangerouslySetInnerHTML={{ __html: html }}
     />
