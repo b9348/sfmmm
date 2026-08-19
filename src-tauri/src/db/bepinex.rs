@@ -23,6 +23,9 @@ use serde::Serialize;
 use tauri::Emitter;
 use tokio::task::JoinHandle;
 
+use crate::db::download::{DownloadProgress, ProgressFn, download_file};
+use crate::db::gh::build_client;
+use crate::db::lanzou;
 use crate::db::subscribe::{open_sqlite, read_game_path};
 
 // ── zip slip 防护（与 subscribe.rs safe_zip_path 同语义）──────
@@ -183,6 +186,12 @@ fn reset_stale_task(conn: &Connection, id: i64) -> Result<(), String> {
 struct BepinexProgress {
     task_id: i64,
     percent: u32,
+    /// 已下载字节（下载中有效）
+    downloaded: u64,
+    /// 总大小字节（服务端给出 Content-Length 时有效）
+    total: u64,
+    /// 实时下载速度（字节/秒），仅下载中有效
+    speed: u64,
     stage: String,
     status: String,
     error: String,
@@ -194,6 +203,8 @@ fn update_task_status(
     task_id: i64,
     status: &str,
     percent: u32,
+    downloaded: u64,
+    total: u64,
     stage: &str,
     error: Option<&str>,
 ) -> Result<(), String> {
@@ -205,8 +216,8 @@ fn update_task_status(
         None
     };
     conn.execute(
-        "UPDATE bepinex_tasks SET status = ?, percent = ?, stage = ?, error = ?, updated_at = ? WHERE id = ?",
-        rusqlite::params![status, percent as i64, stage, error.map(|e| e.to_string()).unwrap_or_default(), now, task_id],
+        "UPDATE bepinex_tasks SET status = ?, percent = ?, downloaded = ?, total = ?, stage = ?, error = ?, updated_at = ? WHERE id = ?",
+        rusqlite::params![status, percent as i64, downloaded as i64, total as i64, stage, error.map(|e| e.to_string()).unwrap_or_default(), now, task_id],
     )
     .map_err(|e| format!("更新任务状态失败: {e}"))?;
     if let Some(ts) = finished {
@@ -222,6 +233,9 @@ fn emit_progress(
     app_handle: &tauri::AppHandle,
     task_id: i64,
     percent: u32,
+    downloaded: u64,
+    total: u64,
+    speed: u64,
     stage: &str,
     status: &str,
     error: &str,
@@ -231,6 +245,9 @@ fn emit_progress(
         BepinexProgress {
             task_id,
             percent,
+            downloaded,
+            total,
+            speed,
             stage: stage.into(),
             status: status.into(),
             error: error.into(),
@@ -242,8 +259,8 @@ fn emit_progress(
 async fn run_bepinex_task(app_handle: tauri::AppHandle, task_id: i64, url: String) {
     // 失败辅助：独立 async fn 避免闭包引用 lifetime 问题（同 subscribe.rs 做法）
     async fn fail(app_handle: &tauri::AppHandle, task_id: i64, stage: &str, err: &str) {
-        let _ = update_task_status(app_handle, task_id, "failed", 0, stage, Some(err));
-        emit_progress(app_handle, task_id, 0, stage, "failed", err);
+        let _ = update_task_status(app_handle, task_id, "failed", 0, 0, 0, stage, Some(err));
+        emit_progress(app_handle, task_id, 0, 0, 0, 0, stage, "failed", err);
     }
 
     // 1) 读游戏目录（后台任务自洽，不依赖前端传参）
@@ -256,75 +273,64 @@ async fn run_bepinex_task(app_handle: tauri::AppHandle, task_id: i64, url: Strin
     };
     let target_dir = game_path.trim_end_matches('\\').to_string();
 
-    let _ = update_task_status(&app_handle, task_id, "downloading", 0, "downloading", None);
-    emit_progress(&app_handle, task_id, 0, "downloading", "downloading", "");
+    let _ = update_task_status(&app_handle, task_id, "downloading", 0, 0, 0, "downloading", None);
+    emit_progress(&app_handle, task_id, 0, 0, 0, 0, "downloading", "downloading", "");
 
-    // 2) 流式下载到临时文件
-    let client = match reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(300))
-        .build()
-    {
+    // 2) 渐进式多线程下载到临时文件（复用 db/download.rs 共享引擎：
+    //    Range 探测 → 分块并行 / 单流回退，节流上报进度含已下载/总大小/实时速度）
+    //
+    // 蓝奏云下载源：分享页不是直链，先用 lanzou 模块解析成文件直链
+    // （含 acw_sc__v2 反爬挑战与 30x/meta 多层跳转处理），并从分享页文件名
+    // 推断压缩格式（.7z/.zip）；直链有时效性，解析成功后立即进入下载，
+    // 下载 client 沿用移动端 UA 与解析会话保持一致。
+    let is_lanzou = lanzou::is_lanzou_url(&url);
+    let (download_url, url_ext) = if is_lanzou {
+        match lanzou::resolve(&url).await {
+            Ok((direct, name)) => {
+                let ext = lanzou::ext_from_name(&name).unwrap_or_else(|| "7z".to_string());
+                (direct, ext)
+            }
+            Err(e) => {
+                fail(&app_handle, task_id, "downloading", &format!("蓝奏云链接解析失败: {e}")).await;
+                return;
+            }
+        }
+    } else {
+        // 临时文件扩展名跟随下载源 URL（.zip / .7z），供解压按扩展名分派正确路由
+        let ext = reqwest::Url::parse(&url)
+            .ok()
+            .and_then(|u| u.path_segments()?.next_back().map(|s| s.to_string()))
+            .and_then(|name| name.rsplit_once('.').map(|(_, ext)| ext.to_lowercase()))
+            .filter(|ext| ext == "zip" || ext == "7z")
+            .unwrap_or_else(|| "7z".to_string());
+        (url.clone(), ext)
+    };
+    let client = match if is_lanzou {
+        lanzou::build_lanzou_download_client(300)
+    } else {
+        build_client(300)
+    } {
         Ok(c) => c,
         Err(e) => {
             fail(&app_handle, task_id, "downloading", &format!("构建 HTTP client 失败: {e}")).await;
             return;
         }
     };
-    let response = match client.get(&url).send().await {
-        Ok(r) if r.status().is_success() => r,
-        Ok(r) => {
-            fail(&app_handle, task_id, "downloading", &format!("下载失败 HTTP {}", r.status())).await;
-            return;
-        }
-        Err(e) => {
-            fail(&app_handle, task_id, "downloading", &format!("下载失败: {e}")).await;
-            return;
-        }
-    };
-    let total = response.content_length().unwrap_or(0);
-    // 临时文件扩展名跟随下载源 URL（.zip / .7z），供解压按扩展名分派正确路由
-    let url_ext = reqwest::Url::parse(&url)
-        .ok()
-        .and_then(|u| u.path_segments()?.next_back().map(|s| s.to_string()))
-        .and_then(|name| name.rsplit_once('.').map(|(_, ext)| ext.to_lowercase()))
-        .filter(|ext| ext == "zip" || ext == "7z")
-        .unwrap_or_else(|| "7z".to_string());
     let temp_path = std::env::temp_dir().join(format!("sfmmm_bepinex_{}.{}", task_id, url_ext));
-    let mut file = match fs::File::create(&temp_path) {
-        Ok(f) => f,
-        Err(e) => {
-            fail(&app_handle, task_id, "downloading", &format!("创建临时文件失败: {e}")).await;
-            return;
-        }
-    };
-    let mut stream = response.bytes_stream();
-    use futures_util::StreamExt;
-    let mut downloaded: u64 = 0;
-    while let Some(chunk) = stream.next().await {
-        match chunk {
-            Ok(c) => {
-                if let Err(e) = file.write_all(&c) {
-                    fail(&app_handle, task_id, "downloading", &format!("写入临时文件失败: {e}")).await;
-                    let _ = fs::remove_file(&temp_path);
-                    return;
-                }
-                downloaded += c.len() as u64;
-                let percent = if total > 0 { (downloaded * 100 / total) as u32 } else { 0 };
-                let _ = update_task_status(&app_handle, task_id, "downloading", percent, "downloading", None);
-                emit_progress(&app_handle, task_id, percent, "downloading", "downloading", "");
-            }
-            Err(e) => {
-                fail(&app_handle, task_id, "downloading", &format!("下载中断: {e}")).await;
-                let _ = fs::remove_file(&temp_path);
-                return;
-            }
-        }
+    let app = app_handle.clone();
+    let on_progress: ProgressFn = Arc::new(move |p: DownloadProgress| {
+        let _ = update_task_status(&app, task_id, "downloading", p.percent, p.downloaded, p.total, "downloading", None);
+        emit_progress(&app, task_id, p.percent, p.downloaded, p.total, p.speed, "downloading", "downloading", "");
+    });
+    if let Err(e) = download_file(&client, &download_url, &temp_path, 8, on_progress).await {
+        fail(&app_handle, task_id, "downloading", &e).await;
+        let _ = fs::remove_file(&temp_path);
+        return;
     }
-    drop(file);
 
     // 3) 解压到游戏根目录（.7z 用 sevenz_rust，.zip 用 zip crate，按扩展名分派）
-    let _ = update_task_status(&app_handle, task_id, "extracting", 100, "extracting", None);
-    emit_progress(&app_handle, task_id, 100, "extracting", "extracting", "");
+    let _ = update_task_status(&app_handle, task_id, "extracting", 100, 0, 0, "extracting", None);
+    emit_progress(&app_handle, task_id, 100, 0, 0, 0, "extracting", "extracting", "");
     if let Err(e) = decompress_archive(&temp_path, &target_dir) {
         fail(&app_handle, task_id, "extracting", &format!("解压失败: {e}")).await;
         let _ = fs::remove_file(&temp_path);
@@ -333,8 +339,8 @@ async fn run_bepinex_task(app_handle: tauri::AppHandle, task_id: i64, url: Strin
     let _ = fs::remove_file(&temp_path);
 
     // 4) done
-    let _ = update_task_status(&app_handle, task_id, "done", 100, "done", None);
-    emit_progress(&app_handle, task_id, 100, "done", "done", "");
+    let _ = update_task_status(&app_handle, task_id, "done", 100, 0, 0, "done", None);
+    emit_progress(&app_handle, task_id, 100, 0, 0, 0, "done", "done", "");
     // 清理句柄
     if let Ok(mut m) = tasks().lock() {
         m.remove(&task_id);
@@ -422,7 +428,7 @@ pub async fn db_get_bepinex_task(
     }
     let row: Option<serde_json::Value> = conn
         .query_row(
-            "SELECT id, url, status, percent, stage, error, created_at, updated_at, finished_at
+            "SELECT id, url, status, percent, downloaded, total, stage, error, created_at, updated_at, finished_at
              FROM bepinex_tasks ORDER BY id DESC LIMIT 1",
             [],
             |r| {
@@ -431,11 +437,13 @@ pub async fn db_get_bepinex_task(
                     "url": r.get::<_, String>(1)?,
                     "status": r.get::<_, String>(2)?,
                     "percent": r.get::<_, i64>(3)?,
-                    "stage": r.get::<_, String>(4)?,
-                    "error": r.get::<_, String>(5)?,
-                    "createdAt": r.get::<_, String>(6)?,
-                    "updatedAt": r.get::<_, String>(7)?,
-                    "finishedAt": r.get::<_, String>(8)?,
+                    "downloaded": r.get::<_, i64>(4)?,
+                    "total": r.get::<_, i64>(5)?,
+                    "stage": r.get::<_, String>(6)?,
+                    "error": r.get::<_, String>(7)?,
+                    "createdAt": r.get::<_, String>(8)?,
+                    "updatedAt": r.get::<_, String>(9)?,
+                    "finishedAt": r.get::<_, String>(10)?,
                 }))
             },
         )

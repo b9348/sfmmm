@@ -94,6 +94,8 @@
     "prereqChecking": "正在检测 mod 前置…",
     "prereqInstalledWithCategory": "{{category}} 前置已安装",
     "prereqNotInstalledWithCategory": "{{category}} 前置未安装",
+    "prereqInstalledWithBepInEx": "{{category}} 前置BepInEx已安装",
+    "prereqNotInstalledWithBepInEx": "{{category}} 前置BepInEx未安装",
     "prereqInstalledShort": "已安装",
     "v2FontLabel": "中文字体",
     "bepInExHint": "{{category}} 需要 BepInEx 加载器作为前置。安装后，BepInEx/plugins 下的插件会出现在这里，可逐个启用、停用与管理。",
@@ -145,6 +147,7 @@
     "groupCount": "共 {{count}} 项",
     "cloudflareDownload": "cloudflare 下载点",
     "builtinDownloadPoint": "内置下载点",
+    "huggingfaceDownloadPoint": "HuggingFace 备用下载点",
     "installingBepInEx": "正在安装 BepInEx...",
     "downloadingBepInEx": "正在下载 BepInEx",
     "extractingBepInEx": "正在解压 BepInEx...",
@@ -153,7 +156,9 @@
     "extractingPrereq": "正在解压 {{category}}...",
     "bepInExManualHint1": "可通过程序内置下载点自动安装 BepInEx 前置，或自行安装。",
     "bepInExManualHintLink": "点此访问作者原网站",
-    "bepInExManualHint2": "，选择「BepInEx Unity (IL2CPP) for Windows (x64) games」下载。下载后请将压缩包中的内容直接解压到游戏根目录（BepInEx 文件夹所在目录），不要额外创建压缩包名的文件夹。"
+    "bepInExManualHint2": "，选择「BepInEx Unity (IL2CPP) for Windows (x64) games」下载。下载后请将压缩包中的内容直接解压到游戏根目录（BepInEx 文件夹所在目录），不要额外创建压缩包名的文件夹。",
+    "bepInExVersionMismatch": "检测到 BepInEx 框架版本兼容性问题（当前 {{current}}，推荐 {{recommended}}），建议更换为 SFMMM 推荐版本以防 mod 不兼容。如无问题可忽略. 下方按钮均为 BepInEx框架稳定兼容版的不同下载点, 如遇网络错误可更换下载源按钮. 无需全部下载, 任选其一即可",
+    "reinstallRecommendedBepInEx": "重新安装推荐版本框架"
   },
   "saves": {
     "openFolder": "打开存档目录",

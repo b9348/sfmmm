@@ -876,6 +876,16 @@ export function MissionFolder({ config, subfolder, onUninstall, focusModKey }) {
         </Text>
       )}
 
+      {/* v1/v2 任务页：先检测最基础的 BepInEx 加载器（防漏装），再检测各自任务插件前置 */}
+      {['v1', 'v2'].includes(categoryFromSubfolder(subfolder)) && (
+        <BepInExPrereqBanner
+          gamePath={gamePath}
+          category="dll"
+          prereqKey="bepinex"
+          onInstalled={onPrereqInstalled}
+        />
+      )}
+
       {['dll', 'v1', 'v2'].includes(categoryFromSubfolder(subfolder)) && (
         <BepInExPrereqBanner
           gamePath={gamePath}

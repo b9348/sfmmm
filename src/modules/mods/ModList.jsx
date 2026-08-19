@@ -25,8 +25,9 @@ import { useTranslation } from 'react-i18next'
 import { useInstalledMods } from '../../hooks/useInstalledMods'
 import { LANG_LABELS } from '../../i18n/languages'
 import { RatingStarsDisplay } from '../../components/common/RatingStars'
-import { BEPINEX_URL } from '../../components/common/prereqPoints'
+import { PREREQ_DOWNLOAD_POINTS } from '../../components/common/prereqPoints'
 import { localizeError } from '../../utils/localizeError'
+import { formatSpeed, formatBytes } from '../../utils/formatSpeed'
 
 const useStyles = makeStyles({
   root: {
@@ -199,6 +200,9 @@ export function ModList({ config, onUninstall }) {
   const [error, setError] = useState('')
   const [installingBepInEx, setInstallingBepInEx] = useState(false)
   const [bepInExProgress, setBepInExProgress] = useState(0)
+  const [bepInExDownloaded, setBepInExDownloaded] = useState(0)
+  const [bepInExTotal, setBepInExTotal] = useState(0)
+  const [bepInExSpeed, setBepInExSpeed] = useState(0)
   const [bepInExStage, setBepInExStage] = useState('')
   const bepInExTaskIdRef = useRef(null)
   const { installed, updates, modDetails } = useInstalledMods()
@@ -307,15 +311,21 @@ export function ModList({ config, onUninstall }) {
   // BepInEx 前置安装：Rust 后台任务（db_install_bepinex，与订阅记录同模式）。
   // 进度经全局事件 "bepinex-progress" 广播，本页按 taskId 匹配刷新；
   // 离开页面/切换标签下载照常执行，回来自动恢复进行中的进度。
-  const installBepInEx = useCallback(async () => {
+  // 支持多下载源（Cloudflare / HuggingFace / Lanzou）：点击即从该源安装，
+  // 蓝奏云源由 Rust 端 lanzou 模块先解析成直链再下载。
+  const bepinexPoints = PREREQ_DOWNLOAD_POINTS.bepinex
+  const installBepInEx = useCallback(async (url) => {
     if (!gamePath) return
     setInstallingBepInEx(true)
     setBepInExProgress(0)
+    setBepInExDownloaded(0)
+    setBepInExTotal(0)
+    setBepInExSpeed(0)
     setBepInExStage('downloading')
     setError('')
     try {
       const result = await invoke('db_install_bepinex', {
-        url: BEPINEX_URL,
+        url: url || bepinexPoints[0].url,
       })
       // 命中进行中任务时返回 deduplicated=true，同样接管其进度
       bepInExTaskIdRef.current = result.taskId
@@ -333,6 +343,9 @@ export function ModList({ config, onUninstall }) {
       const payload = ev.payload || {}
       if (bepInExTaskIdRef.current === null || payload.taskId !== bepInExTaskIdRef.current) return
       setBepInExProgress(payload.percent ?? 0)
+      setBepInExDownloaded(payload.downloaded ?? 0)
+      setBepInExTotal(payload.total ?? 0)
+      setBepInExSpeed(payload.speed ?? 0)
       setBepInExStage(payload.stage || '')
       if (payload.status === 'done') {
         setInstallingBepInEx(false)
@@ -360,6 +373,8 @@ export function ModList({ config, onUninstall }) {
           bepInExTaskIdRef.current = task.id
           setInstallingBepInEx(true)
           setBepInExProgress(task.percent ?? 0)
+          setBepInExDownloaded(task.downloaded ?? 0)
+          setBepInExTotal(task.total ?? 0)
           setBepInExStage(task.stage || 'downloading')
         } else if (task.status === 'failed') {
           setError(localizeError(t, task.error || ''))
@@ -432,14 +447,17 @@ export function ModList({ config, onUninstall }) {
             <Button size="small" icon={<FolderOpen24Regular />} onClick={() => openPath(gamePath)} disabled={installingBepInEx}>{t('mods.openGameDir')}</Button>
           </div>
           <div className={styles.toolbarRow}>
-            <Button
-              size="small"
-              icon={installingBepInEx ? <Spinner size="tiny" /> : <ArrowDownload24Regular />}
-              onClick={installBepInEx}
-              disabled={installingBepInEx || loading}
-            >
-              {installingBepInEx ? t('mods.installingBepInEx') : t('mods.builtinDownloadPoint')}
-            </Button>
+            {bepinexPoints.map((p) => (
+              <Button
+                key={p.url}
+                size="small"
+                icon={installingBepInEx ? <Spinner size="tiny" /> : <ArrowDownload24Regular />}
+                onClick={() => installBepInEx(p.url)}
+                disabled={installingBepInEx || loading}
+              >
+                {installingBepInEx ? t('mods.installingBepInEx') : p.name}
+              </Button>
+            ))}
           </div>
           <Text size="small" className={styles.emptyDetails}>
             {t('mods.bepInExManualHint1')}
@@ -453,7 +471,12 @@ export function ModList({ config, onUninstall }) {
             <div className={styles.progressRow}>
               <ProgressBar value={bepInExProgress / 100} />
               <Text size="small" className={styles.muted}>
-                {bepInExStage === 'downloading' && `${t('mods.downloadingBepInEx')} ${bepInExProgress}%`}
+                {bepInExStage === 'downloading' && (
+                  <>
+                    {t('mods.downloadingBepInEx')} {formatBytes(bepInExDownloaded)} / {formatBytes(bepInExTotal)}（{bepInExProgress}%）
+                    {bepInExSpeed > 0 ? ` · ${formatSpeed(bepInExSpeed)}` : ''}
+                  </>
+                )}
                 {bepInExStage === 'extracting' && t('mods.extractingBepInEx')}
               </Text>
             </div>

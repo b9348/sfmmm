@@ -6,7 +6,15 @@ import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { stat } from '@tauri-apps/plugin-fs'
 import { localizeError } from '../../utils/localizeError'
-import { PREREQ_DOWNLOAD_POINTS, V1_PREREQ_MARKER, V2_PREREQ_MARKER, V2_PREREQ_FONT, RMMOSAIC_MARKER } from './prereqPoints'
+import { formatSpeed, formatBytes } from '../../utils/formatSpeed'
+import {
+  PREREQ_DOWNLOAD_POINTS,
+  RECOMMENDED_DOORSTOP_VERSION,
+  V1_PREREQ_MARKER,
+  V2_PREREQ_MARKER,
+  V2_PREREQ_FONT,
+  RMMOSAIC_MARKER,
+} from './prereqPoints'
 
 export { PREREQ_DOWNLOAD_POINTS, BEPINEX_URL, V1_PREREQ_URL, V2_PREREQ_URL, RMMOSAIC_URL } from './prereqPoints'
 
@@ -52,20 +60,26 @@ const useStyles = makeStyles({
 
 // 前置检测与一键安装共用组件。
 // 用于任何以前置作为先决条件的模组/任务页（DLL 模组页、自定义任务 v1/v2 等）：
-// - prereqKey='bepinex'：调用 scan_mods 检测 BepInEx 是否已装；
+// - prereqKey='bepinex'：调用 scan_mods 检测 BepInEx 是否已装；scan_mods 同时返回
+//   .doorstop_version 版本与推荐版本比对结果（doorstopCompatible），版本不兼容时
+//   即使已安装也提示更换为 SFMMM 推荐版本（RECOMMENDED_DOORSTOP_VERSION）。
 // - prereqKey='v1'：检测游戏根目录 BepInEx/plugins/SFM_custom_mission.dll 是否存在。
 // 未装则显示警示 banner 与一键安装按钮（下载点来自 PREREQ_DOWNLOAD_POINTS 枚举，
-// 名为"内置下载点"），安装成功后通过 onInstalled 回调通知父级刷新目录。
+// 名为"内置下载点"；BepInEx 支持内置 + HuggingFace + 蓝奏云多下载点切换），安装成功后通过
+// onInstalled 回调通知父级刷新目录。
 // category 复用创意工坊详情页的 workshop.category_* 语言键（dll/v1/v2 等）来显示分类名。
 //
 // 下载改为 Rust 后台任务（db_install_bepinex，与订阅记录同模式）：
-// 进度经全局事件 "bepinex-progress" 广播，本页按 taskId 匹配刷新；
+// 下载复用渐进式多线程引擎（db/download.rs），进度经全局事件 "bepinex-progress"
+// 广播（含 percent/downloaded/total/speed），本页按 taskId 匹配刷新；
 // 离开页面/切换标签下载照常执行，回来自动恢复进行中的进度。
 export function BepInExPrereqBanner({ gamePath, onInstalled, category = 'dll', prereqKey = 'bepinex' }) {
   const { t, i18n } = useTranslation()
   const styles = useStyles()
   const categoryLabel = t(`workshop.category_${category}`, { defaultValue: category })
-  const downloadPoint = PREREQ_DOWNLOAD_POINTS[prereqKey]?.[0] || PREREQ_DOWNLOAD_POINTS.bepinex[0]
+  const points = PREREQ_DOWNLOAD_POINTS[prereqKey] || PREREQ_DOWNLOAD_POINTS.bepinex
+  const [sourceIndex, setSourceIndex] = useState(0)
+  const downloadPoint = points[sourceIndex] || points[0]
   const isBepinex = prereqKey === 'bepinex'
   // 安装/下载/解压进度文案按前置类型取键：BepInEx 用专属键，其余用通用键(带分类名)
   const installingLabel = isBepinex
@@ -78,10 +92,14 @@ export function BepInExPrereqBanner({ gamePath, onInstalled, category = 'dll', p
     ? t('mods.extractingBepInEx')
     : t('mods.extractingPrereq', { category: categoryLabel })
   const isZh = (i18n.language || '').toLowerCase().startsWith('zh')
-  const [status, setStatus] = useState(null) // null=检测中, { installed: boolean, fontInstalled?: boolean }
+  // status: null=检测中, { installed, fontInstalled?, doorstopVersion?, doorstopCompatible? }
+  const [status, setStatus] = useState(null)
   const [error, setError] = useState('')
   const [installing, setInstalling] = useState(false)
   const [progress, setProgress] = useState(0)
+  const [downloaded, setDownloaded] = useState(0)
+  const [total, setTotal] = useState(0)
+  const [speed, setSpeed] = useState(0)
   const [stage, setStage] = useState('')
   const taskIdRef = useRef(null)
 
@@ -123,7 +141,11 @@ export function BepInExPrereqBanner({ gamePath, onInstalled, category = 'dll', p
         setStatus({ installed })
       } else {
         const res = await invoke('scan_mods', { gamePath })
-        setStatus({ installed: res.bepinExInstalled === true })
+        setStatus({
+          installed: res.bepinExInstalled === true,
+          doorstopVersion: res.doorstopVersion || '',
+          doorstopCompatible: res.doorstopCompatible === true,
+        })
       }
     } catch (e) {
       setError(String(e))
@@ -142,6 +164,9 @@ export function BepInExPrereqBanner({ gamePath, onInstalled, category = 'dll', p
       const payload = ev.payload || {}
       if (taskIdRef.current === null || payload.taskId !== taskIdRef.current) return
       setProgress(payload.percent ?? 0)
+      setDownloaded(payload.downloaded ?? 0)
+      setTotal(payload.total ?? 0)
+      setSpeed(payload.speed ?? 0)
       setStage(payload.stage || '')
       if (payload.status === 'done') {
         setInstalling(false)
@@ -173,6 +198,8 @@ export function BepInExPrereqBanner({ gamePath, onInstalled, category = 'dll', p
           taskIdRef.current = task.id
           setInstalling(true)
           setProgress(task.percent ?? 0)
+          setDownloaded(task.downloaded ?? 0)
+          setTotal(task.total ?? 0)
           setStage(task.stage || 'downloading')
         } else if (task.status === 'failed') {
           setError(task.error || '')
@@ -182,13 +209,19 @@ export function BepInExPrereqBanner({ gamePath, onInstalled, category = 'dll', p
     return () => { cancelled = true }
   }, [downloadPoint.url])
 
-  const install = useCallback(async () => {
+  const install = useCallback(async (index) => {
+    // 下载源按钮直接传 index；未传（如 v1/v2 单源场景）时回退到当前选中源
+    const point = points[index] ?? points[sourceIndex] ?? points[0]
+    setSourceIndex(index ?? sourceIndex)
     setInstalling(true)
     setProgress(0)
+    setDownloaded(0)
+    setTotal(0)
+    setSpeed(0)
     setStage('downloading')
     setError('')
     try {
-      const result = await invoke('db_install_bepinex', { url: downloadPoint.url })
+      const result = await invoke('db_install_bepinex', { url: point.url })
       // 命中进行中任务时返回 deduplicated=true，同样接管其进度
       taskIdRef.current = result.taskId
     } catch (e) {
@@ -196,17 +229,68 @@ export function BepInExPrereqBanner({ gamePath, onInstalled, category = 'dll', p
       setInstalling(false)
       setStage('')
     }
-  }, [downloadPoint.url])
+  }, [points, sourceIndex])
+
+  // 下载/解压进度块（已安装/未安装卡片共用）：显示百分比 + 已下载/总大小 + 实时速度
+  const renderProgress = () => (
+    installing && (
+      <div className={styles.prereqProgress}>
+        <ProgressBar value={progress / 100} />
+        <Text size="small" className={styles.prereqText}>
+          {stage === 'downloading' && (
+            <>
+              {downloadingLabel} {formatBytes(downloaded)} / {formatBytes(total)}（{progress}%）
+              {speed > 0 ? ` · ${formatSpeed(speed)}` : ''}
+            </>
+          )}
+          {stage === 'extracting' && extractingLabel}
+        </Text>
+      </div>
+    )
+  )
+
+  // 下载源按钮：并列排列，点击即从该源安装/重装（BepInEx 三源；单源前置仅一个按钮）。
+  // 按钮文字直接用源全拼（Cloudflare / HuggingFace / Lanzou），不再叫"内置下载点"。
+  const renderSourceButtons = () => (
+    <div className={styles.prereqRow}>
+      {points.map((p, i) => (
+        <Button
+          key={p.url}
+          size="small"
+          icon={installing && sourceIndex === i ? <Spinner size="tiny" /> : <ArrowDownload24Regular />}
+          onClick={() => install(i)}
+          disabled={installing}
+        >
+          {installing && sourceIndex === i ? installingLabel : (p.name.startsWith('mods.') ? t(p.name) : p.name)}
+        </Button>
+      ))}
+    </div>
+  )
 
   // 已安装：始终显示绿色状态卡（各页面前置状态一目了然）
   if (status && status.installed) {
+    // BepInEx 版本不兼容：即使已安装也提示更换为 SFMMM 推荐版本
+    const versionMismatch = isBepinex && status.doorstopCompatible === false
     return (
       <Card className={styles.prereqBannerOk}>
         <div className={styles.prereqRow}>
           <CheckmarkCircle24Regular style={{ color: tokens.colorStatusSuccessForeground1 }} />
-          <Text size="small" weight="semibold">{t('mods.prereqInstalledWithCategory', { category: categoryLabel })}</Text>
+          <Text size="small" weight="semibold">
+            {isBepinex
+              ? t('mods.prereqInstalledWithBepInEx', { category: categoryLabel })
+              : t('mods.prereqInstalledWithCategory', { category: categoryLabel })}
+          </Text>
           <Button size="small" icon={<ArrowClockwise24Regular />} appearance="subtle" onClick={check} disabled={installing}>{t('mods.reDetect')}</Button>
         </div>
+        {/* BepInEx 版本兼容性警告：.doorstop_version 非推荐版本时提示 */}
+        {versionMismatch && (
+          <div className={styles.prereqRow}>
+            <Warning24Regular style={{ color: tokens.colorStatusWarningForeground1 }} />
+            <Text size="small" className={styles.prereqText} style={{ color: tokens.colorStatusWarningForeground1 }}>
+              {t('mods.bepInExVersionMismatch', { current: status.doorstopVersion || '?', recommended: RECOMMENDED_DOORSTOP_VERSION })}
+            </Text>
+          </div>
+        )}
         {/* v2 中文用户：仅字体缺失时提示并可从下载点安装（已安装则不显示） */}
         {prereqKey === 'v2' && isZh && status.fontInstalled === false && (
           <div className={styles.prereqRow}>
@@ -223,6 +307,9 @@ export function BepInExPrereqBanner({ gamePath, onInstalled, category = 'dll', p
             </Button>
           </div>
         )}
+        {/* 常驻"重新安装"（仅 BepInEx）：版本不兼容或想升级时，从所选源一键重装 */}
+        {isBepinex && renderSourceButtons()}
+        {renderProgress()}
       </Card>
     )
   }
@@ -244,7 +331,11 @@ export function BepInExPrereqBanner({ gamePath, onInstalled, category = 'dll', p
     <Card className={styles.prereqBanner}>
       <div className={styles.prereqRow}>
         <Warning24Regular />
-        <Text size="small" weight="semibold">{t('mods.prereqNotInstalledWithCategory', { category: categoryLabel })}</Text>
+        <Text size="small" weight="semibold">
+          {isBepinex
+            ? t('mods.prereqNotInstalledWithBepInEx', { category: categoryLabel })
+            : t('mods.prereqNotInstalledWithCategory', { category: categoryLabel })}
+        </Text>
         <Button size="small" icon={<ArrowClockwise24Regular />} appearance="subtle" onClick={check} disabled={installing}>{t('mods.reDetect')}</Button>
       </div>
       {/* 前置说明：v1/v2 用各自文案，去马赛克补丁不显示该句 */}
@@ -274,16 +365,8 @@ export function BepInExPrereqBanner({ gamePath, onInstalled, category = 'dll', p
         </div>
       )}
       {error && <Text size="small" className={styles.prereqText} style={{ color: tokens.colorStatusDangerForeground1 }}>{localizeError(t, error)}</Text>}
-      <div className={styles.prereqRow}>
-        <Button
-          size="small"
-          icon={installing ? <Spinner size="tiny" /> : <ArrowDownload24Regular />}
-          onClick={install}
-          disabled={installing}
-        >
-          {installing ? installingLabel : t(downloadPoint.name)}
-        </Button>
-      </div>
+      {/* 下载源按钮：并列排列，点击即从该源安装（BepInEx 三源各一个按钮） */}
+      {renderSourceButtons()}
       {/* 手动安装说明仅限 BepInEx 前置（作者官网链接及其描述仅适用于该前置） */}
       {prereqKey === 'bepinex' && (
         <Text size="small" className={styles.prereqText}>
@@ -295,15 +378,7 @@ export function BepInExPrereqBanner({ gamePath, onInstalled, category = 'dll', p
           {t('mods.bepInExManualHint2')}
         </Text>
       )}
-      {installing && (
-        <div className={styles.prereqProgress}>
-          <ProgressBar value={progress / 100} />
-          <Text size="small" className={styles.prereqText}>
-            {stage === 'downloading' && `${downloadingLabel} ${progress}%`}
-            {stage === 'extracting' && extractingLabel}
-          </Text>
-        </div>
-      )}
+      {renderProgress()}
     </Card>
   )
 }

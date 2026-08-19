@@ -38,8 +38,16 @@ struct ScanModsResult {
     warnings: Vec<String>,
     missing_core_files: Vec<String>,
     bepin_ex_installed: bool,
+    /// 游戏根目录 .doorstop_version 文件内容（BepInEx 6 的 Doorstop 引导器版本号）
+    doorstop_version: Option<String>,
+    /// 是否为 SFMMM 推荐版本（RECOMMENDED_DOORSTOP_VERSION），否则即使已安装也提示兼容性问题
+    doorstop_compatible: bool,
     scanned_at: String,
 }
+
+/// SFMMM 实测推荐使用的 Doorstop 版本（BepInEx 6 内置引导器）。
+/// 不同版本实测效果更好（见需求：非 4.3.0 时提示用户更换推荐版本）。
+const RECOMMENDED_DOORSTOP_VERSION: &str = "4.3.0";
 
 fn path_to_string(path: PathBuf) -> String {
     path.to_string_lossy().into_owned()
@@ -750,6 +758,12 @@ fn scan_mods(game_path: String) -> Result<ScanModsResult, String> {
     let mut mods = Vec::new();
     let missing_core_files = missing_bepinex_core_files(&game_path);
     let bepin_ex_installed = missing_core_files.is_empty();
+    // 读取 .doorstop_version 文件内容（BepInEx 6 引导器版本），判断是否为 SFMMM 推荐版本
+    let doorstop_version = fs::read_to_string(game_path.join(".doorstop_version"))
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    let doorstop_compatible = doorstop_version.as_deref() == Some(RECOMMENDED_DOORSTOP_VERSION);
 
     if !bepin_ex_installed {
         warnings.push("mod 前置未安装或不完整".into());
@@ -760,6 +774,8 @@ fn scan_mods(game_path: String) -> Result<ScanModsResult, String> {
             warnings,
             missing_core_files,
             bepin_ex_installed,
+            doorstop_version,
+            doorstop_compatible,
             scanned_at: current_timestamp(),
         });
     }
@@ -857,6 +873,8 @@ fn scan_mods(game_path: String) -> Result<ScanModsResult, String> {
         warnings,
         missing_core_files,
         bepin_ex_installed,
+        doorstop_version,
+        doorstop_compatible,
         scanned_at: current_timestamp(),
     })
 }
@@ -1395,6 +1413,15 @@ pub fn run() {
             // 是否仍对应当前最新版（避免把过期/残留的旧版安装包自动提升为待应用，
             // 也避免对其他渠道下载的旧版安装包重复覆盖）。旧行默认空串，视为未知。
             sql: "ALTER TABLE update_tasks ADD COLUMN version TEXT DEFAULT ''",
+            kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 17,
+            description: "add_size_cols_to_bepinex_tasks",
+            // BepInEx 前置下载任务记录已下载/总大小（字节），配合 db/download.rs 共享引擎
+            // 的进度上报（downloaded/total/speed），前端可显示"已下载 X / Y · 速度"。
+            sql: "ALTER TABLE bepinex_tasks ADD COLUMN downloaded INTEGER DEFAULT 0;
+                  ALTER TABLE bepinex_tasks ADD COLUMN total INTEGER DEFAULT 0;",
             kind: MigrationKind::Up,
         },
     ];

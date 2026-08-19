@@ -94,6 +94,8 @@
     "prereqChecking": "Mod 前提条件を確認中…",
     "prereqInstalledWithCategory": "{{category}} の前提条件はインストール済み",
     "prereqNotInstalledWithCategory": "{{category}} の前提条件がインストールされていません",
+    "prereqInstalledWithBepInEx": "{{category}} の前提条件 BepInEx はインストール済み",
+    "prereqNotInstalledWithBepInEx": "{{category}} の前提条件 BepInEx がインストールされていません",
     "prereqInstalledShort": "インストール済み",
     "v2FontLabel": "中国語フォント",
     "bepInExHint": "{{category}} には前提として BepInEx ローダーが必要です。インストールすると、BepInEx/plugins 配下のプラグインがここに表示され、個別に有効化・無効化・管理できます。",
@@ -145,6 +147,7 @@
     "groupCount": "全 {{count}} 件",
     "cloudflareDownload": "Cloudflare ダウンロード",
     "builtinDownloadPoint": "内蔵ダウンロードポイント",
+    "huggingfaceDownloadPoint": "HuggingFace ミラーダウンロードポイント",
     "installingBepInEx": "BepInEx をインストール中...",
     "downloadingBepInEx": "BepInEx をダウンロード中",
     "extractingBepInEx": "BepInEx を展開中...",
@@ -153,7 +156,9 @@
     "extractingPrereq": "{{category}} を展開中...",
     "bepInExManualHint1": "プログラム内蔵のダウンロードポイントから BepInEx を自動インストールするか、手動でインストールできます。",
     "bepInExManualHintLink": "こちらから作者の公式サイトにアクセス",
-    "bepInExManualHint2": "し、「BepInEx Unity (IL2CPP) for Windows (x64) games」を選択してダウンロードしてください。ダウンロード後、アーカイブの中身をゲームのルートディレクトリ（BepInEx フォルダと同じ階層）に直接展開してください。アーカイブ名のフォルダを追加で作成しないでください。"
+    "bepInExManualHint2": "し、「BepInEx Unity (IL2CPP) for Windows (x64) games」を選択してダウンロードしてください。ダウンロード後、アーカイブの中身をゲームのルートディレクトリ（BepInEx フォルダと同じ階層）に直接展開してください。アーカイブ名のフォルダを追加で作成しないでください。",
+    "bepInExVersionMismatch": "BepInEx フレームワークのバージョン互換性の問題を検出しました（現在 {{current}}、推奨 {{recommended}}）。mod の非互換を防ぐため、SFMMM 推奨バージョンへの交換をおすすめします。問題がなければ無視して構いません。下のボタンはすべて同じ安定互換版の BepInEx フレームワークの異なるダウンロード元です。ネットワークエラーが発生した場合はダウンロード元のボタンを切り替えてください。すべてをダウンロードする必要はありません。いずれか 1 つを選べば十分です",
+    "reinstallRecommendedBepInEx": "推奨フレームワークを再インストール"
   },
   "saves": {
     "openFolder": "セーブフォルダを開く",

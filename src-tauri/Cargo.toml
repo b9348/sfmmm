@@ -1,6 +1,6 @@
 [package]
 name = "app"
-version = "0.1.97"
+version = "0.1.98"
 description = "A Tauri App"
 authors = ["you"]
 license = ""
@@ -29,7 +29,7 @@ tauri-plugin-fs = "2"
 tauri-plugin-shell = "2"
 tauri-plugin-http = { version = "2", features = ["native-tls"] }
 tauri-plugin-process = "2"
-reqwest = { version = "0.12", features = ["json", "stream"] }
+reqwest = { version = "0.12", features = ["json", "stream", "gzip"] }
 mysql = "25"
 sha2 = "0.10"
 hmac = "0.12"
@@ -44,6 +44,7 @@ rusqlite = { version = "0.31", features = ["bundled"] }
 lazy_static = "1"
 once_cell = "1"
 chrono = "0.4"
+regex = "1"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full"] }

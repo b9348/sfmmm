@@ -94,6 +94,8 @@
     "prereqChecking": "Checking mod prerequisites…",
     "prereqInstalledWithCategory": "{{category}} prerequisite installed",
     "prereqNotInstalledWithCategory": "{{category}} prerequisite not installed",
+    "prereqInstalledWithBepInEx": "{{category}} BepInEx prerequisite installed",
+    "prereqNotInstalledWithBepInEx": "{{category}} BepInEx prerequisite not installed",
     "prereqInstalledShort": "Installed",
     "v2FontLabel": "Chinese font",
     "bepInExHint": "{{category}} require the BepInEx loader as a prerequisite. Once installed, plugins under BepInEx/plugins will appear here and can be enabled, disabled and managed individually.",
@@ -145,6 +147,7 @@
     "groupCount": "{{count}} items",
     "cloudflareDownload": "Cloudflare Download",
     "builtinDownloadPoint": "Built-in Download Point",
+    "huggingfaceDownloadPoint": "HuggingFace Mirror Download Point",
     "installingBepInEx": "Installing BepInEx...",
     "downloadingBepInEx": "Downloading BepInEx",
     "extractingBepInEx": "Extracting BepInEx...",
@@ -153,7 +156,9 @@
     "extractingPrereq": "Extracting {{category}}...",
     "bepInExManualHint1": "Install BepInEx automatically via the built-in download point, or install manually.",
     "bepInExManualHintLink": "Click here to visit the author's official site",
-    "bepInExManualHint2": ", select \"BepInEx Unity (IL2CPP) for Windows (x64) games\" to download. After downloading, extract the contents directly to the game root directory (the same directory as the BepInEx folder). Do NOT create an extra folder named after the archive."
+    "bepInExManualHint2": ", select \"BepInEx Unity (IL2CPP) for Windows (x64) games\" to download. After downloading, extract the contents directly to the game root directory (the same directory as the BepInEx folder). Do NOT create an extra folder named after the archive.",
+    "bepInExVersionMismatch": "BepInEx framework version compatibility issue detected (current {{current}}, recommended {{recommended}}). Switch to the SFMMM recommended framework to avoid mod incompatibility. You can ignore this if everything works fine. The buttons below are different download points for the same stable-compatible BepInEx framework; if you encounter network errors, you can switch to another download source. No need to download all of them — choose any one.",
+    "reinstallRecommendedBepInEx": "Reinstall recommended framework"
   },
   "saves": {
     "openFolder": "Open save folder",

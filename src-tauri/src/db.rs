@@ -11,8 +11,10 @@ pub mod hash;
 pub mod installer;
 pub mod subscribe;
 pub mod bepinex;
+pub mod lanzou;
 pub mod gh;
 pub mod crypto;
+pub mod download;
 
 mod user;
 mod mod_ops;
