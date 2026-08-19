@@ -146,43 +146,46 @@ function App() {
           return
         }
 
-        // 已有待应用更新：仅当安装包就绪、文件在盘且版本仍为当前最新版才自动应用
+        // 已有待应用更新：仅当安装包就绪、文件在盘且版本仍为当前最新版才自动应用。
+        // 注意不依赖 info.hasUpdate：版本齐平（本地=服务器=安装包）时服务器虽报告
+        // "无更新"，但已下载的安装包仍应被应用——与手动"立即重启并更新"按钮同语义
+        // （按钮只看安装包就绪，不查 hasUpdate），避免"按钮能更新、重启后自动应用失效"
+        // 的不对等。canAutoApply 仍校验 st.version === latestVersion，防陈旧提升；
+        // 网络故障时 latestVersion 为 null，canAutoApply 返回 false，走 error 分支保留标志。
         if (cfg.pending_update === 'true') {
-          if (info.hasUpdate && info.updateUrl) {
-            const st = await getUpdateStatus()
-            if (cancelled) return
-            if (canAutoApply(st, info.latestVersion)) {
-              // 关键：应用更新前先清除 pending_update 标志并置 applyingRef。
-              // applyUpdate() 会调用 app_handle.exit(0) 终止当前进程，由 bat 脚本
-              // 静默安装后重启；否则重启后的新进程会再次触发 applyUpdate()，
-              // 形成"白屏 → 退出 → bat 弹窗 → 重启 → 白屏"的死循环。
-              applyingRef.current = true
-              try {
-                await setConfig('pending_update', 'false')
-                await applyUpdate()
-                return // 进程将退出
-              } catch (e) {
-                console.warn('[Update] 自动应用待更新失败:', e)
-                // 失败后复位 applyingRef（含 setConfig 拒绝/applyUpdate 失败）：
-                // 本会话后续下载（全局 update-progress 监听）仍能正常写回
-                // pending_update，避免静默更新被永久抑制
-                applyingRef.current = false
-                // 记录失败退避时间戳，24h 内不再自动发起下载/提升待应用
-                setConfig('auto_update_fail_at', new Date().toISOString()).catch((failErr) => {
-                  console.warn('[Update] 记录失败退避失败:', failErr)
-                })
-                // 应用失败已记录退避：本会话不再回落到自动下载，避免同会话立即
-                // 重新下载并再次武装 pending_update；下次启动由上方退避检查统一拦截
-                return
-              }
+          const st = await getUpdateStatus()
+          if (cancelled) return
+          if (canAutoApply(st, info.latestVersion)) {
+            // 关键：应用更新前先清除 pending_update 标志并置 applyingRef。
+            // applyUpdate() 会调用 app_handle.exit(0) 终止当前进程，由 bat 脚本
+            // 静默安装后重启；否则重启后的新进程会再次触发 applyUpdate()，
+            // 形成"白屏 → 退出 → bat 弹窗 → 重启 → 白屏"的死循环。
+            applyingRef.current = true
+            try {
+              await setConfig('pending_update', 'false')
+              await applyUpdate()
+              return // 进程将退出
+            } catch (e) {
+              console.warn('[Update] 自动应用待更新失败:', e)
+              // 失败后复位 applyingRef（含 setConfig 拒绝/applyUpdate 失败）：
+              // 本会话后续下载（全局 update-progress 监听）仍能正常写回
+              // pending_update，避免静默更新被永久抑制
+              applyingRef.current = false
+              // 记录失败退避时间戳，24h 内不再自动发起下载/提升待应用
+              setConfig('auto_update_fail_at', new Date().toISOString()).catch((failErr) => {
+                console.warn('[Update] 记录失败退避失败:', failErr)
+              })
+              // 应用失败已记录退避：本会话不再回落到自动下载，避免同会话立即
+              // 重新下载并再次武装 pending_update；下次启动由上方退避检查统一拦截
+              return
             }
           } else if (info.error) {
-            // 更新源故障（图床不可达/清单异常）：无法确认是否仍有更新，保留
+            // 更新源故障（图床不可达/清单异常）且安装包不满足应用条件：保留
             // pending_update 待下次启动重试——瞬态故障不能误删有效安装包的待应用状态
             console.warn('[Update] 检测更新源失败，保留待应用状态:', info.error)
             return
           }
-          // 服务器明确确认无更新（或安装包失效）：清残留标志，回落重新下载
+          // 服务器明确确认无更新且安装包不满足应用条件（陈旧/失效/版本不符）：清残留标志
           await setConfig('pending_update', 'false')
         }
 

@@ -18,6 +18,7 @@ import {
   Link24Regular,
   Globe24Regular,
   Delete24Regular,
+  Dismiss24Regular,
 } from '@fluentui/react-icons'
 import { makeStyles, tokens } from '@fluentui/react-components'
 import { invoke } from '@tauri-apps/api/core'
@@ -27,9 +28,9 @@ import { open as openUrl } from '@tauri-apps/plugin-shell'
 import { getConfig, setConfig } from '../../services/dbHelper'
 import { Acknowledgments } from './Acknowledgments'
 import i18n from '../../i18n'
-import { checkVersion, checkGitHubUpdate, prepareUpdate, applyUpdate, getUpdateStatus, compareVersions, armPendingUpdate } from '../../services/updateApi'
+import { checkVersion, checkGitHubUpdate, prepareUpdate, applyUpdate, getUpdateStatus, compareVersions, armPendingUpdate, cancelUpdate } from '../../services/updateApi'
 import APP_VERSION from '../../version.js'
-import { formatSpeed } from '../../utils/formatSpeed'
+import { formatSpeed, formatBytes } from '../../utils/formatSpeed'
 
 const useStyles = makeStyles({
   formGrid: {
@@ -91,6 +92,9 @@ export function GameSettings({ config, onConfigChange, appUpdateInfo }) {
   const [ghResolving, setGhResolving] = useState(false)
   // 实时下载速度（字节/秒），来自 update-progress 事件
   const [downloadSpeed, setDownloadSpeed] = useState(0)
+  // 已下载/总大小（字节），来自 update-progress 事件，用于"已下载 X / Y"展示（与 BepInEx 前置同款）
+  const [downloadedBytes, setDownloadedBytes] = useState(0)
+  const [totalBytes, setTotalBytes] = useState(0)
   // 当前后台下载任务 id：进度事件按 taskId 匹配（与订阅下载同模式）
   const taskIdRef = useRef(null)
 
@@ -160,6 +164,8 @@ export function GameSettings({ config, onConfigChange, appUpdateInfo }) {
         if (st.status === 'downloading' || st.status === 'pending') {
           setDownloading(true)
           setDownloadProgress(st.percent ?? 0)
+          setDownloadedBytes(st.downloaded ?? 0)
+          setTotalBytes(st.total ?? 0)
           setDownloadStage('downloading')
         } else if (st.status === 'ready') {
           setPrepared(true)
@@ -202,11 +208,25 @@ export function GameSettings({ config, onConfigChange, appUpdateInfo }) {
         setDownloading(false)
         setDownloadStage('')
         setDownloadSpeed(0)
+        setDownloadedBytes(0)
+        setTotalBytes(0)
         setDownloadError(payload.error || t('settings.downloadFailedGeneric'))
+      } else if (payload.status === 'cancelled') {
+        // 取消：复位 UI（taskIdRef 已在 handleCancelDownload 清除，此处兜底防止
+        // 被动收到 cancelled 事件时状态残留），不当作失败显示错误
+        taskIdRef.current = null
+        setDownloading(false)
+        setDownloadStage('')
+        setDownloadProgress(0)
+        setDownloadedBytes(0)
+        setTotalBytes(0)
+        setDownloadSpeed(0)
       } else {
         setDownloadProgress(payload.percent ?? 0)
         setDownloadStage(payload.stage || 'downloading')
         setDownloadSpeed(payload.speed ?? 0)
+        setDownloadedBytes(payload.downloaded ?? 0)
+        setTotalBytes(payload.total ?? 0)
       }
     }).then(fn => { unlistenFn = fn }).catch(e => console.warn('[Update] 监听进度事件失败:', e))
 
@@ -275,6 +295,8 @@ export function GameSettings({ config, onConfigChange, appUpdateInfo }) {
     setDownloadProgress(0)
     setDownloadStage('downloading')
     setDownloadError('')
+    setDownloadedBytes(0)
+    setTotalBytes(0)
     try {
       // 创建后台下载任务后立即返回；下载在 Rust 执行，进度由 update-progress 事件回传，
       // 离开设置页也不中断，重进页面通过 getUpdateStatus() 恢复
@@ -286,6 +308,26 @@ export function GameSettings({ config, onConfigChange, appUpdateInfo }) {
       setDownloadStage('')
       setDownloadError(e.message || t('settings.downloadFailedGeneric'))
     }
+  }
+
+  // 取消进行中的更新下载：置位取消标志让 Rust 下载引擎子任务停止并删半成品安装包，
+  // 同时 abort 句柄、写 cancelled 状态。事件监听收到 cancelled 后复位 UI（与订阅取消同款）。
+  const handleCancelDownload = async () => {
+    const tid = taskIdRef.current
+    if (tid === null) return
+    try {
+      await cancelUpdate(tid)
+    } catch (e) {
+      console.warn('[Update] 取消下载失败:', e)
+      // 取消失败仍复位 UI，避免按钮卡死；真实任务状态由 getUpdateStatus 恢复
+    }
+    taskIdRef.current = null
+    setDownloading(false)
+    setDownloadStage('')
+    setDownloadProgress(0)
+    setDownloadedBytes(0)
+    setTotalBytes(0)
+    setDownloadSpeed(0)
   }
 
   // GitHub Releases 下载渠道：检测已确认发布完成，拉取直链后直接发起下载
@@ -410,14 +452,22 @@ export function GameSettings({ config, onConfigChange, appUpdateInfo }) {
         <CardHeader header={<Title2>{t('settings.updateTitle')}</Title2>} />
         <div style={{ padding: '8px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
           <div className={styles.updateRow}>
-            {/* loading 状态统一收敛到「检测更新」按钮：无论从哪个源下载/解析直链，都由此按钮转圈指示 */}
+            {/* 主按钮三态：检测中(转圈禁用) / 下载中(改为可点击的"取消下载") / 空闲(检测更新)。
+                下载中不再 disabled：点击即取消后台下载（与 BepInEx 前置"安装中"可取消同语义），
+                取消后复位回空闲态可重新选源/检测。ghResolving(解析 GitHub 直链)期间仍禁用。 */}
             <Button
               size="small"
-              icon={checking || downloading || ghResolving ? <Spinner size="tiny" /> : <ArrowSync24Regular />}
-              onClick={handleCheckUpdate}
-              disabled={checking || downloading || ghResolving}
+              icon={checking || ghResolving ? <Spinner size="tiny" /> : downloading ? <Dismiss24Regular /> : <ArrowSync24Regular />}
+              onClick={downloading ? handleCancelDownload : handleCheckUpdate}
+              disabled={checking || ghResolving}
             >
-              {checking ? t('settings.checking') : (downloading || ghResolving) ? t('settings.downloadingUpdate') : t('settings.checkUpdateBtn')}
+              {checking
+                ? t('settings.checking')
+                : downloading
+                  ? t('settings.cancelDownload')
+                  : ghResolving
+                    ? t('settings.downloadingUpdate')
+                    : t('settings.checkUpdateBtn')}
             </Button>
             <div className={styles.updateInfo}>
               {prepared ? (
@@ -500,7 +550,12 @@ export function GameSettings({ config, onConfigChange, appUpdateInfo }) {
                 <>
                   <ProgressBar value={downloadProgress / 100} />
                   <Text size="small" style={{ color: tokens.colorNeutralForeground3 }}>
-                    {downloadStage === 'downloading' && t('settings.downloadingUpdate') + ` ${downloadProgress}%` + (downloadSpeed > 0 ? ` · ${formatSpeed(downloadSpeed)}` : '')}
+                    {downloadStage === 'downloading' && (
+                      <>
+                        {t('settings.downloadingUpdate')} {formatBytes(downloadedBytes)} / {formatBytes(totalBytes)}（{downloadProgress}%）
+                        {downloadSpeed > 0 ? ` · ${formatSpeed(downloadSpeed)}` : ''}
+                      </>
+                    )}
                   </Text>
                 </>
               )}

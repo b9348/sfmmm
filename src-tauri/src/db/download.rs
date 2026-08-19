@@ -8,7 +8,7 @@
 use std::fs;
 use std::io::Write;
 use std::path::Path;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 
 use futures_util::StreamExt;
@@ -26,9 +26,20 @@ pub struct DownloadProgress {
 /// 进度回调：调用方自行写库 + 广播事件
 pub type ProgressFn = Arc<dyn Fn(DownloadProgress) + Send + Sync>;
 
+/// 取消标志：置 true 后所有下载子任务尽快停止并返回 Err，避免取消后残留子任务
+/// 继续写文件（与再次下载并发写同一文件导致安装包损坏）。调用方在 spawn 任务时
+/// 创建并持有，cancel 命令置位。
+pub type CancelFlag = Arc<AtomicBool>;
+
+/// 构造一个永不会被取消的标志，供无需取消的调用方（如 BepInEx 前置）使用。
+pub fn no_cancel() -> CancelFlag {
+    Arc::new(AtomicBool::new(false))
+}
+
 /// 下载 [start, end] 闭区间到文件对应偏移（独立句柄 + seek，与其它子块互不干扰）。
 /// 内部重试 3 次；成功返回 Ok(())，最终失败返回 Err(())，已写字节数会回退，
 /// 由调用方（主线程）决定是否补下该区间——子线程失败不影响主流程。
+/// 取消：检测到 cancel 置位立即停止并回退已写字节，返回 Err。
 async fn download_range(
     client: &reqwest::Client,
     url: &str,
@@ -36,9 +47,13 @@ async fn download_range(
     start: u64,
     end: u64,
     downloaded: &AtomicU64,
+    cancel: &CancelFlag,
 ) -> Result<(), ()> {
     const ATTEMPTS: u32 = 3;
     for attempt in 0..ATTEMPTS {
+        if cancel.load(Ordering::Relaxed) {
+            return Err(());
+        }
         let range = format!("bytes={}-{}", start, end);
         let resp = match client
             .get(url)
@@ -63,6 +78,10 @@ async fn download_range(
         let mut written: u64 = 0;
         let mut stream_err = false;
         while let Some(chunk) = stream.next().await {
+            if cancel.load(Ordering::Relaxed) {
+                stream_err = true;
+                break;
+            }
             match chunk {
                 Ok(c) => {
                     if file.write_all(&c).await.is_err() {
@@ -80,6 +99,10 @@ async fn download_range(
         drop(file);
         // 进度只统计成功写入的字节；失败时回退，避免重试重复计数
         downloaded.fetch_add(written, Ordering::Relaxed);
+        if cancel.load(Ordering::Relaxed) {
+            downloaded.fetch_sub(written, Ordering::Relaxed);
+            return Err(());
+        }
         if !stream_err && written == end - start + 1 {
             return Ok(());
         }
@@ -92,6 +115,7 @@ async fn download_range(
 /// 渐进式多线程分块下载（服务端支持 Range 时使用）：
 /// 预分配文件 → 按 threads 分块并行拉取 → 子块失败在主线程串行补下（带重试）。
 /// 全程持续落盘并节流上报进度，成功返回 Ok(())。
+/// 取消：cancel 置位后子块立即停止，主线程检测到取消即删半成品文件返回取消错误。
 async fn download_parallel(
     client: &reqwest::Client,
     url: &str,
@@ -99,7 +123,12 @@ async fn download_parallel(
     total: u64,
     threads: u32,
     on_progress: ProgressFn,
+    cancel: CancelFlag,
 ) -> Result<(), String> {
+    // 取消前置检查：进入前已被取消则不创建/预分配文件
+    if cancel.load(Ordering::Relaxed) {
+        return Err("下载已取消".into());
+    }
     // 预分配文件，供各子块独立句柄 seek 写入
     let file = match fs::File::create(path) {
         Ok(f) => f,
@@ -127,8 +156,9 @@ async fn download_parallel(
         let p = path.to_path_buf();
         let dl = downloaded.clone();
         let failed = failed_ranges.clone();
+        let can = cancel.clone();
         handles.push(tokio::spawn(async move {
-            if download_range(&c, &u, &p, start, end, &dl).await.is_err() {
+            if download_range(&c, &u, &p, start, end, &dl, &can).await.is_err() {
                 if let Ok(mut m) = failed.lock() {
                     m.push((start, end));
                 }
@@ -140,11 +170,15 @@ async fn download_parallel(
     let monitor = {
         let dl = downloaded.clone();
         let cb = on_progress.clone();
+        let can = cancel.clone();
         tokio::spawn(async move {
             let mut prev_bytes: u64 = 0;
             let mut prev_time = tokio::time::Instant::now();
             loop {
                 tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+                if can.load(Ordering::Relaxed) {
+                    break;
+                }
                 let d = dl.load(Ordering::Relaxed);
                 let now = tokio::time::Instant::now();
                 let elapsed = now.duration_since(prev_time).as_secs_f64();
@@ -169,12 +203,21 @@ async fn download_parallel(
     }
     monitor.abort();
 
+    // 取消：子块停止后直接删半成品文件返回，不进入补下流程
+    if cancel.load(Ordering::Relaxed) {
+        let _ = fs::remove_file(path);
+        return Err("下载已取消".into());
+    }
+
     // 子线程失败不影响主流程：主线程串行补下失败区间（每个区间再重试 3 次）
     let failed = failed_ranges.lock().map(|m| m.clone()).unwrap_or_default();
     for (start, end) in failed {
         let mut ok = false;
         for _ in 0..3 {
-            if download_range(client, url, path, start, end, &downloaded).await.is_ok() {
+            if cancel.load(Ordering::Relaxed) {
+                break;
+            }
+            if download_range(client, url, path, start, end, &downloaded, &cancel).await.is_ok() {
                 ok = true;
                 break;
             }
@@ -195,12 +238,17 @@ async fn download_parallel(
 }
 
 /// 单次单流下载尝试：成功 Ok(())，失败 Err(错误信息)，不写失败状态
+/// 取消：cancel 置位立即停止写文件并返回取消错误。
 async fn single_stream_attempt(
     client: &reqwest::Client,
     url: &str,
     path: &Path,
     on_progress: ProgressFn,
+    cancel: &CancelFlag,
 ) -> Result<(), String> {
+    if cancel.load(Ordering::Relaxed) {
+        return Err("下载已取消".into());
+    }
     let response = match client.get(url).send().await {
         Ok(r) if r.status().is_success() => r,
         Ok(r) => return Err(format!("下载失败 HTTP {}", r.status())),
@@ -217,6 +265,11 @@ async fn single_stream_attempt(
     let mut prev_bytes: u64 = 0;
     let mut prev_time = tokio::time::Instant::now();
     while let Some(chunk) = stream.next().await {
+        if cancel.load(Ordering::Relaxed) {
+            drop(file);
+            let _ = fs::remove_file(path);
+            return Err("下载已取消".into());
+        }
         match chunk {
             Ok(c) => {
                 if let Err(e) = file.write_all(&c) {
@@ -251,22 +304,31 @@ async fn single_stream_attempt(
 
 /// 单流下载（服务端不支持 Range / 大小未知 / 单线程时回退）。
 /// 网络抖动/连接被截断时整体重试 3 次（间隔递增），避免一次中断即失败。
+/// 取消：任意一次尝试被取消即立即返回，不再重试。
 async fn download_single_stream(
     client: &reqwest::Client,
     url: &str,
     path: &Path,
     on_progress: ProgressFn,
+    cancel: CancelFlag,
 ) -> Result<(), String> {
     const ATTEMPTS: u32 = 3;
     let mut last_err = String::from("下载失败");
     for attempt in 0..ATTEMPTS {
+        if cancel.load(Ordering::Relaxed) {
+            return Err("下载已取消".into());
+        }
         // 重试前上报 downloading 初始进度，覆盖上次尝试残留
         if attempt > 0 {
             on_progress(DownloadProgress { downloaded: 0, total: 0, percent: 0, speed: 0 });
         }
-        match single_stream_attempt(client, url, path, on_progress.clone()).await {
+        match single_stream_attempt(client, url, path, on_progress.clone(), &cancel).await {
             Ok(()) => return Ok(()),
             Err(e) => {
+                // 取消不重试
+                if cancel.load(Ordering::Relaxed) {
+                    return Err(e);
+                }
                 last_err = e;
                 let _ = fs::remove_file(path);
                 if attempt + 1 < ATTEMPTS {
@@ -281,13 +343,19 @@ async fn download_single_stream(
 
 /// 统一入口：探测 Range 支持 → 分派并行分块或单流回退，成功 Ok(())，失败 Err(错误信息)。
 /// 失败时已删除半成品文件，调用方只需写失败状态。
+/// cancel：取消标志，置位后立即停止下载并删除半成品文件返回"下载已取消"。
 pub async fn download_file(
     client: &reqwest::Client,
     url: &str,
     path: &Path,
     threads: u32,
     on_progress: ProgressFn,
+    cancel: CancelFlag,
 ) -> Result<(), String> {
+    // 进入探测前先检查取消，避免取消后又创建/预分配文件
+    if cancel.load(Ordering::Relaxed) {
+        return Err("下载已取消".into());
+    }
     // 探测是否支持 Range 分块（多线程下载的前提）。
     // 先 HEAD 探测；HEAD 失败/未确认 Range 支持时，回退 GET + Range: bytes=0-0
     // 实测（GitHub 等 CDN 对 Range 请求返回 206 + content-range，可拿到总大小）。
@@ -327,10 +395,15 @@ pub async fn download_file(
         }
     }
 
+    // 探测期间被取消：直接返回，不进入下载
+    if cancel.load(Ordering::Relaxed) {
+        return Err("下载已取消".into());
+    }
+
     // HEAD/Range 探测不可用 / 大小未知 / 不支持 Range / 单线程 → 回退单流
     if total > 0 && supports_range && threads > 1 {
-        download_parallel(client, url, path, total, threads, on_progress).await
+        download_parallel(client, url, path, total, threads, on_progress, cancel).await
     } else {
-        download_single_stream(client, url, path, on_progress).await
+        download_single_stream(client, url, path, on_progress, cancel).await
     }
 }

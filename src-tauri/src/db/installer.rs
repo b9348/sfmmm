@@ -16,6 +16,7 @@
 // 命令：db_prepare_update / db_get_update_status / db_apply_update
 use std::collections::HashMap;
 use std::fs;
+use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 
 use once_cell::sync::Lazy;
@@ -25,7 +26,7 @@ use tauri::Emitter;
 use tauri::Manager;
 use tokio::task::JoinHandle;
 
-use crate::db::download::{DownloadProgress, ProgressFn, download_file};
+use crate::db::download::{DownloadProgress, ProgressFn, CancelFlag, download_file};
 use crate::db::gh::build_client;
 use crate::db::subscribe::open_sqlite;
 
@@ -51,6 +52,19 @@ fn task_alive(id: i64) -> bool {
     tasks().lock().map(|m| m.contains_key(&id)).unwrap_or(false)
 }
 
+// ── 取消标志表（取消下载用）──────────────────────────────────
+// 与句柄表并列：下载任务 spawn 时创建标志并存入，db_cancel_update 置位后
+// download.rs 共享引擎的各子任务检测到即停止并删半成品文件，避免取消后
+// 残留子任务继续写文件、与下次下载并发写同一安装包导致损坏。句柄表 abort
+// 仅能停掉 run_update_download_task 顶层 future（它大多在 await download_file），
+// 无法停掉 download_file 内部 spawn 的并行子块，故必须用标志真正停止它们。
+static CANCEL_FLAGS: Lazy<Arc<Mutex<HashMap<i64, CancelFlag>>>> =
+    Lazy::new(|| Arc::new(Mutex::new(HashMap::new())));
+
+fn cancel_flags() -> &'static Mutex<HashMap<i64, CancelFlag>> {
+    &CANCEL_FLAGS
+}
+
 /// 将残留运行态行重置为 failed/interrupted（进程重启后无人接管的下载）
 fn reset_stale_task(conn: &Connection, id: i64) -> Result<(), String> {
     let now = chrono::Utc::now().to_rfc3339();
@@ -70,11 +84,15 @@ fn reset_stale_task(conn: &Connection, id: i64) -> Result<(), String> {
 struct UpdateProgress {
     task_id: i64,
     percent: u32,
+    /// 已下载字节（下载中有效）
+    downloaded: u64,
+    /// 总大小字节（服务端给出 Content-Length 时有效）
+    total: u64,
+    /// 实时下载速度（字节/秒），仅下载中有效
+    speed: u64,
     stage: String,
     status: String,
     error: String,
-    /// 实时下载速度（字节/秒），仅下载中有效
-    speed: u64,
 }
 
 // ── 任务状态写回（update_tasks 表）────────────────────────
@@ -83,6 +101,8 @@ fn update_task_status(
     task_id: i64,
     status: &str,
     percent: u32,
+    downloaded: u64,
+    total: u64,
     stage: &str,
     error: Option<&str>,
 ) -> Result<(), String> {
@@ -94,8 +114,8 @@ fn update_task_status(
         None
     };
     conn.execute(
-        "UPDATE update_tasks SET status = ?, percent = ?, stage = ?, error = ?, updated_at = ? WHERE id = ?",
-        rusqlite::params![status, percent as i64, stage, error.map(|e| e.to_string()).unwrap_or_default(), now, task_id],
+        "UPDATE update_tasks SET status = ?, percent = ?, downloaded = ?, total = ?, stage = ?, error = ?, updated_at = ? WHERE id = ?",
+        rusqlite::params![status, percent as i64, downloaded as i64, total as i64, stage, error.map(|e| e.to_string()).unwrap_or_default(), now, task_id],
     )
     .map_err(|e| format!("更新任务状态失败: {e}"))?;
     if let Some(ts) = finished {
@@ -111,34 +131,45 @@ fn emit_progress(
     app_handle: &tauri::AppHandle,
     task_id: i64,
     percent: u32,
+    downloaded: u64,
+    total: u64,
+    speed: u64,
     stage: &str,
     status: &str,
     error: &str,
-    speed: u64,
 ) {
     let _ = app_handle.emit(
         "update-progress",
         UpdateProgress {
             task_id,
             percent,
+            downloaded,
+            total,
+            speed,
             stage: stage.into(),
             status: status.into(),
             error: error.into(),
-            speed,
         },
     );
 }
 
 // ── 失败状态写回（多线程/单流路径共用）────────────────────
 fn write_fail(app_handle: &tauri::AppHandle, task_id: i64, stage: &str, err: &str) {
-    let _ = update_task_status(app_handle, task_id, "failed", 0, stage, Some(err));
-    emit_progress(app_handle, task_id, 0, stage, "failed", err, 0);
+    let _ = update_task_status(app_handle, task_id, "failed", 0, 0, 0, stage, Some(err));
+    emit_progress(app_handle, task_id, 0, 0, 0, 0, stage, "failed", err);
 }
 
 // ── 主任务体（spawn 执行）──────────────────────────────────
-async fn run_update_download_task(app_handle: tauri::AppHandle, task_id: i64, url: String, threads: u32) {
-    let _ = update_task_status(&app_handle, task_id, "downloading", 0, "downloading", None);
-    emit_progress(&app_handle, task_id, 0, "downloading", "downloading", "", 0);
+async fn run_update_download_task(app_handle: tauri::AppHandle, task_id: i64, url: String, threads: u32, cancel: CancelFlag) {
+    let _ = update_task_status(&app_handle, task_id, "downloading", 0, 0, 0, "downloading", None);
+    emit_progress(&app_handle, task_id, 0, 0, 0, 0, "downloading", "downloading", "");
+
+    // 进入下载前已被取消：直接写 cancelled 状态，不创建文件
+    if cancel.load(Ordering::Relaxed) {
+        let _ = update_task_status(&app_handle, task_id, "cancelled", 0, 0, 0, "cancelled", Some("用户取消"));
+        emit_progress(&app_handle, task_id, 0, 0, 0, 0, "cancelled", "cancelled", "用户取消");
+        return;
+    }
 
     // 复用 gh.rs 的客户端构建（代理遵循 reqwest 默认系统代理检测，不做额外干预）
     let client = match build_client(300) {
@@ -158,19 +189,29 @@ async fn run_update_download_task(app_handle: tauri::AppHandle, task_id: i64, ur
 
     // 共享多线程下载引擎（db/download.rs）：内部完成 Range 探测 → 分块并行 / 单流回退，
     // 节流上报进度（percent + downloaded + total + speed），回调里写库 + 广播。
+    // cancel 贯穿引擎各子任务：置位后立即停止并删半成品文件，返回"下载已取消"。
     let app = app_handle.clone();
     let on_progress: ProgressFn = Arc::new(move |p: DownloadProgress| {
-        let _ = update_task_status(&app, task_id, "downloading", p.percent, "downloading", None);
-        emit_progress(&app, task_id, p.percent, "downloading", "downloading", "", p.speed);
+        let _ = update_task_status(&app, task_id, "downloading", p.percent, p.downloaded, p.total, "downloading", None);
+        emit_progress(&app, task_id, p.percent, p.downloaded, p.total, p.speed, "downloading", "downloading", "");
     });
-    if let Err(e) = download_file(&client, &url, &path, threads, on_progress).await {
-        write_fail(&app_handle, task_id, "downloading", &e);
-        return; // 半成品文件已由引擎删除
+    match download_file(&client, &url, &path, threads, on_progress, cancel).await {
+        Ok(()) => {}
+        Err(e) if e == "下载已取消" => {
+            // 取消：引擎已删半成品文件，写 cancelled 状态并广播，不再当作失败
+            let _ = update_task_status(&app_handle, task_id, "cancelled", 0, 0, 0, "cancelled", Some("用户取消"));
+            emit_progress(&app_handle, task_id, 0, 0, 0, 0, "cancelled", "cancelled", "用户取消");
+            return;
+        }
+        Err(e) => {
+            write_fail(&app_handle, task_id, "downloading", &e);
+            return; // 半成品文件已由引擎删除
+        }
     }
 
     // ready：安装包已就绪，等用户"重启并更新"（或下次启动自动应用）
-    let _ = update_task_status(&app_handle, task_id, "ready", 100, "done", None);
-    emit_progress(&app_handle, task_id, 100, "done", "ready", "", 0);
+    let _ = update_task_status(&app_handle, task_id, "ready", 100, 0, 0, "done", None);
+    emit_progress(&app_handle, task_id, 100, 0, 0, 0, "done", "ready", "");
     // 清理句柄
     if let Ok(mut m) = tasks().lock() {
         m.remove(&task_id);
@@ -244,9 +285,17 @@ pub async fn db_prepare_update(
     }
 
     // spawn 后台任务
+    let cancel: CancelFlag = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    if let Ok(mut m) = cancel_flags().lock() {
+        m.insert(task_id, cancel.clone());
+    }
     let app = app_handle.clone();
     let handle: JoinHandle<()> = tokio::spawn(async move {
-        run_update_download_task(app, task_id, url, threads).await;
+        run_update_download_task(app, task_id, url, threads, cancel).await;
+        // 任务结束（成功/失败/取消）后清理取消标志，避免表无限增长
+        if let Ok(mut m) = cancel_flags().lock() {
+            m.remove(&task_id);
+        }
     });
     if let Ok(mut m) = tasks().lock() {
         m.insert(task_id, handle);
@@ -256,14 +305,17 @@ pub async fn db_prepare_update(
 }
 
 /// 将 update_tasks 行映射为前端状态 JSON。
-/// 参数顺序与 SELECT 列序（id, url, version, status, percent, stage, error,
-/// created_at, updated_at, finished_at）一一对应，抽成纯函数便于单测列序不漂移。
+/// 参数顺序与 SELECT 列序（id, url, version, status, percent, downloaded, total,
+/// stage, error, created_at, updated_at, finished_at）一一对应，抽成纯函数便于
+/// 单测列序不漂移。
 fn status_row_json(
     id: i64,
     url: &str,
     version: &str,
     status: &str,
     percent: i64,
+    downloaded: i64,
+    total: i64,
     stage: &str,
     error: &str,
     created_at: &str,
@@ -276,6 +328,8 @@ fn status_row_json(
         "version": version,
         "status": status,
         "percent": percent,
+        "downloaded": downloaded,
+        "total": total,
         "stage": stage,
         "error": error,
         "createdAt": created_at,
@@ -317,7 +371,7 @@ pub async fn db_get_update_status(
     }
     let row: Option<serde_json::Value> = conn
         .query_row(
-            "SELECT id, url, version, status, percent, stage, error, created_at, updated_at, finished_at
+            "SELECT id, url, version, status, percent, downloaded, total, stage, error, created_at, updated_at, finished_at
              FROM update_tasks ORDER BY id DESC LIMIT 1",
             [],
             |r| {
@@ -327,11 +381,13 @@ pub async fn db_get_update_status(
                     &r.get::<_, String>(2)?,
                     &r.get::<_, String>(3)?,
                     r.get::<_, i64>(4)?,
-                    &r.get::<_, String>(5)?,
-                    &r.get::<_, String>(6)?,
+                    r.get::<_, i64>(5)?,
+                    r.get::<_, i64>(6)?,
                     &r.get::<_, String>(7)?,
                     &r.get::<_, String>(8)?,
                     &r.get::<_, String>(9)?,
+                    &r.get::<_, String>(10)?,
+                    &r.get::<_, String>(11)?,
                 ))
             },
         )
@@ -353,6 +409,13 @@ pub async fn db_get_update_status(
                     let _ = conn.execute("DELETE FROM update_tasks WHERE id = ?", rusqlite::params![id]);
                 }
                 return Ok(serde_json::Value::Null);
+            } else if v.get("status").and_then(|s| s.as_str()) == Some("cancelled") {
+                // 取消的过期残留：删除任务记录并返回 null，让设置页恢复空闲态可重新检测/选源
+                // （与 failed 残留同语义；cancelled 行不携带可恢复进度，留作最新行只会卡住 UI）
+                if let Some(id) = v.get("id").and_then(|x| x.as_i64()) {
+                    let _ = conn.execute("DELETE FROM update_tasks WHERE id = ?", rusqlite::params![id]);
+                }
+                return Ok(serde_json::Value::Null);
             }
             // 供前端判断"就绪安装包是否确实在盘上"：ready 任务行可能是残留
             // （安装包已被上次 bat 安装成功后删除/安装失败清理），文件缺失时
@@ -366,6 +429,8 @@ pub async fn db_get_update_status(
             "version": "",
             "status": "ready",
             "percent": 100,
+            "downloaded": 0,
+            "total": 0,
             "stage": "done",
             "error": "",
             "installerExists": true,
@@ -388,6 +453,58 @@ pub async fn db_clear_update(app_handle: tauri::AppHandle) -> Result<serde_json:
         }
     }
     Ok(serde_json::json!({ "cleared": true }))
+}
+
+/// 取消进行中的更新下载任务（abort）：置位取消标志让下载引擎各子任务尽快停止，
+/// 同时 abort 句柄并写 cancelled 状态。与 db_cancel_subscription 同款，但更新下载
+/// 用 CancelFlag 真正停掉 download_file 内部的并行子块（仅 abort 句柄停不掉它们）。
+/// 已结束（ready/failed/cancelled）或无标志（进程残留任务）时仍把状态置 cancelled
+/// 防前端显示卡死。
+#[tauri::command(rename_all = "snake_case")]
+pub async fn db_cancel_update(
+    app_handle: tauri::AppHandle,
+    task_id: i64,
+) -> Result<serde_json::Value, String> {
+    // 置位取消标志：下载引擎子任务检测到即停止并删半成品文件
+    if let Ok(m) = cancel_flags().lock() {
+        if let Some(flag) = m.get(&task_id) {
+            flag.store(true, Ordering::Relaxed);
+        }
+    }
+    // abort 顶层 future（run_update_download_task 多半在 await download_file）
+    let aborted = {
+        if let Ok(mut m) = tasks().lock() {
+            if let Some(h) = m.remove(&task_id) {
+                h.abort();
+                true
+            } else {
+                false
+            }
+        } else {
+            false
+        }
+    };
+    let _ = update_task_status(&app_handle, task_id, "cancelled", 0, 0, 0, "cancelled", Some("用户取消"));
+    let _ = app_handle.emit(
+        "update-progress",
+        UpdateProgress {
+            task_id,
+            percent: 0,
+            downloaded: 0,
+            total: 0,
+            speed: 0,
+            stage: "cancelled".into(),
+            status: "cancelled".into(),
+            error: "用户取消".into(),
+        },
+    );
+    // 删除可能残留的半成品安装包（引擎通常已删，兜底处理）
+    if let Ok(p) = installer_path(&app_handle) {
+        if p.exists() {
+            let _ = fs::remove_file(&p);
+        }
+    }
+    Ok(serde_json::json!({ "cancelled": true, "aborted": aborted }))
 }
 
 /// 启动已下载的安装包并退出当前应用，安装完成后自动重启
@@ -527,22 +644,28 @@ mod tests {
         assert_eq!(ver, "1.2.3");
     }
 
-    /// status_row_json 列序映射：SELECT 10 列的索引 → JSON 字段一一对应
+    /// status_row_json 列序映射：SELECT 12 列的索引 → JSON 字段一一对应
     #[test]
     fn status_row_json_maps_select_columns_in_order() {
         let conn = Connection::open_in_memory().unwrap();
         create_update_tasks_without_version(&conn);
         conn.execute_batch("ALTER TABLE update_tasks ADD COLUMN version TEXT DEFAULT ''")
             .unwrap();
+        // migration 18：downloaded/total 列
+        conn.execute_batch(
+            "ALTER TABLE update_tasks ADD COLUMN downloaded INTEGER DEFAULT 0;
+             ALTER TABLE update_tasks ADD COLUMN total INTEGER DEFAULT 0;",
+        )
+        .unwrap();
         conn.execute(
-            "INSERT INTO update_tasks (url, version, status, percent, stage, error) VALUES ('https://example.com/setup.exe', '2.0.0', 'ready', 100, 'done', '')",
+            "INSERT INTO update_tasks (url, version, status, percent, downloaded, total, stage, error) VALUES ('https://example.com/setup.exe', '2.0.0', 'downloading', 42, 524288, 1048576, 'downloading', '')",
             [],
         )
         .unwrap();
 
         let v: serde_json::Value = conn
             .query_row(
-                "SELECT id, url, version, status, percent, stage, error, created_at, updated_at, finished_at
+                "SELECT id, url, version, status, percent, downloaded, total, stage, error, created_at, updated_at, finished_at
                  FROM update_tasks ORDER BY id DESC LIMIT 1",
                 [],
                 |r| {
@@ -552,19 +675,23 @@ mod tests {
                         &r.get::<_, String>(2)?,
                         &r.get::<_, String>(3)?,
                         r.get::<_, i64>(4)?,
-                        &r.get::<_, String>(5)?,
-                        &r.get::<_, String>(6)?,
+                        r.get::<_, i64>(5)?,
+                        r.get::<_, i64>(6)?,
                         &r.get::<_, String>(7)?,
                         &r.get::<_, String>(8)?,
                         &r.get::<_, String>(9)?,
+                        &r.get::<_, String>(10)?,
+                        &r.get::<_, String>(11)?,
                     ))
                 },
             )
             .unwrap();
         assert_eq!(v["version"], "2.0.0");
-        assert_eq!(v["status"], "ready");
-        assert_eq!(v["percent"], 100);
-        assert_eq!(v["stage"], "done");
+        assert_eq!(v["status"], "downloading");
+        assert_eq!(v["percent"], 42);
+        assert_eq!(v["downloaded"], 524288);
+        assert_eq!(v["total"], 1048576);
+        assert_eq!(v["stage"], "downloading");
         assert_eq!(v["url"], "https://example.com/setup.exe");
     }
 

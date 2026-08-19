@@ -179,3 +179,13 @@ export async function armPendingUpdate(latestVersion) {
 export async function applyUpdate() {
   return await invoke('db_apply_update')
 }
+
+/**
+ * 取消进行中的更新下载任务：置位取消标志让下载引擎子任务停止并删半成品安装包，
+ * 同时 abort 句柄并写 cancelled 状态。已结束/无标志时仍把状态置 cancelled 防卡死。
+ * @param {number} taskId - 要取消的任务 id（prepareUpdate 返回的 taskId）
+ * @returns {Promise<{cancelled: boolean, aborted: boolean}>}
+ */
+export async function cancelUpdate(taskId) {
+  return await invoke('db_cancel_update', { taskId })
+}

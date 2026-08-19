@@ -1424,6 +1424,16 @@ pub fn run() {
                   ALTER TABLE bepinex_tasks ADD COLUMN total INTEGER DEFAULT 0;",
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 18,
+            description: "add_size_cols_to_update_tasks",
+            // 程序更新下载任务记录已下载/总大小（字节），与 bepinex_tasks(migration 17) 同款：
+            // 配合 db/download.rs 共享引擎的进度上报（downloaded/total/speed），前端设置页
+            // 可像 BepInEx 前置一样显示"已下载 X / Y · 速度"，离开页面再回来也能恢复。
+            sql: "ALTER TABLE update_tasks ADD COLUMN downloaded INTEGER DEFAULT 0;
+                  ALTER TABLE update_tasks ADD COLUMN total INTEGER DEFAULT 0;",
+            kind: MigrationKind::Up,
+        },
     ];
 
     tauri::Builder::default()
@@ -1456,6 +1466,7 @@ pub fn run() {
             db::installer::db_get_update_status,
             db::installer::db_apply_update,
             db::installer::db_clear_update,
+            db::installer::db_cancel_update,
             db::subscribe::db_subscribe_mod,
             db::subscribe::db_list_subscription_tasks,
             db::subscribe::db_cancel_subscription,

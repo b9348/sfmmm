@@ -223,6 +223,7 @@
     "ghNoAsset": "GitHub ソースにインストーラーのアセットが見つかりません",
     "downloadUpdate": "既定のソース",
     "downloadingUpdate": "ダウンロード中...",
+    "cancelDownload": "ダウンロードをキャンセル",
     "restartAndUpdate": "今すぐ再起動して更新",
     "updateLater": "あとで",
     "clearAndReset": "クリア＆リセット（開発）",

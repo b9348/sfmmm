@@ -23,7 +23,7 @@ use serde::Serialize;
 use tauri::Emitter;
 use tokio::task::JoinHandle;
 
-use crate::db::download::{DownloadProgress, ProgressFn, download_file};
+use crate::db::download::{DownloadProgress, ProgressFn, download_file, no_cancel};
 use crate::db::gh::build_client;
 use crate::db::lanzou;
 use crate::db::subscribe::{open_sqlite, read_game_path};
@@ -322,7 +322,7 @@ async fn run_bepinex_task(app_handle: tauri::AppHandle, task_id: i64, url: Strin
         let _ = update_task_status(&app, task_id, "downloading", p.percent, p.downloaded, p.total, "downloading", None);
         emit_progress(&app, task_id, p.percent, p.downloaded, p.total, p.speed, "downloading", "downloading", "");
     });
-    if let Err(e) = download_file(&client, &download_url, &temp_path, 8, on_progress).await {
+    if let Err(e) = download_file(&client, &download_url, &temp_path, 8, on_progress, no_cancel()).await {
         fail(&app_handle, task_id, "downloading", &e).await;
         let _ = fs::remove_file(&temp_path);
         return;

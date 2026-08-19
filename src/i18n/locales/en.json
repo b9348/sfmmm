@@ -223,6 +223,7 @@
     "ghNoAsset": "No installer asset found on GitHub source",
     "downloadUpdate": "Default source",
     "downloadingUpdate": "Downloading...",
+    "cancelDownload": "Cancel download",
     "restartAndUpdate": "Restart & Update",
     "updateLater": "Later",
     "clearAndReset": "Clear & Reset (dev)",
