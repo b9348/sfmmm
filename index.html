@@ -8,6 +8,30 @@
   </head>
   <body>
     <div id="root"></div>
+    <script>
+      // 移动端诊断：JS 崩溃/未处理 Promise 拒绝直接渲染到屏幕，便于无 adb 排查白屏
+      (function () {
+        function showFatal(title, detail) {
+          try {
+            var root = document.getElementById('root')
+            if (!root) return
+            var pre = document.createElement('pre')
+            pre.style.cssText =
+              'position:fixed;inset:0;z-index:99999;overflow:auto;margin:0;padding:12px;' +
+              'background:#1e1e1e;color:#ff6b6b;font-size:12px;white-space:pre-wrap;word-break:break-all;'
+            pre.textContent = '[FATAL] ' + title + '\n\n' + detail
+            root.appendChild(pre)
+          } catch (e) { /* ignore */ }
+        }
+        window.addEventListener('error', function (e) {
+          showFatal(e.message, (e.error && e.error.stack) || e.filename + ':' + e.lineno)
+        })
+        window.addEventListener('unhandledrejection', function (e) {
+          var r = e.reason
+          showFatal('Unhandled rejection', (r && (r.stack || r.message)) || String(r))
+        })
+      })()
+    </script>
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>

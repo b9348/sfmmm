@@ -366,6 +366,7 @@ function App() {
     return (
       <FluentProvider theme={resolvedTheme === 'dark' ? webDarkTheme : webLightTheme} className={`app-theme-${resolvedTheme}`}>
         <div className={styles.loadingContainer}>
+          <Text>Loading…</Text>
         </div>
       </FluentProvider>
     )
