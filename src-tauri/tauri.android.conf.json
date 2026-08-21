@@ -35,7 +35,7 @@
   "bundle": {
     "active": true,
     "targets": [
-      "nsis"
+      "apk"
     ],
     "icon": [
       "icons/32x32.png",
@@ -44,23 +44,6 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "windows": {
-      "webviewInstallMode": {
-        "type": "downloadBootstrapper",
-        "silent": true
-      },
-      "nsis": {
-        "installMode": "currentUser",
-        "displayLanguageSelector": false,
-        "languages": [
-          "English",
-          "SimpChinese",
-          "Japanese"
-        ],
-        "template": "nsis/installer.nsi.templ",
-        "installerHooks": null
-      }
-    },
     "resources": [],
     "android": {
       "debugApplicationIdSuffix": ".debug"

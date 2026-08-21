@@ -125,7 +125,7 @@ jobs:
         shell: bash
 
       - name: Build APK
-        run: pnpm tauri android build --apk
+        run: pnpm tauri android build --apk --config '{"bundle":{"targets":["apk"]}}'
         env:
           ANDROID_HOME: ${{ env.ANDROID_HOME }}
           NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/25.2.9519653
