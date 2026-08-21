@@ -94,6 +94,14 @@ jobs:
         run: rm -f src-tauri/.cargo/config.toml
         shell: bash
 
+      - name: Add NDK toolchain to PATH
+        run: |
+          NDK_TOOLCHAIN=$ANDROID_HOME/ndk/25.2.9519653/toolchains/llvm/prebuilt/linux-x86_64/bin
+          echo "$NDK_TOOLCHAIN" >> $GITHUB_PATH
+          echo "NDK toolchain added: $NDK_TOOLCHAIN"
+          ls -la "$NDK_TOOLCHAIN"/aarch64-linux-android-ranlib
+        shell: bash
+
       - name: Switch to Android config
         run: cp src-tauri/tauri.android.conf.json src-tauri/tauri.conf.json
         shell: bash
