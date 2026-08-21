@@ -16,9 +16,7 @@
   },
   "plugins": {
     "sql": {
-      "preload": [
-        "sqlite:config.db"
-      ]
+      "preload": []
     }
   },
   "bundle": {

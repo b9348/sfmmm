@@ -188,6 +188,17 @@ jobs:
           test -n "$(find "$OUT" -name '*.apk' -print -quit)"
         shell: bash
 
+      - name: Build Debug APK (diagnostics)
+        run: pnpm tauri android build --apk --debug --target aarch64
+        shell: bash
+
+      - name: Upload Debug APK artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: android-apk-debug-${{ steps.get_version.outputs.version }}
+          path: src-tauri/gen/android/app/build/outputs/apk/universal/debug/*.apk
+          if-no-files-found: error
+
       - name: Upload APK artifact
         uses: actions/upload-artifact@v7
         with:
