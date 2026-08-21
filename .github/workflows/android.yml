@@ -67,10 +67,14 @@ jobs:
         uses: android-actions/setup-android@v3
         with:
           accept-android-sdk-licenses: true
-          sdk-platform: '34'
-          build-tools: '34.0.0'
-          ndk-version: '25.2.9519653'
-          cmake-version: '3.22.1'
+
+      - name: Install NDK
+        run: |
+          yes | sdkmanager --licenses
+          sdkmanager "platforms;android-34" "build-tools;34.0.0" "ndk;25.2.9519653" "cmake;3.22.1"
+          echo "NDK installed at: $ANDROID_HOME/ndk/25.2.9519653"
+          ls -la "$ANDROID_HOME/ndk/25.2.9519653/toolchains/llvm/prebuilt/linux-x86_64/bin"/aarch64-linux-android-ranlib
+        shell: bash
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
