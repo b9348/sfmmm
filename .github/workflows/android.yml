@@ -2,7 +2,7 @@ name: Build Android APK
 
 on:
   push:
-    branches: [main]
+    branches: [feat/mobile-discussion]
   workflow_dispatch:
     inputs:
       version_override:
