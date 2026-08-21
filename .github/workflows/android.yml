@@ -142,8 +142,50 @@ jobs:
           fi
         shell: bash
 
+      - name: Prepare signing keystore
+        run: |
+          KS="$RUNNER_TEMP/sfm-debug.keystore"
+          if [ ! -f "$KS" ]; then
+            keytool -genkeypair -keystore "$KS" -storepass android -keypass android \
+              -alias androiddebugkey -keyalg RSA -keysize 2048 -validity 10000 \
+              -dname "CN=Android Debug,O=SFM,C=US"
+          fi
+          {
+            echo "TAURI_ANDROID_KEYSTORE_PATH=$KS"
+            echo "TAURI_ANDROID_KEYSTORE_PASSWORD=android"
+            echo "TAURI_ANDROID_KEY_ALIAS=androiddebugkey"
+          } >> "$GITHUB_ENV"
+        shell: bash
+
       - name: Build APK
         run: pnpm tauri android build --apk
+        shell: bash
+
+      - name: Collect & sign APKs
+        run: |
+          BT="$ANDROID_HOME/build-tools/34.0.0"
+          KS="$TAURI_ANDROID_KEYSTORE_PATH"
+          OUT="src-tauri/target/release/apk"
+          mkdir -p "$OUT"
+          find src-tauri/gen/android/app/build/outputs/apk -name "*.apk" -type f | while read -r APK; do
+            NAME="$(basename "$APK" .apk)"
+            NAME="${NAME%-unsigned}"
+            ALIGNED="$RUNNER_TEMP/${NAME}-aligned.apk"
+            SIGNED="$OUT/${NAME}.apk"
+            if [[ "$APK" == *-unsigned.apk ]]; then
+              echo "Aligning & signing: $APK"
+              "$BT/zipalign" -f -p 4 "$APK" "$ALIGNED"
+              "$BT/apksigner" sign --ks "$KS" --ks-pass pass:"$TAURI_ANDROID_KEYSTORE_PASSWORD" \
+                --key-pass pass:"$TAURI_ANDROID_KEYSTORE_PASSWORD" --ks-key-alias "$TAURI_ANDROID_KEY_ALIAS" \
+                --out "$SIGNED" "$ALIGNED"
+            else
+              echo "Copying already-signed: $APK"
+              cp -f "$APK" "$SIGNED"
+            fi
+            "$BT/apksigner" verify --print-certs "$SIGNED" || true
+          done
+          ls -la "$OUT"
+          test -n "$(find "$OUT" -name '*.apk' -print -quit)"
         shell: bash
 
       - name: Upload APK artifact
