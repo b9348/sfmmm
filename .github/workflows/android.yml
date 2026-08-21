@@ -71,11 +71,19 @@ jobs:
       - name: Install NDK
         run: |
           sdkmanager --licenses < /dev/null || true
-          sdkmanager "platforms;android-34" "build-tools;34.0.0" "ndk;25.2.9519653" "cmake;3.22.1" < /dev/null || true
-          echo "NDK installed at: $ANDROID_HOME/ndk/25.2.9519653"
-          # 列出实际目录结构，找到正确的工具链路径
-          ls -la "$ANDROID_HOME/ndk/25.2.9519653/"
-          find "$ANDROID_HOME/ndk/25.2.9519653" -name "aarch64-linux-android-ranlib" 2>/dev/null | head -5
+          echo "y" | sdkmanager "platforms;android-34" "build-tools;34.0.0" "ndk;25.2.9519653" "cmake;3.22.1" || true
+          echo "=== NDK directory structure ==="
+          ls -la "$ANDROID_HOME/ndk/" 2>/dev/null || echo "No ndk dir"
+          echo "=== Find ranlib ==="
+          RANLIB_PATH=$(find "$ANDROID_HOME/ndk/25.2.9519653" -name "aarch64-linux-android-ranlib" 2>/dev/null | head -1)
+          if [ -n "$RANLIB_PATH" ]; then
+            TOOLCHAIN_DIR=$(dirname "$RANLIB_PATH")
+            echo "Found toolchain at: $TOOLCHAIN_DIR"
+            echo "$TOOLCHAIN_DIR" >> $GITHUB_PATH
+          else
+            echo "=== Full NDK tree ==="
+            find "$ANDROID_HOME/ndk/25.2.9519653" -type d 2>/dev/null | head -20
+          fi
         shell: bash
 
       - name: Setup Rust
@@ -98,14 +106,6 @@ jobs:
 
       - name: Remove local Cargo config for CI
         run: rm -f src-tauri/.cargo/config.toml
-        shell: bash
-
-      - name: Add NDK toolchain to PATH
-        run: |
-          NDK_TOOLCHAIN=$ANDROID_HOME/ndk/25.2.9519653/toolchains/llvm/prebuilt/linux-x86_64/bin
-          echo "$NDK_TOOLCHAIN" >> $GITHUB_PATH
-          echo "NDK toolchain added: $NDK_TOOLCHAIN"
-          ls -la "$NDK_TOOLCHAIN"/aarch64-linux-android-ranlib
         shell: bash
 
       - name: Switch to Android config
