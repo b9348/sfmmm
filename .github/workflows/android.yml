@@ -43,8 +43,8 @@ jobs:
             VERSION=$(node -p "require('./src-tauri/tauri.conf.json').version")
           fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "tag_name=v$VERSION" >> "$GITHUB_OUTPUT"
-          echo "Detected version: v$VERSION"
+          echo "tag_name=android-v$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Detected version: android-v$VERSION"
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
@@ -142,8 +142,8 @@ jobs:
           path: src-tauri/target/release/apk/*.apk
           if-no-files-found: error
 
-      - name: Upload to ImgBed (on tag)
-        if: startsWith(github.ref, 'refs/tags/v')
+      - name: Upload to ImgBed (on android tag)
+        if: startsWith(github.ref, 'refs/tags/android-v')
         shell: bash
         run: |
           APK_FILE=$(find src-tauri/target/release/apk -name "*.apk" | head -1)
@@ -167,7 +167,7 @@ jobs:
           echo "$UPLOAD_RESP" | jq -r '.[0].src // empty'
 
       - name: Create Release with APK
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/android-v')
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.get_version.outputs.tag_name }}
