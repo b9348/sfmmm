@@ -94,6 +94,10 @@ jobs:
         run: rm -f src-tauri/.cargo/config.toml
         shell: bash
 
+      - name: Switch to Android config
+        run: cp src-tauri/tauri.android.conf.json src-tauri/tauri.conf.json
+        shell: bash
+
       - name: Cache Rust
         uses: actions/cache@v4
         with:
@@ -125,7 +129,7 @@ jobs:
         shell: bash
 
       - name: Build APK
-        run: pnpm tauri android build --apk --config '{"bundle":{"targets":["apk"]}}'
+        run: pnpm tauri android build --apk
         env:
           ANDROID_HOME: ${{ env.ANDROID_HOME }}
           NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/25.2.9519653
