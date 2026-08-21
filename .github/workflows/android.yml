@@ -3,6 +3,7 @@ name: Build Android APK
 on:
   push:
     branches: [feat/mobile-discussion]
+    tags: ['android-v*']
   workflow_dispatch:
     inputs:
       version_override:
@@ -39,6 +40,8 @@ jobs:
         run: |
           if [ -n "${{ inputs.version_override }}" ]; then
             VERSION="${{ inputs.version_override }}"
+          elif [[ "$GITHUB_REF" == refs/tags/android-v* ]]; then
+            VERSION="${GITHUB_REF#refs/tags/android-v}"
           else
             VERSION=$(node -p "require('./src-tauri/tauri.conf.json').version")
           fi
@@ -49,7 +52,7 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
         with:
-          version: 8
+          version: 9
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
@@ -68,22 +71,19 @@ jobs:
         with:
           accept-android-sdk-licenses: true
 
-      - name: Install NDK
+      - name: Setup Android NDK
         run: |
-          sdkmanager --licenses < /dev/null || true
-          echo "y" | sdkmanager "platforms;android-34" "build-tools;34.0.0" "ndk;25.2.9519653" "cmake;3.22.1" || true
-          echo "=== NDK directory structure ==="
-          ls -la "$ANDROID_HOME/ndk/" 2>/dev/null || echo "No ndk dir"
-          echo "=== Find ranlib ==="
-          RANLIB_PATH=$(find "$ANDROID_HOME/ndk/25.2.9519653" -name "aarch64-linux-android-ranlib" 2>/dev/null | head -1)
-          if [ -n "$RANLIB_PATH" ]; then
-            TOOLCHAIN_DIR=$(dirname "$RANLIB_PATH")
-            echo "Found toolchain at: $TOOLCHAIN_DIR"
-            echo "$TOOLCHAIN_DIR" >> $GITHUB_PATH
-          else
-            echo "=== Full NDK tree ==="
-            find "$ANDROID_HOME/ndk/25.2.9519653" -type d 2>/dev/null | head -20
+          sdkmanager --install "platforms;android-34" "build-tools;34.0.0"
+          NDK_VER=$(ls -1 "$ANDROID_HOME/ndk" 2>/dev/null | sort -V | tail -n 1 || true)
+          if [ -z "$NDK_VER" ]; then
+            echo "No preinstalled NDK found, installing pinned version..."
+            sdkmanager --install "ndk;27.2.12479018"
+            NDK_VER=27.2.12479018
           fi
+          NDK_HOME="$ANDROID_HOME/ndk/$NDK_VER"
+          test -f "$NDK_HOME/source.properties"
+          echo "Using NDK $NDK_VER at $NDK_HOME"
+          echo "NDK_HOME=$NDK_HOME" >> "$GITHUB_ENV"
         shell: bash
 
       - name: Setup Rust
@@ -123,19 +123,19 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-
 
-      - name: Cache Android build
+      - name: Cache Gradle
         uses: actions/cache@v4
         with:
           path: |
-            src-tauri/android/.gradle
-            src-tauri/android/app/build
-          key: ${{ runner.os }}-android-${{ hashFiles('src-tauri/android/**') }}
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('src-tauri/gen/android/**/*.gradle*', 'src-tauri/gen/android/gradle/wrapper/**') }}
           restore-keys: |
-            ${{ runner.os }}-android-
+            ${{ runner.os }}-gradle-
 
       - name: Init Tauri Android (if needed)
         run: |
-          if [ ! -d "src-tauri/android" ]; then
+          if [ ! -d "src-tauri/gen/android" ]; then
             pnpm tauri android init
           else
             echo "Android project already initialized"
@@ -144,9 +144,6 @@ jobs:
 
       - name: Build APK
         run: pnpm tauri android build --apk
-        env:
-          ANDROID_HOME: ${{ env.ANDROID_HOME }}
-          JAVA_HOME: ${{ env.JAVA_HOME }}
         shell: bash
 
       - name: Upload APK artifact
@@ -160,7 +157,7 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/android-v')
         shell: bash
         run: |
-          APK_FILE=$(find src-tauri/target/release/apk -name "*.apk" | head -1)
+          APK_FILE=$(find src-tauri/target/release/apk -name "*.apk" -print -quit)
           if [ -z "$APK_FILE" ]; then
             echo "::error::No APK file found"
             exit 1
