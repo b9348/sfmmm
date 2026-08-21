@@ -40,17 +40,20 @@ export function usePlatform() {
 }
 
 function detectWebFallback() {
-  if (typeof navigator === 'undefined') {
-    return { platform: 'unknown', isAndroid: false, isMobile: false, isTauri: false, ready: true }
-  }
-  const ua = navigator.userAgent || ''
-  const isAndroid = /android/i.test(ua)
-  const isIOS = /iphone|ipad|ipod/i.test(ua)
+  const ua = typeof navigator === 'undefined' ? '' : navigator.userAgent || ''
   return {
-    platform: isAndroid ? 'android' : isIOS ? 'ios' : 'desktop',
-    isAndroid,
-    isMobile: isAndroid || isIOS,
+    platform: isMobileUA(ua) ? mobileKind(ua) : 'desktop',
+    isAndroid: /android/i.test(ua),
+    isMobile: isMobileUA(ua),
     isTauri: false,
     ready: true,
   }
+}
+
+export function isMobileUA(ua) {
+  return /android|iphone|ipad|ipod/i.test(ua || '')
+}
+
+function mobileKind(ua) {
+  return /android/i.test(ua) ? 'android' : 'ios'
 }

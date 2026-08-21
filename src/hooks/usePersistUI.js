@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { getCurrentWindow, PhysicalSize, PhysicalPosition } from '@tauri-apps/api/window'
 import { getDb as getSharedDb } from '../services/dbHelper'
+import { isMobileUA } from './usePlatform'
 
 function debounce(fn, delay) {
   let timer
@@ -76,6 +77,9 @@ export function usePersistUI() {
 
   // Restore window size/position on mount, then listen for changes
   useEffect(() => {
+    // 移动端窗口由系统管理，跳过尺寸/位置持久化（相关 API 会拒绝调用）
+    if (isMobileUA(navigator.userAgent)) return
+
     let unlistenResize, unlistenMove
 
     ;(async () => {

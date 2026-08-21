@@ -17,8 +17,11 @@
             if (!root) return
             var pre = document.createElement('pre')
             pre.style.cssText =
-              'position:fixed;inset:0;z-index:99999;overflow:auto;margin:0;padding:12px;' +
-              'background:#1e1e1e;color:#ff6b6b;font-size:12px;white-space:pre-wrap;word-break:break-all;'
+              'position:fixed;inset:auto 0 0 0;max-height:60%;z-index:99999;overflow:auto;margin:0;padding:12px;' +
+              'background:#1e1e1e;color:#ff6b6b;font-size:12px;white-space:pre-wrap;word-break:break-all;' +
+              'border-top:1px solid #444;cursor:pointer;'
+            pre.title = '点击关闭'
+            pre.onclick = function () { pre.remove() }
             pre.textContent = '[FATAL] ' + title + '\n\n' + detail
             root.appendChild(pre)
           } catch (e) { /* ignore */ }

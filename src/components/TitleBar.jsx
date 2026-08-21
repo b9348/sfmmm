@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { getCurrentWindow } from '@tauri-apps/api/window'
+import { usePlatform } from '../hooks/usePlatform'
 import { makeStyles, tokens, Tooltip } from '@fluentui/react-components'
 import {
   DismissRegular,
@@ -85,9 +86,13 @@ const useStyles = makeStyles({
 })
 
 export function TitleBar() {
+  const { isMobile } = usePlatform()
   const styles = useStyles()
   const { t } = useTranslation()
   const [isMaximized, setIsMaximized] = useState(false)
+
+  // 移动端没有桌面窗口控制（最小化/最大化/关闭），窗口 API 会拒绝调用
+  if (isMobile) return null
 
   useEffect(() => {
     const checkMaximized = async () => {
