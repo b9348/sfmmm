@@ -1177,8 +1177,39 @@ fn rename_save_file(app: tauri::AppHandle, name: String, new_name: String) -> Re
     Ok(())
 }
 
+fn diag(msg: &str) {
+    let base = if cfg!(debug_assertions) {
+        "/data/data/com.sfmmm.app.debug/files"
+    } else {
+        "/data/data/com.sfmmm.app/files"
+    };
+    let _ = std::fs::create_dir_all(base);
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(format!("{base}/rust-diag.log"))
+    {
+        use std::io::Write;
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis())
+            .unwrap_or(0);
+        let _ = writeln!(f, "[{ts}] {msg}");
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // 诊断探针：本机 ROM 吞日志，改为写文件（run-as 可读），桌面端写入失败静默跳过
+    {
+        let default_hook = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            crate::diag(&format!("PANIC: {info}"));
+            default_hook(info);
+        }));
+        crate::diag("run() enter");
+    }
+
     // 启动前检测 WebView2 运行时；缺失则弹 Windows 原生 MessageBox
     // （按系统语言选择中/英/日文案），并用系统默认浏览器打开下载链接。
     if !webview_check::ensure_webview2() {
@@ -1436,7 +1467,8 @@ pub fn run() {
         },
     ];
 
-    tauri::Builder::default()
+    crate::diag("building tauri app");
+    let builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_shell::init())
@@ -1499,6 +1531,7 @@ pub fn run() {
         )
         .manage(db::DbState::new().expect("failed to init MySQL pool"))
         .setup(|app| {
+            crate::diag("setup enter");
             // 清理旧版本残留的 .env 文件（以前被错误地打包进安装目录）
             if let Ok(exe) = std::env::current_exe() {
                 if let Some(dir) = exe.parent() {
@@ -1512,6 +1545,7 @@ pub fn run() {
 
             // 启动 MySQL 连接池空闲检查器：超过 60 秒无请求则释放连接
             app.state::<db::DbState>().pool.start_idle_checker();
+            crate::diag("setup: pool checker started");
 
             if cfg!(debug_assertions) {
                 app.handle().plugin(
@@ -1519,9 +1553,25 @@ pub fn run() {
                         .level(log::LevelFilter::Info)
                         .build(),
                 )?;
+                crate::diag("setup: log plugin registered (debug)");
             }
+            crate::diag("setup ok");
             Ok(())
-        })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        });
+    match builder
+        .build(tauri::generate_context!())
+    {
+        Ok(app) => {
+            crate::diag("APP BUILT");
+            app.run(|_app, event| {
+                if let tauri::RunEvent::Ready = event {
+                    crate::diag("EVENT LOOP READY");
+                }
+            });
+            crate::diag("event loop exited");
+        }
+        Err(e) => {
+            crate::diag(&format!("BUILD FAILED: {e}"));
+        }
+    }
 }
