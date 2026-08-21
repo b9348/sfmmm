@@ -10,6 +10,14 @@
     "beforeBuildCommand": "pnpm build"
   },
   "app": {
+    "windows": [
+      {
+        "title": "sfmmm",
+        "width": 1024,
+        "height": 768,
+        "resizable": true
+      }
+    ],
     "security": {
       "csp": null
     }
