@@ -1,0 +1,180 @@
+name: Build Android APK
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      version_override:
+        description: '版本号（留空则使用 tauri.conf.json 中的版本）'
+        required: false
+        type: string
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-apk:
+    name: Build Android APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: write
+
+    env:
+      DB_URL: ${{ secrets.DB_URL }}
+      IMGBED_URL: ${{ secrets.IMGBED_URL }}
+      IMGBED_TOKEN: ${{ secrets.IMGBED_TOKEN }}
+      DB_ENC_KEY: ${{ secrets.DB_ENC_KEY }}
+      VITE_LATEST_URL: ${{ secrets.IMGBED_URL }}/file/sfm/installer/latest.json
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Get version
+        id: get_version
+        shell: bash
+        run: |
+          if [ -n "${{ inputs.version_override }}" ]; then
+            VERSION="${{ inputs.version_override }}"
+          else
+            VERSION=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag_name=v$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Detected version: v$VERSION"
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 8
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: 'pnpm'
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          accept-android-sdk-licenses: true
+          sdk-platform: '34'
+          build-tools: '34.0.0'
+          ndk-version: '25.2.9519653'
+          cmake-version: '3.22.1'
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: 'aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android'
+
+      - name: Install dependencies
+        run: pnpm install
+        shell: bash
+
+      - name: Create .env
+        run: |
+          echo "DB_URL=${{ secrets.DB_URL }}" > src-tauri/.env
+          echo "IMGBED_URL=${{ secrets.IMGBED_URL }}" >> src-tauri/.env
+          echo "IMGBED_TOKEN=${{ secrets.IMGBED_TOKEN }}" >> src-tauri/.env
+          echo "DB_ENC_KEY=${{ secrets.DB_ENC_KEY }}" >> src-tauri/.env
+          echo "VITE_LATEST_URL=${{ secrets.IMGBED_URL }}/file/sfm/installer/latest.json" > .env
+        shell: bash
+
+      - name: Remove local Cargo config for CI
+        run: rm -f src-tauri/.cargo/config.toml
+        shell: bash
+
+      - name: Cache Rust
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            src-tauri/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('src-tauri/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Cache Android build
+        uses: actions/cache@v4
+        with:
+          path: |
+            src-tauri/android/.gradle
+            src-tauri/android/app/build
+          key: ${{ runner.os }}-android-${{ hashFiles('src-tauri/android/**') }}
+          restore-keys: |
+            ${{ runner.os }}-android-
+
+      - name: Init Tauri Android (if needed)
+        run: |
+          if [ ! -d "src-tauri/android" ]; then
+            pnpm tauri android init
+          else
+            echo "Android project already initialized"
+          fi
+        shell: bash
+
+      - name: Build APK
+        run: pnpm tauri android build --apk
+        env:
+          ANDROID_HOME: ${{ env.ANDROID_HOME }}
+          NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/25.2.9519653
+          JAVA_HOME: ${{ env.JAVA_HOME }}
+        shell: bash
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: android-apk-${{ steps.get_version.outputs.version }}
+          path: src-tauri/target/release/apk/*.apk
+          if-no-files-found: error
+
+      - name: Upload to ImgBed (on tag)
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          APK_FILE=$(find src-tauri/target/release/apk -name "*.apk" | head -1)
+          if [ -z "$APK_FILE" ]; then
+            echo "::error::No APK file found"
+            exit 1
+          fi
+          echo "Found APK: $APK_FILE"
+          
+          NEW_VERSION="${{ steps.get_version.outputs.version }}"
+          IMGBED_URL="${{ secrets.IMGBED_URL }}"
+          
+          echo "::group::Upload APK to ImgBed"
+          UPLOAD_RESP=$(curl -s -X POST \
+            "${IMGBED_URL}/upload?uploadChannel=telegram&uploadFolder=sfm/android/v${NEW_VERSION}&returnFormat=full" \
+            -H "Authorization: Bearer ${{ secrets.IMGBED_TOKEN }}" \
+            -F "file=@${APK_FILE}")
+          echo "ImgBed response: $UPLOAD_RESP"
+          echo "::endgroup::"
+          
+          echo "$UPLOAD_RESP" | jq -r '.[0].src // empty'
+
+      - name: Create Release with APK
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ steps.get_version.outputs.tag_name }}
+          name: Android ${{ steps.get_version.outputs.tag_name }}
+          body: |
+            ## Android APK ${{ steps.get_version.outputs.tag_name }}
+
+            自动构建的 Android 安装包。
+            
+            **注意**：此版本仅支持登录，注册请在 PC 端完成。
+          files: |
+            src-tauri/target/release/apk/*.apk
+          generate_release_notes: true

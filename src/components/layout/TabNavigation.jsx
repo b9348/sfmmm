@@ -39,6 +39,7 @@ import { getConfig } from '../../services/dbHelper'
 import { getAvatarUrl } from '../../utils/avatars'
 import { LoginDialog, ProfileDialog } from '../../components'
 import { WinNavigationView } from './WinNavigationView'
+import { usePlatform } from '../../hooks/usePlatform'
 
 // 启动游戏的特殊条目值：只触发动作，不切换标签页
 const LAUNCH_VALUE = '__launch'
@@ -52,6 +53,7 @@ export function TabNavigation({ value, onChange, isCollapsed, onToggleCollapse, 
   const { user, isLoggedIn, logout } = useAuth()
   const { openUser } = useUserNav()
   const { unread, refreshUnread } = useNotification()
+  const { isAndroid } = usePlatform()
   const [authOpen, setAuthOpen] = useState(false)
   const [profileOpen, setProfileOpen] = useState(false)
   const [isRegister, setIsRegister] = useState(false)
@@ -243,7 +245,7 @@ export function TabNavigation({ value, onChange, isCollapsed, onToggleCollapse, 
       onClick={() => { setAuthOpen(true) }}
     >
       <span className="winnv-icon winnv-icon-node"><Person24Regular /></span>
-      <span className="winnv-label">{t('nav.loginRegister')}</span>
+      <span className="winnv-label">{isAndroid ? t('workshop.login') : t('nav.loginRegister')}</span>
     </div>
   )
 

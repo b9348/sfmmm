@@ -35,7 +35,8 @@
   "bundle": {
     "active": true,
     "targets": [
-      "nsis"
+      "nsis",
+      "apk"
     ],
     "icon": [
       "icons/32x32.png",

@@ -4,11 +4,14 @@ import { Input, Button, Text, tokens, Avatar, Tooltip, Dialog, DialogSurface, Di
 import { login, register } from '../../services/workshopApi'
 import { useAuth } from '../../contexts/useAuth'
 import { getAvatarUrl, getAllAvatars } from '../../utils/avatars'
+import { usePlatform } from '../../hooks/usePlatform'
 
 export function LoginForm({ onSuccess, defaultIsRegister }) {
   const { t } = useTranslation()
   const { loginSuccess } = useAuth()
-  const [isRegister, setIsRegister] = useState(() => !!defaultIsRegister)
+  const { isAndroid } = usePlatform()
+  // Android 端强制只允许登录，不允许注册
+  const [isRegister, setIsRegister] = useState(() => isAndroid ? false : !!defaultIsRegister)
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
@@ -90,14 +93,28 @@ export function LoginForm({ onSuccess, defaultIsRegister }) {
         {error && (
           <Text size="small" style={{ color: tokens.colorPaletteRedForeground1 }}>{error}</Text>
         )}
+        {/* Android 端提示：注册请在 PC 端完成 */}
+        {isAndroid && (
+          <Text size="small" style={{ color: tokens.colorNeutralForeground2, fontStyle: 'italic' }}>
+            {t('workshop.registerOnPc', { defaultValue: '注册账号请在 PC 端完成' })}
+          </Text>
+        )}
       </div>
       <div style={{ display: 'flex', gap: '6px', marginTop: '8px' }}>
         <Button size="small" appearance="primary" onClick={handleSubmit} disabled={busy}>
           {busy ? t('workshop.processing') : isRegister ? t('workshop.registerBtn') : t('workshop.login')}
         </Button>
-        <Button size="small" appearance="subtle" onClick={() => { setIsRegister(!isRegister); setError(''); setSelectedAvatar(null) }}>
-          {isRegister ? t('workshop.hasAccount') : t('workshop.noAccount')}
-        </Button>
+        {/* Android 端不显示注册切换按钮 */}
+        {!isRegister && !isAndroid && (
+          <Button size="small" appearance="subtle" onClick={() => { setIsRegister(!isRegister); setError(''); setSelectedAvatar(null) }}>
+            {isRegister ? t('workshop.hasAccount') : t('workshop.noAccount')}
+          </Button>
+        )}
+        {isRegister && !isAndroid && (
+          <Button size="small" appearance="subtle" onClick={() => { setIsRegister(!isRegister); setError(''); setSelectedAvatar(null) }}>
+            {t('workshop.hasAccount')}
+          </Button>
+        )}
       </div>
     </>
   )
