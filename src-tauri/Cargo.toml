@@ -49,3 +49,10 @@ regex = "1"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full"] }
+
+[profile.release]
+strip = true
+lto = true
+codegen-units = 1
+opt-level = "s"
+panic = "abort"
