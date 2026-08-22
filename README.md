@@ -204,3 +204,9 @@ See `src-tauri/.env.example` for reference.
 ## License / 许可证 / ライセンス
 
 MIT
+
+
+---
+
+高风险：zip 条目名 GBK 乱码
+db/subscribe.rs:198 / db/bepinex.rs:54(zip crate = "2"):ZIP 规范对无 UTF-8 标志的条目名默认按 CP437 解码(刚用 context7 核实过 zip2 的行为，且提供 name_raw() 正是为此场景)。中文作者用 WinRAR/7-Zip 旧版打的包是 GBK 文件名、通常不带 UTF-8 标志 → 订阅 mod 解压到游戏目录后文件名全部乱码，游戏加载不到、指纹比对也基于乱码名。影响面：订阅下载(subscribe.rs)、v1/v2 分发包(bepinex.rs);官方 BepInEx 包是 ASCII 名所以 bepinex 风险低。修法:name_raw() 拿原始字节，UTF-8 校验失败时用 encoding_rs 按 GBK 解码。
