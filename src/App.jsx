@@ -2,7 +2,7 @@ import { useState, useEffect, useReducer, useRef } from 'react'
 import { listen } from '@tauri-apps/api/event'
 import { FluentProvider, webLightTheme, webDarkTheme, Dialog, DialogSurface, DialogBody, DialogTitle, DialogContent, DialogActions, DialogTrigger, Button, Text, Toaster } from '@fluentui/react-components'
 import { makeStyles, tokens } from '@fluentui/react-components'
-import { TabNavigation, WelcomeScreen, TitleBar } from './components'
+import { TabNavigation, WelcomeScreen, TitleBar, RequireLogin } from './components'
 import { SaveManagement, ImportExport, GameSettings, Workshop, LocalMods, NotifyPage } from './modules'
 import { AuthProvider } from './contexts/AuthContext.jsx'
 import { UserNavProvider } from './contexts/UserNavProvider.jsx'
@@ -431,8 +431,8 @@ function App() {
               {activeTab === 'localmods' && <LocalMods key={`localmods-${state.config?.game_path || ''}-${modListKey}`} config={state.config} onUninstall={handleUninstallMod} />}
               {activeTab === 'saves' && <SaveManagement config={state.config} />}
               {activeTab === 'import-export' && <ImportExport config={state.config} />}
-              {activeTab === 'workshop' && <Workshop initialModId={navTarget?.modId} initialCommentId={navTarget?.commentId} onConsumeNavTarget={() => setNavTarget(null)} />}
-              {activeTab === 'notify' && <NotifyPage onNavigate={(entity, targetId, commentId) => {
+              {activeTab === 'workshop' && <RequireLogin><Workshop initialModId={navTarget?.modId} initialCommentId={navTarget?.commentId} onConsumeNavTarget={() => setNavTarget(null)} /></RequireLogin>}
+              {activeTab === 'notify' && <RequireLogin><NotifyPage onNavigate={(entity, targetId, commentId) => {
                 if (entity === 'discussion') {
                   // 讨论区通知：设置 #/discuss/<id>?comment=<cid>，Workshop hashchange 自动切到讨论区并打开对应楼层
                   window.location.hash = commentId ? `#/discuss/${targetId}?comment=${commentId}` : `#/discuss/${targetId}`
@@ -444,7 +444,7 @@ function App() {
                   setNavTarget({ modId: targetId, commentId })
                   handleTabChange('workshop')
                 }
-              }} />}
+              }} /></RequireLogin>}
               {activeTab === 'settings' && <GameSettings config={state.config} onConfigChange={handleConfigChange} appUpdateInfo={updateInfo} />}
             </main>
           </TabNavigation>

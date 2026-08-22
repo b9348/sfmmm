@@ -218,7 +218,7 @@
     "checking": "检查中...",
     "checkUpdateBtn": "检测更新",
     "ghDownloadUpdate": "GitHub 下载源",
- "quarkDownload": "打开夸克网盘",
+    "quarkDownload": "打开夸克网盘",
     "ghNotReady": "GitHub 源尚未发布 v{{version}}，请稍后重试",
     "ghNoAsset": "GitHub 源未找到安装包资产",
     "downloadUpdate": "默认下载源",
@@ -456,7 +456,9 @@
     "unlikedHint": "尚未点赞",
     "applyToEdit": "申请编辑",
     "applyReasonPlaceholder": "请说明申请编辑的原因...",
-    "submit": "提交"
+    "submit": "提交",
+    "loginRequiredDesc": "社区内容需要登录账号后才能查看",
+    "loginNow": "立即登录"
   },
   "editor": {
     "bold": "粗体",

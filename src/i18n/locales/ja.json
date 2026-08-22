@@ -218,7 +218,7 @@
     "checking": "確認中...",
     "checkUpdateBtn": "更新を確認",
     "ghDownloadUpdate": "GitHub ソース",
- "quarkDownload": "夸克ネットドライブを開く",
+    "quarkDownload": "夸克ネットドライブを開く",
     "ghNotReady": "GitHub ソースは v{{version}} をまだ公開していません。後でもう一度お試しください",
     "ghNoAsset": "GitHub ソースにインストーラーのアセットが見つかりません",
     "downloadUpdate": "既定のソース",
@@ -456,7 +456,9 @@
     "unlikedHint": "まだいいねしていません",
     "applyToEdit": "編集を申請",
     "applyReasonPlaceholder": "編集を申請する理由を入力してください...",
-    "submit": "送信"
+    "submit": "送信",
+    "loginRequiredDesc": "コミュニティコンテンツの閲覧にはログインが必要です",
+    "loginNow": "今すぐログイン"
   },
   "editor": {
     "bold": "太字",

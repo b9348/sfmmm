@@ -17,6 +17,7 @@ import { usePagePrefetch } from '../../hooks/usePagePrefetch'
 import { EditModPage, CreateModPage } from './MyMods'
 import { getConfig, setConfig } from '../../services/dbHelper'
 import { Pagination, AsyncView, LoginDialog, FloatingActions, EmptyState, ItemsPerRowControl } from '../../components'
+import { isMobileUA } from '../../hooks/usePlatform'
 import { ModCard } from './ModCard'
 
 const useStyles = makeStyles({
@@ -82,7 +83,7 @@ export function BrowseMods({ initialModId, initialCommentId, onConsumeNavTarget,
   const modStackRef = useRef([]) // 导航栈：返回上一页而非列表
   const [editingMod, setEditingMod] = useState(null)
   const [showCreatePage, setShowCreatePage] = useState(false)
-  const [itemsPerRow, setItemsPerRow] = useState(3)
+  const [itemsPerRow, setItemsPerRow] = useState(isMobileUA(navigator.userAgent) ? 1 : 3)
   const initialFetch = useRef(false)
   const rootRef = useRef(null)
   const [overlayRect, setOverlayRect] = useState(null)

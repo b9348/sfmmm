@@ -14,4 +14,7 @@ body {
   width: 100vw;
   height: 100vh;
   overflow: hidden;
+  /* 移动端全面屏：为状态栏与底部手势区留出安全区域（桌面端 env() 为 0 无影响） */
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
 }

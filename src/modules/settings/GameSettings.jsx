@@ -403,7 +403,7 @@ export function GameSettings({ config, onConfigChange, appUpdateInfo }) {
   ]
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '8px' }}>
+    <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(2, 1fr)', gap: '8px' }}>
       <Card appearance="outline">
         <CardHeader header={<Title2>{t('settings.language')}</Title2>} />
         <div style={{ padding: '8px', display: 'flex', flexDirection: 'column', gap: '8px' }}>

@@ -17,6 +17,7 @@ import { CreateDiscussionPage } from './CreateDiscussionPage'
 import { useAuth } from '../../contexts/useAuth'
 import { usePagePrefetch } from '../../hooks/usePagePrefetch'
 import { Pagination, AsyncView, LoginDialog, FloatingActions, EmptyState, ItemsPerRowControl } from '../../components'
+import { isMobileUA } from '../../hooks/usePlatform'
 
 const useStyles = makeStyles({
   root: {
@@ -77,7 +78,7 @@ export function Discussion({ active = true }) {
   const [sortBy, setSortBy] = useState('created_at')
   // 时间正/倒序：desc（新→旧，默认）| asc（旧→新），持久化到 sqlite config 表
   const [sortOrder, setSortOrder] = useState('desc')
-  const [itemsPerRow, setItemsPerRow] = useState(3)
+  const [itemsPerRow, setItemsPerRow] = useState(isMobileUA(navigator.userAgent) ? 1 : 3)
   const [discussions, setDiscussions] = useState([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)

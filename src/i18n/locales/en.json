@@ -218,7 +218,7 @@
     "checking": "Checking...",
     "checkUpdateBtn": "Check update",
     "ghDownloadUpdate": "GitHub source",
- "quarkDownload": "Open Quark Drive",
+    "quarkDownload": "Open Quark Drive",
     "ghNotReady": "GitHub source has not published v{{version}} yet, try again later",
     "ghNoAsset": "No installer asset found on GitHub source",
     "downloadUpdate": "Default source",
@@ -456,7 +456,9 @@
     "unlikedHint": "Not liked yet",
     "applyToEdit": "Apply to edit",
     "applyReasonPlaceholder": "Please explain why you want to edit...",
-    "submit": "Submit"
+    "submit": "Submit",
+    "loginRequiredDesc": "Log in to view community content",
+    "loginNow": "Log in now"
   },
   "editor": {
     "bold": "Bold",
