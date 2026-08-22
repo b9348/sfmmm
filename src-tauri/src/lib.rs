@@ -514,8 +514,16 @@ fn launch_game(game_path: String) -> Result<(), String> {
         // CREATE_NO_WINDOW：防止游戏（若为控制台子系统程序）弹出黑框窗口，
         // GUI 程序不受该标志影响，窗口照常显示。
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        std::process::Command::new(&exe_path)
-            .current_dir(&game_dir)
+
+        // 中文路径兼容：下面经 CreateProcessW 启动本身支持任意 Unicode 路径，
+        // 但游戏本体是日文程序，内部多用 ANSI 接口（中文系统为 GBK）定位自身资源，
+        // 安装在含中文的目录下会因编码不符而闪退。转为纯 ASCII 的 8.3 短路径启动
+        // 即可绕开；卷禁用 8.3 名生成或转换失败时原样回退，行为与旧版一致。
+        let exe_launch = short_ascii_path(&exe_path).unwrap_or_else(|| exe_path.clone());
+        let dir_launch = short_ascii_path(&game_dir).unwrap_or_else(|| game_dir.clone());
+
+        std::process::Command::new(&exe_launch)
+            .current_dir(&dir_launch)
             .creation_flags(CREATE_NO_WINDOW)
             .spawn()
             .map_err(|e| format!("启动游戏失败: {}", e))?;
@@ -530,6 +538,46 @@ fn launch_game(game_path: String) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+/// 取路径的 8.3 短路径（GetShortPathNameW）。ASCII 在各代码页下字节一致，
+/// 可供内部走 ANSI 接口的老程序安全使用。注意短名只保证 OEM 代码页可表示，
+/// 中文系统下可能仍含非 ASCII 双字节字符，故拿到结果后复查，含非 ASCII
+/// （如卷关闭了 8.3 名生成时返回原长路径）则返回 None，由调用方回退到原始
+/// 路径。文件必须已存在；路径本身是纯 ASCII 时转换等价于原样返回，无副作用。
+#[cfg(target_os = "windows")]
+fn short_ascii_path(p: &std::path::Path) -> Option<std::path::PathBuf> {
+    use std::ffi::OsString;
+    use std::iter::once;
+    use std::os::windows::ffi::{OsStrExt, OsStringExt};
+
+    type DWORD = u32;
+    type LPCWSTR = *const u16;
+    type LPWSTR = *mut u16;
+
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn GetShortPathNameW(lpszLongPath: LPCWSTR, lpszShortPath: LPWSTR, cchBuffer: DWORD) -> DWORD;
+    }
+
+    let wide: Vec<u16> = p.as_os_str().encode_wide().chain(once(0)).collect();
+    unsafe {
+        // 先传 NULL 缓冲区取所需长度（含结尾 NUL），再实际取短路径
+        let len = GetShortPathNameW(wide.as_ptr(), std::ptr::null_mut(), 0);
+        if len == 0 {
+            return None;
+        }
+        let mut buf = vec![0u16; len as usize];
+        let n = GetShortPathNameW(wide.as_ptr(), buf.as_mut_ptr(), len);
+        if n == 0 {
+            return None;
+        }
+        buf.truncate(n as usize);
+        if buf.iter().any(|&c| c > 0x7F) {
+            return None;
+        }
+        Some(std::path::PathBuf::from(OsString::from_wide(&buf)))
+    }
 }
 
 #[derive(Clone, Serialize)]
