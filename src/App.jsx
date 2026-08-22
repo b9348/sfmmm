@@ -8,6 +8,7 @@ import { AuthProvider } from './contexts/AuthContext.jsx'
 import { UserNavProvider } from './contexts/UserNavProvider.jsx'
 import { NotificationProvider } from './contexts/NotificationContext'
 import { usePersistUI } from './hooks/usePersistUI'
+import { usePlatform } from './hooks/usePlatform'
 import { getConfigs, setConfig } from './services/dbHelper'
 import { checkVersion, applyUpdate, prepareUpdate, getUpdateStatus, armPendingUpdate } from './services/updateApi'
 import { isInBackoff, canAutoApply } from './services/updatePolicy'
@@ -66,6 +67,9 @@ function appReducer(state, action) {
 
 function App() {
   const styles = useStyles()
+  const { isMobile } = usePlatform()
+  // 移动端纯社区模式：仅保留 社区/通知/设置
+  const MOBILE_TABS = ['workshop', 'notify', 'settings']
   const [selectedTab, setSelectedTab] = useState('mods')
   const [navTarget, setNavTarget] = useState(null)
   const { sidebarCollapsed, toggleSidebar } = usePersistUI()
@@ -126,6 +130,8 @@ function App() {
   useEffect(() => {
     let cancelled = false
     const startup = async () => {
+      // 移动端纯社区模式：不检测/下载 PC 安装包更新（APK 更新走发布页）
+      if (isMobile) return
       try {
         const info = await checkVersion(APP_VERSION)
         if (cancelled) return
@@ -290,10 +296,13 @@ function App() {
         const LEGACY_LOCAL_TABS = { mods: 'localmods', v1: 'localmods', v2: 'localmods' }
         // 旧版本 点赞/申请 独立 tab → 新版本统一收纳到 notify
         const LEGACY_NOTIFY_TABS = { likes: 'notify', apply: 'notify' }
-        const validTabs = ['localmods', 'saves', 'import-export', 'workshop', 'notify', 'settings']
+        const validTabs = isMobile
+          ? MOBILE_TABS
+          : ['localmods', 'saves', 'import-export', 'workshop', 'notify', 'settings']
         let restoredTab = configMap.selected_tab
         if (LEGACY_LOCAL_TABS[restoredTab]) restoredTab = LEGACY_LOCAL_TABS[restoredTab]
         if (LEGACY_NOTIFY_TABS[restoredTab]) restoredTab = LEGACY_NOTIFY_TABS[restoredTab]
+        if (isMobile && !validTabs.includes(restoredTab)) restoredTab = 'workshop'
         if (restoredTab && validTabs.includes(restoredTab)) {
           setSelectedTab(restoredTab)
           // 旧值映射后回写持久化，避免每次启动都走映射
@@ -302,7 +311,13 @@ function App() {
           }
         }
 
-        if (configMap.initialized === 'true' || (configMap.game_path && configMap.exe_path)) {
+        if (isMobile) {
+          // 移动端纯社区模式：跳过游戏目录首屏向导，直接进入主界面
+          if (configMap.initialized !== 'true') {
+            setConfig('initialized', 'true').catch(() => {})
+          }
+          dispatch({ type: 'INIT_COMPLETE', config: { ...configMap, initialized: 'true' } })
+        } else if (configMap.initialized === 'true' || (configMap.game_path && configMap.exe_path)) {
           dispatch({ type: 'INIT_COMPLETE', config: { ...configMap, initialized: 'true' } })
         } else {
           dispatch({ type: 'FIRST_RUN' })
@@ -340,6 +355,8 @@ function App() {
   }
 
   const { t } = useTranslation()
+  // 移动端兜底：持久化的 PC 专属 tab 一律回落到社区页
+  const activeTab = isMobile && !MOBILE_TABS.includes(selectedTab) ? 'workshop' : selectedTab
   const [uninstallTarget, setUninstallTarget] = useState(null)
   const [uninstalling, setUninstalling] = useState(false)
   const [modListKey, setModListKey] = useState(0)
@@ -372,7 +389,7 @@ function App() {
     )
   }
 
-  if (state.isFirstRun) {
+  if (state.isFirstRun && !isMobile) {
     return (
       <FluentProvider theme={resolvedTheme === 'dark' ? webDarkTheme : webLightTheme} className={`app-theme-${resolvedTheme}`}>
         <div className={styles.root}>
@@ -401,7 +418,7 @@ function App() {
           <TitleBar />
           <div className={styles.appShell}>
             <TabNavigation
-             value={selectedTab}
+             value={activeTab}
              onChange={handleTabChange}
              isCollapsed={sidebarCollapsed}
              onToggleCollapse={toggleSidebar}
@@ -411,11 +428,11 @@ function App() {
              onNavigateToSettings={() => handleTabChange('settings')}
            >
             <main className={styles.tabContent}>
-              {selectedTab === 'localmods' && <LocalMods key={`localmods-${state.config?.game_path || ''}-${modListKey}`} config={state.config} onUninstall={handleUninstallMod} />}
-              {selectedTab === 'saves' && <SaveManagement config={state.config} />}
-              {selectedTab === 'import-export' && <ImportExport config={state.config} />}
-              {selectedTab === 'workshop' && <Workshop initialModId={navTarget?.modId} initialCommentId={navTarget?.commentId} onConsumeNavTarget={() => setNavTarget(null)} />}
-              {selectedTab === 'notify' && <NotifyPage onNavigate={(entity, targetId, commentId) => {
+              {activeTab === 'localmods' && <LocalMods key={`localmods-${state.config?.game_path || ''}-${modListKey}`} config={state.config} onUninstall={handleUninstallMod} />}
+              {activeTab === 'saves' && <SaveManagement config={state.config} />}
+              {activeTab === 'import-export' && <ImportExport config={state.config} />}
+              {activeTab === 'workshop' && <Workshop initialModId={navTarget?.modId} initialCommentId={navTarget?.commentId} onConsumeNavTarget={() => setNavTarget(null)} />}
+              {activeTab === 'notify' && <NotifyPage onNavigate={(entity, targetId, commentId) => {
                 if (entity === 'discussion') {
                   // 讨论区通知：设置 #/discuss/<id>?comment=<cid>，Workshop hashchange 自动切到讨论区并打开对应楼层
                   window.location.hash = commentId ? `#/discuss/${targetId}?comment=${commentId}` : `#/discuss/${targetId}`
@@ -428,7 +445,7 @@ function App() {
                   handleTabChange('workshop')
                 }
               }} />}
-              {selectedTab === 'settings' && <GameSettings config={state.config} onConfigChange={handleConfigChange} appUpdateInfo={updateInfo} />}
+              {activeTab === 'settings' && <GameSettings config={state.config} onConfigChange={handleConfigChange} appUpdateInfo={updateInfo} />}
             </main>
           </TabNavigation>
           </div>

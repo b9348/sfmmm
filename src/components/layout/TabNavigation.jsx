@@ -53,7 +53,7 @@ export function TabNavigation({ value, onChange, isCollapsed, onToggleCollapse, 
   const { user, isLoggedIn, logout } = useAuth()
   const { openUser } = useUserNav()
   const { unread, refreshUnread } = useNotification()
-  const { isAndroid } = usePlatform()
+  const { isAndroid, isMobile } = usePlatform()
   const [authOpen, setAuthOpen] = useState(false)
   const [profileOpen, setProfileOpen] = useState(false)
   const [isRegister, setIsRegister] = useState(false)
@@ -91,7 +91,8 @@ export function TabNavigation({ value, onChange, isCollapsed, onToggleCollapse, 
   }, [value])
 
   const menuItems = [
-    {
+    // 移动端纯社区模式：不提供本地模组管理
+    ...(!isMobile ? [{
       value: 'localmods',
       label: t('nav.localmods'),
       icon: <BoxMultiple24Regular />,
@@ -103,7 +104,7 @@ export function TabNavigation({ value, onChange, isCollapsed, onToggleCollapse, 
         { value: 'localmods:v2', label: t('nav.v2'), icon: <DocumentFolder24Regular /> },
         { value: 'localmods:saves', label: t('nav.saves'), icon: <Save24Regular /> },
       ],
-    },
+    }] : []),
     // { value: 'import-export', label: '导入/导出', icon: <ArrowSwap24Regular /> },
     {
       value: 'workshop',
@@ -147,10 +148,10 @@ export function TabNavigation({ value, onChange, isCollapsed, onToggleCollapse, 
     },
   ]
 
-  // 底部菜单：启动游戏紧跟设置，底部顺序为 启动游戏 → 设置 → 版本号
-  const footerMenuItems = [
-    { value: LAUNCH_VALUE, label: t('nav.launchGame'), icon: <Play24Regular /> },
-  ]
+  // 底部菜单：启动游戏紧跟设置（移动端纯社区模式不提供启动游戏）
+  const footerMenuItems = isMobile
+    ? []
+    : [{ value: LAUNCH_VALUE, label: t('nav.launchGame'), icon: <Play24Regular /> }]
 
   const handleLogout = () => {
     logout()

@@ -26,6 +26,7 @@ import { listen } from '@tauri-apps/api/event'
 import { open as openDialog } from '@tauri-apps/plugin-dialog'
 import { open as openUrl } from '@tauri-apps/plugin-shell'
 import { getConfig, setConfig } from '../../services/dbHelper'
+import { usePlatform } from '../../hooks/usePlatform'
 import { Acknowledgments } from './Acknowledgments'
 import i18n from '../../i18n'
 import { checkVersion, checkGitHubUpdate, prepareUpdate, applyUpdate, getUpdateStatus, compareVersions, armPendingUpdate, cancelUpdate } from '../../services/updateApi'
@@ -77,6 +78,7 @@ const useStyles = makeStyles({
 
 export function GameSettings({ config, onConfigChange, appUpdateInfo }) {
   const { t, i18n: i18nInstance } = useTranslation()
+  const { isMobile } = usePlatform()
   const styles = useStyles()
   const [gamePath, setGamePath] = useState(config?.game_path || '')
   const [language, setLanguage] = useState(config?.language || i18nInstance.language || 'zh')
@@ -426,6 +428,7 @@ export function GameSettings({ config, onConfigChange, appUpdateInfo }) {
         </div>
       </Card>
 
+      {!isMobile && (
       <Card appearance="outline">
         <CardHeader header={<Title2>{t('settings.gamePath')}</Title2>} />
         <div style={{ padding: '8px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
@@ -447,7 +450,9 @@ export function GameSettings({ config, onConfigChange, appUpdateInfo }) {
           </Text>
         </div>
       </Card>
+      )}
 
+      {!isMobile && (
       <Card appearance="outline">
         <CardHeader header={<Title2>{t('settings.updateTitle')}</Title2>} />
         <div style={{ padding: '8px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
@@ -566,6 +571,7 @@ export function GameSettings({ config, onConfigChange, appUpdateInfo }) {
           )}
         </div>
       </Card>
+      )}
 
       <Card appearance="outline">
         <CardHeader header={<Title2>{t('settings.aboutTitle')}</Title2>} />
