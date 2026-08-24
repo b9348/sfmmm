@@ -19,7 +19,7 @@ import { listen } from '@tauri-apps/api/event'
 import { RichTextContent, MarkdownContent } from '../../components/common/RichTextEditor'
 import { invoke } from '@tauri-apps/api/core'
 import { useAuth } from '../../contexts/useAuth'
-import { submitApplication, likeMod, unlikeMod, getDeviceId, rateMod, unrateMod, addComment, getComments, getCommentReplies, deleteComment, editComment } from '../../services/workshopApi'
+import { submitApplication, likeMod, unlikeMod, getDeviceId, rateMod, unrateMod, addComment, getComments, getCommentReplies, deleteComment, editComment, locateModComment } from '../../services/workshopApi'
 import { upsertLikedModToCache, removeLikedModFromCache } from '../../services/likedModsCache'
 import { upsertRatedModToCache } from '../../services/ratingCache'
 import CommentSection from './CommentSection'
@@ -118,6 +118,7 @@ export default function ModDetailPage({ mod, onBack, onEdit, scrollToCommentId }
     list: (args) => getComments({ mod_id: args.targetId, page: args.page, page_size: args.page_size, sort_order: args.sort_order, reply_order: args.reply_order }),
     add: (args) => addComment({ mod_id: args.targetId, author_id: args.author_id, content: args.content, parent_id: args.parent_id, reply_to_id: args.reply_to_id }),
     replies: (args) => getCommentReplies({ comment_id: args.comment_id, page: args.page, page_size: args.page_size, sort_order: args.sort_order }),
+    locate: (args) => locateModComment({ comment_id: args.comment_id, top_sort_order: args.top_sort_order, reply_sort_order: args.reply_order }),
     edit: (args) => editComment({ comment_id: args.comment_id, author_id: args.author_id, content: args.content }),
     del: (args) => deleteComment({ comment_id: args.comment_id, author_id: args.author_id }),
   }), [])

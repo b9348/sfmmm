@@ -407,6 +407,16 @@ export async function getCommentReplies({ comment_id, page = 1, page_size = 10, 
   }
 }
 
+// 定位 mod 评论在详情页中的位置（通知跳转用）：所属一楼 id / 一楼页码 / 楼中楼内排名
+export async function locateModComment({ comment_id, top_sort_order, reply_sort_order } = {}) {
+  const res = await dbCall('db_locate_mod_comment', {
+    comment_id,
+    top_sort_order: top_sort_order || null,
+    reply_sort_order: reply_sort_order || null,
+  })
+  return { success: true, data: res.data }
+}
+
 export async function deleteComment({ comment_id, author_id }) {
   await dbCall('db_delete_comment', { comment_id, author_id })
   return { success: true }
@@ -636,6 +646,16 @@ export async function getDiscussionReplies({ comment_id, page = 1, page_size = 1
     page: res.data?.page || 1,
     page_size: res.data?.page_size || page_size,
   }
+}
+
+// 定位评论在详情页中的位置（通知跳转用）：所属一楼 id / 一楼页码 / 楼中楼内排名
+export async function locateDiscussionComment({ comment_id, top_sort_order, reply_sort_order } = {}) {
+  const res = await dbCall('db_locate_discussion_comment', {
+    comment_id,
+    top_sort_order: top_sort_order || null,
+    reply_sort_order: reply_sort_order || null,
+  })
+  return { success: true, data: res.data }
 }
 
 export async function deleteDiscussionComment({ comment_id, author_id }) {

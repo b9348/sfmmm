@@ -9,6 +9,7 @@ import {
 import {
   likeDiscussion, unlikeDiscussion, boostDiscussion, unboostDiscussion, deleteDiscussion, getDiscussionDetail,
   addDiscussionComment, getDiscussionComments, getDiscussionReplies, editDiscussionComment, deleteDiscussionComment,
+  locateDiscussionComment,
 } from '../../services/workshopApi'
 import { useAuth } from '../../contexts/useAuth'
 import { RichTextContent, MarkdownContent } from '../../components/common/RichTextEditor'
@@ -99,6 +100,7 @@ export function DiscussionDetailPage({ discussion, onBack, scrollToCommentId, on
     list: (args) => getDiscussionComments({ discussion_id: args.targetId, page: args.page, page_size: args.page_size, sort_order: args.sort_order, reply_order: args.reply_order }),
     add: (args) => addDiscussionComment({ discussion_id: args.targetId, author_id: args.author_id, content: args.content, parent_id: args.parent_id, reply_to_id: args.reply_to_id }),
     replies: (args) => getDiscussionReplies({ comment_id: args.comment_id, page: args.page, page_size: args.page_size, sort_order: args.sort_order }),
+    locate: (args) => locateDiscussionComment({ comment_id: args.comment_id, top_sort_order: args.top_sort_order, reply_sort_order: args.reply_order }),
     edit: (args) => editDiscussionComment({ comment_id: args.comment_id, author_id: args.author_id, content: args.content }),
     del: (args) => deleteDiscussionComment({ comment_id: args.comment_id, author_id: args.author_id }),
   }), [])

@@ -142,8 +142,10 @@ pub async fn db_list_mods(
         let order_sql = match sort_by.as_str() {
             "likes" => "ORDER BY m.like_count DESC, m.created_at DESC",
             "rating" => "ORDER BY m.rating_avg DESC, m.rating_count DESC, m.created_at DESC",
-            _ if sort_order == "asc" => "ORDER BY m.created_at ASC",
-            _ => "ORDER BY m.created_at DESC",
+            // 时间排序以「最近更新」为准（COALESCE 兜底未编辑项用创建时间），
+            // 让编辑过的 item 排序靠前，作者无需重新发帖来置顶
+            _ if sort_order == "asc" => "ORDER BY COALESCE(m.updated_at, m.created_at) ASC",
+            _ => "ORDER BY COALESCE(m.updated_at, m.created_at) DESC",
         };
 
         let mut conditions: Vec<String> = Vec::new();
@@ -854,10 +856,14 @@ pub async fn db_update_mod(
             return Ok(ApiResponse::err("You don't have permission to edit this mod"));
         }
 
+        // 标记是否有实际编辑动作，用于最后刷新 updated_at（时间排序依此让编辑过的 item 靠前）
+        let mut edited = false;
+
         if can_edit_mod_info {
             if let Some(cat) = &category {
                 conn.exec_drop("UPDATE mods SET category = ? WHERE id = ?", (cat, mod_id))
                     .map_err(|e| e.to_string())?;
+                edited = true;
             }
         }
 
@@ -876,6 +882,8 @@ pub async fn db_update_mod(
                     continue;
                 }
             }
+
+            edited = true;
 
             let raw_name = t.get("name").and_then(|v| v.as_str()).unwrap_or("");
             let raw_desc = t.get("description").and_then(|v| v.as_str()).unwrap_or("");
@@ -917,6 +925,12 @@ pub async fn db_update_mod(
                 "UPDATE mod_files SET version = ? WHERE mod_id = ? AND lang_code = ?",
                 (t_ver, mod_id, lc),
             ).map_err(|e| e.to_string())?;
+        }
+
+        // 编辑过即刷新 mods.updated_at，驱动「云」列表按最近更新排序（编辑项靠前）
+        if edited {
+            conn.exec_drop("UPDATE mods SET updated_at = CURRENT_TIMESTAMP WHERE id = ?", (mod_id,))
+                .map_err(|e| e.to_string())?;
         }
 
         Ok(ApiResponse::ok_msg("Mod updated"))

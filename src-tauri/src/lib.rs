@@ -1514,6 +1514,7 @@ pub fn run() {
             db::db_delete_imgbed_file,
             db::db_get_version,
             db::db_add_comment, db::db_get_comments, db::db_get_replies, db::db_edit_comment, db::db_delete_comment,
+            db::db_locate_mod_comment,
             db::db_like_mod, db::db_unlike_mod,
             db::db_rate_mod, db::db_unrate_mod,
             db::db_check_updates,
@@ -1548,6 +1549,7 @@ pub fn run() {
             db::db_vote_poll, db::db_get_poll_results,
             db::db_add_discussion_comment, db::db_get_discussion_comments,
             db::db_get_discussion_replies, db::db_edit_discussion_comment, db::db_delete_discussion_comment,
+            db::db_locate_discussion_comment,
             db::db_list_my_discussions, db::db_list_my_discussion_comments,
         ])
         .plugin(

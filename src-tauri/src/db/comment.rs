@@ -126,9 +126,9 @@ pub async fn db_get_comments(
              FROM mod_comments c
              JOIN users u ON c.author_id = u.id
              WHERE c.mod_id = ? AND c.parent_id IS NULL
-             ORDER BY c.created_at {} 
+             ORDER BY c.created_at {}, c.id {}
              LIMIT ? OFFSET ?",
-            top_order
+            top_order, top_order
         );
         conn.exec_map(
             &top_sql,
@@ -149,9 +149,9 @@ pub async fn db_get_comments(
                  FROM mod_comments c
                  JOIN users u ON c.author_id = u.id
                  WHERE c.parent_id = ?
-                 ORDER BY c.created_at {} 
+                 ORDER BY c.created_at {}, c.id {}
                  LIMIT 2",
-                reply_dir
+                reply_dir, reply_dir
             );
             conn.exec_map(
                 &reply_sql,
@@ -232,9 +232,9 @@ pub async fn db_get_replies(
              FROM mod_comments c
              JOIN users u ON c.author_id = u.id
              WHERE c.parent_id = ?
-             ORDER BY c.created_at {} 
+             ORDER BY c.created_at {}, c.id {}
              LIMIT ? OFFSET ?",
-            dir
+            dir, dir
         );
         conn.exec_map(
             &sql,
@@ -267,6 +267,75 @@ pub async fn db_get_replies(
             page: None,
             page_size: None,
         })
+    }).await
+}
+
+/// 定位一条 mod 评论在详情页中的位置（通知跳转「查看回复详情」用）：
+/// 返回所属一楼 id、一楼所在页码（page_size=10，与前端 fetchComments 一致）、
+/// 楼中楼内 1-based 排名（含前 2 条预览口径，与前端预览+分页规则一致）。
+/// 排名按 (created_at, id) 双键、与列表排序同向计算，保证页码换算与列表实际顺序一致。
+/// 与 db_locate_discussion_comment 互为镜像（mod_comments / mod 通知跳转链路）。
+#[tauri::command(rename_all = "snake_case")]
+pub async fn db_locate_mod_comment(
+    state: tauri::State<'_, DbState>,
+    comment_id: u64,
+    top_sort_order: Option<String>,
+    reply_sort_order: Option<String>,
+) -> Result<ApiResponse, String> {
+    with_conn(state.inner(), move |conn: &mut PooledConn| {
+        let row: Option<(u64, Option<u64>)> = conn.exec_first(
+            "SELECT mod_id, parent_id FROM mod_comments WHERE id = ?",
+            (comment_id,),
+        ).map_err(|e| e.to_string())?;
+        let Some((mod_id, parent_id)) = row else {
+            return Ok(ApiResponse::err("Comment not found"));
+        };
+        let top_id = parent_id.unwrap_or(comment_id);
+        let top_order = top_sort_order
+            .filter(|s| s == "asc" || s == "desc")
+            .unwrap_or_else(|| "desc".into());
+        let reply_order = reply_sort_order
+            .filter(|s| s == "asc" || s == "desc")
+            .unwrap_or_else(|| "asc".into());
+
+        // 一楼排名：统计按当前排序方向排在目标前面的楼数（同秒并列用 id 次序，与列表 ORDER BY 一致）
+        let (top_op, top_tie) = if top_order == "asc" { ("<", "<") } else { (">", ">") };
+        let top_before: i64 = conn.exec_first(
+            &format!(
+                "SELECT COUNT(*) FROM mod_comments c
+                 WHERE c.mod_id = ? AND c.parent_id IS NULL
+                   AND (c.created_at {top_op} (SELECT created_at FROM mod_comments WHERE id = ?)
+                     OR (c.created_at = (SELECT created_at FROM mod_comments WHERE id = ?) AND c.id {top_tie} ?))"
+            ),
+            (mod_id, top_id, top_id, top_id),
+        ).map_err(|e| e.to_string())?.unwrap_or(0i64);
+        // 前端一楼分页：page_size=10；rank = top_before + 1 → page = (rank-1)/10 + 1
+        let top_page = (top_before / 10 + 1) as u64;
+
+        // 楼中楼排名：目标自身是回复时才计算（比较对象为目标自身，在其一楼范围内）
+        let reply_index: u64 = if parent_id.is_some() {
+            let (reply_op, reply_tie) = if reply_order == "asc" { ("<", "<") } else { (">", ">") };
+            let reply_before: i64 = conn.exec_first(
+                &format!(
+                    "SELECT COUNT(*) FROM mod_comments c
+                     WHERE c.parent_id = ?
+                       AND (c.created_at {reply_op} (SELECT created_at FROM mod_comments WHERE id = ?)
+                         OR (c.created_at = (SELECT created_at FROM mod_comments WHERE id = ?) AND c.id {reply_tie} ?))"
+                ),
+                (top_id, comment_id, comment_id, comment_id),
+            ).map_err(|e| e.to_string())?.unwrap_or(0i64);
+            (reply_before + 1) as u64
+        } else {
+            0
+        };
+
+        Ok(ApiResponse::ok_val(serde_json::json!({
+            "mod_id": mod_id,
+            "parent_id": parent_id,
+            "top_id": top_id,
+            "top_page": top_page,
+            "reply_index": reply_index,
+        }), "OK"))
     }).await
 }
 

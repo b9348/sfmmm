@@ -132,22 +132,36 @@ export default function CommentSection({ api, targetId, folderPrefix = 'sfm', sc
   // 与楼中楼排序方向（asc 旧→新 | desc 新→旧，默认 asc），持久化到 sqlite config 表
   const [sortOrder, setSortOrder] = useState('desc')
   const [replyOrder, setReplyOrder] = useState('asc')
+  // 偏好是否已从 sqlite 恢复完成（通知定位需等恢复后按最终口径发起，避免口径漂移）
+  const [ordersLoaded, setOrdersLoaded] = useState(false)
 
   const initialFetch = useRef(false)
+  // 供 mount 期的 loadOrders 调用（彼时 fetchComments 引用可能过期，ref 转发取最新）
+  const fetchCommentsRef = useRef(null)
 
   // 从 sqlite 恢复浏览习惯（详情页打开即生效，无需登录）
   useEffect(() => {
     const loadOrders = async () => {
+      let s = null
+      let r = null
       try {
-        const [s, r] = await Promise.all([
+        ;[s, r] = await Promise.all([
           getConfig('comment_sort_order'),
           getConfig('comment_reply_order'),
         ])
-        if (s === 'asc' || s === 'desc') setSortOrder(s)
-        if (r === 'asc' || r === 'desc') setReplyOrder(r)
+        if (s !== 'asc' && s !== 'desc') s = null
+        if (r !== 'asc' && r !== 'desc') r = null
       } catch (e) {
         console.warn('[CommentSection] 读取浏览习惯失败:', e)
       }
+      // 恢复方向非默认时立即按该方向重拉（与 Discussion 同模式）：
+      // 否则首屏仍是默认口径的数据，而排序控件/通知定位已是恢复口径，两者脱节
+      const top = s || 'desc'
+      const reply = r || 'asc'
+      if (s) setSortOrder(s)
+      if (r) setReplyOrder(r)
+      if (top !== 'desc' || reply !== 'asc') fetchCommentsRef.current(1, top, reply)
+      setOrdersLoaded(true)
     }
     loadOrders()
   }, [])
@@ -160,10 +174,14 @@ export default function CommentSection({ api, targetId, folderPrefix = 'sfm', sc
   }, [])
 
   // 接受显式排序参数：切换排序时调用方传入新值，避免 setState 未提交时的陈旧闭包
+  // 请求序号防竞态：通知定位可能紧随 initialFetch 发起二次翻页请求，旧响应后到时丢弃
+  const fetchSeqRef = useRef(0)
   const fetchComments = useCallback(async (p, sort = sortOrder, reply = replyOrder) => {
+    const seq = ++fetchSeqRef.current
     setLoading(true)
     try {
       const data = await api.list({ targetId, page: p, page_size: 10, sort_order: sort, reply_order: reply })
+      if (seq !== fetchSeqRef.current) return
       setComments(data.comments)
       setTotal(data.total)
       // 优先使用后端返回的全量计数（含楼中楼）；兜底用 一楼 + 各楼楼中楼之和
@@ -175,9 +193,12 @@ export default function CommentSection({ api, targetId, folderPrefix = 'sfm', sc
     } catch {
       // silent
     } finally {
-      setLoading(false)
+      if (seq === fetchSeqRef.current) setLoading(false)
     }
   }, [targetId, api, sortOrder, replyOrder])
+
+  // 供 mount 期的 loadOrders 调用（彼时 fetchComments 尚未定义/引用会过期，ref 转发取最新）
+  useEffect(() => { fetchCommentsRef.current = fetchComments }, [fetchComments])
 
   useEffect(() => {
     if (!initialFetch.current) {
@@ -185,6 +206,109 @@ export default function CommentSection({ api, targetId, folderPrefix = 'sfm', sc
       fetchComments(1)
     }
   }, [fetchComments])
+
+  // ── 通知跳转定位（api.locate 可选注入；未注入时退化为纯 DOM 滚动，行为同旧版）──
+  // locate 反查目标评论所属一楼/页码/楼中楼排名，解决"目标回复不在 DOM（折叠/跨页）时静默定位失败"
+  const [locateInfo, setLocateInfo] = useState(null)
+  const locateTriedRef = useRef(false)
+  // 目标元素出现过一次即视为定位完成：之后用户手动切排序/翻页不再被推进逻辑拉回
+  const locatedRef = useRef(false)
+  // 放弃推进（用户改口径 / 定位页确认无目标楼）：不再干预列表
+  const locateGaveUpRef = useRef(false)
+  useEffect(() => {
+    if (!scrollToCommentId || !api.locate || !ordersLoaded || locateTriedRef.current) return
+    locateTriedRef.current = true
+    // 偏好恢复完成后按最终口径发起，保证定位页码与首屏列表一致；
+    // 口径随 locateInfo 携带，后续推进/续传均锁定该口径
+    api.locate({ comment_id: scrollToCommentId, top_sort_order: sortOrder, reply_order: replyOrder })
+      .then((res) => {
+        if (res?.data) setLocateInfo({ ...res.data, top_sort_order: sortOrder, reply_order: replyOrder })
+      })
+      .catch(() => { /* 定位失败（评论已删等）：退化为原有 DOM 滚动 */ })
+  }, [scrollToCommentId, api, ordersLoaded, sortOrder, replyOrder])
+
+  // 定位推进：确保目标评论所在一楼在当前页、楼中楼已展开且分页已覆盖到目标回复；
+  // 元素进入 DOM 后由下方滚动 effect 完成滚动与高亮
+  useEffect(() => {
+    if (!scrollToCommentId || !locateInfo || loading || locatedRef.current || locateGaveUpRef.current) return
+    // 用户已手动切换排序口径：放弃推进，避免把列表拉回 locate 时的旧口径
+    if (sortOrder !== locateInfo.top_sort_order || replyOrder !== locateInfo.reply_order) {
+      locateGaveUpRef.current = true
+      return
+    }
+    const topId = Number(locateInfo.parent_id ?? scrollToCommentId)
+    const top = comments.find((c) => Number(c.id) === topId)
+    if (!top) {
+      if (page !== locateInfo.top_page) {
+        // 所属一楼不在当前页：切到定位页码
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- effect 内发起请求同步置 loading，与挂载拉取同模式
+        fetchComments(locateInfo.top_page, locateInfo.top_sort_order, locateInfo.reply_order)
+      } else {
+        // 已在定位页仍找不到目标楼（locate 后被新评论挤出该页/已删除）：彻底放弃，不再劫持用户翻页
+        locateGaveUpRef.current = true
+      }
+      return
+    }
+    if (!locateInfo.parent_id) return // 目标是一楼：交给滚动 effect
+    const rs = replyState[topId] || {}
+    const visibleIds = new Set([
+      ...(top.replies || []).map((r) => Number(r.id)),
+      ...(rs.replies || []).map((r) => Number(r.id)),
+    ])
+    if (visibleIds.has(Number(scrollToCommentId))) {
+      // 目标已可见（预览前 2 条或已加载分页内）：折叠态下展开即可
+      if (!rs.expanded) {
+        setReplyState((prev) => {
+          const cur = prev[topId] || { replies: [], page: 0, hasMore: top.has_more, loading: false }
+          return { ...prev, [topId]: { ...cur, expanded: true } }
+        })
+      }
+      return
+    }
+    // 目标在未加载的分页区间：展开并加载覆盖到目标排名的回复
+    let cancelled = false
+    const needCount = Math.max(0, (locateInfo.reply_index || 1) - 2) // 前 2 条已由预览渲染
+    ;(async () => {
+      let merged = [...(rs.replies || [])]
+      let hasMore = rs.hasMore ?? true
+      while (!cancelled && merged.length < needCount && hasMore) {
+        const remaining = needCount - merged.length
+        // 页大小按 10 对齐（上限 50）：一次请求尽量覆盖，且与后端 offset = 2 + (page-1)*page_size 口径无缝续传
+        const pageSize = Math.min(50, Math.max(10, Math.ceil(remaining / 10) * 10))
+        const replyPage = Math.floor(merged.length / pageSize) + 1
+        try {
+          // 排序口径锁定为 locate 时口径，与 reply_index 排名计算一致
+          const data = await api.replies({ comment_id: topId, page: replyPage, page_size: pageSize, sort_order: locateInfo.reply_order })
+          if (cancelled) return
+          const existing = new Set(merged.map((r) => Number(r.id)))
+          const got = (data.replies || []).filter((r) => !existing.has(Number(r.id)))
+          merged = [...merged, ...got]
+          const total = data.total ?? 0
+          hasMore = got.length > 0 && 2 + merged.length < total
+          setReplyState((prev) => {
+            const cur = prev[topId]
+            const curIds = new Set((cur?.replies || []).map((r) => Number(r.id)))
+            const nextReplies = [...(cur?.replies || []), ...merged.filter((r) => !curIds.has(Number(r.id)))]
+            return {
+              ...prev,
+              [topId]: {
+                ...(cur || {}),
+                replies: nextReplies,
+                // 等效 10 条/页口径的进度：后续"加载更多"从 rs.page+1 续传，不重复不遗漏
+                page: Math.floor(nextReplies.length / 10),
+                hasMore: 2 + nextReplies.length < total,
+                expanded: true,
+                loading: false,
+              },
+            }
+          })
+        } catch {
+          hasMore = false
+        }
+      }
+    })()
+    return () => { cancelled = true }
+  }, [scrollToCommentId, locateInfo, comments, replyState, loading, page, fetchComments, api, sortOrder, replyOrder])
 
   // 滚动到指定评论/回复
   const scrollTimerRef = useRef(null)
@@ -194,6 +318,7 @@ export default function CommentSection({ api, targetId, folderPrefix = 'sfm', sc
     const tryScroll = (retries = 8) => {
       const el = document.getElementById(`comment-${scrollToCommentId}`) || document.getElementById(`reply-${scrollToCommentId}`)
       if (el) {
+        locatedRef.current = true
         el.scrollIntoView({ behavior: 'smooth', block: 'center' })
         el.style.transition = 'background-color 1s ease'
         el.style.backgroundColor = tokens.colorBrandBackground2Hover
@@ -204,7 +329,7 @@ export default function CommentSection({ api, targetId, folderPrefix = 'sfm', sc
     }
     tryScroll()
     return () => { if (scrollTimerRef.current) clearTimeout(scrollTimerRef.current) }
-  }, [scrollToCommentId, loading])
+  }, [scrollToCommentId, loading, comments, replyState])
 
   // 点击回复时平滑滚动到 textarea 区域
   useEffect(() => {
@@ -525,16 +650,23 @@ export default function CommentSection({ api, targetId, folderPrefix = 'sfm', sc
     setReplyState(prev => ({ ...prev, [commentId]: { ...rs, expanded: true, loading: true } }))
     try {
       const data = await api.replies({ comment_id: commentId, page: nextPage, page_size: 10, sort_order: replyOrder })
-      setReplyState(prev => ({
-        ...prev,
-        [commentId]: {
-          ...prev[commentId],
-          replies: [...(prev[commentId]?.replies || []), ...data.replies],
-          page: nextPage,
-          hasMore: data.replies.length >= 10,
-          loading: false,
-        },
-      }))
+      setReplyState(prev => {
+        const cur = prev[commentId]
+        // 去重追加：通知定位可能已按非 10 倍数进度预加载，续传时跳过已加载的回复
+        const curIds = new Set((cur?.replies || []).map(r => Number(r.id)))
+        const add = (data.replies || []).filter(r => !curIds.has(Number(r.id)))
+        const nextReplies = [...(cur?.replies || []), ...add]
+        return {
+          ...prev,
+          [commentId]: {
+            ...cur,
+            replies: nextReplies,
+            page: Math.floor(nextReplies.length / 10),
+            hasMore: add.length > 0 && 2 + nextReplies.length < (data.total || 0),
+            loading: false,
+          },
+        }
+      })
     } catch {
       setReplyState(prev => ({ ...prev, [commentId]: { ...prev[commentId], loading: false } }))
     }
