@@ -121,6 +121,7 @@ pub async fn db_rate_mod(
     let rating = validate_rating(rating)?;
     with_conn(state.inner(), move |conn: &mut PooledConn| {
         ensure_rating_schema(conn)?;
+        crate::db::ensure_mod_updated_at_semantics(conn)?;
 
         let mod_exists: Option<(u64,)> = conn
             .exec_first("SELECT id FROM mods WHERE id = ?", (mod_id,))
@@ -136,7 +137,6 @@ pub async fn db_rate_mod(
                 (mod_id, user_id),
             )
             .map_err(|e| e.to_string())?;
-        let is_first = existing.is_none();
 
         conn.exec_drop(
             "INSERT INTO mod_ratings (mod_id, user_id, rating) VALUES (?, ?, ?)
@@ -145,21 +145,6 @@ pub async fn db_rate_mod(
         )
         .map_err(|e| e.to_string())?;
         recalc_rating(conn, mod_id)?;
-
-        if is_first {
-            let author: Option<(u64,)> = conn
-                .exec_first("SELECT author_id FROM mods WHERE id = ?", (mod_id,))
-                .map_err(|e| e.to_string())?;
-            if let Some((author_id,)) = author {
-                if author_id != user_id {
-                    conn.exec_drop(
-                        "INSERT INTO mod_notifications (user_id, mod_id, type) VALUES (?, ?, 'new_rating')",
-                        (author_id, mod_id),
-                    )
-                    .map_err(|e| e.to_string())?;
-                }
-            }
-        }
 
         let (avg, cnt) = read_rating_stats(conn, mod_id)?;
         Ok(ApiResponse::ok_val(
@@ -183,6 +168,7 @@ pub async fn db_unrate_mod(
 ) -> Result<ApiResponse, String> {
     with_conn(state.inner(), move |conn: &mut PooledConn| {
         ensure_rating_schema(conn)?;
+        crate::db::ensure_mod_updated_at_semantics(conn)?;
 
         let existing: Option<(u64,)> = conn
             .exec_first(

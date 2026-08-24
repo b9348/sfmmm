@@ -161,7 +161,10 @@ pub async fn db_list_discussions(
         let order_sql = match sort_by.as_str() {
             "likes" => "ORDER BY d.like_count DESC, d.created_at DESC",
             "boosts" => "ORDER BY d.boost_count DESC, d.created_at DESC",
-            // 时间排序以「最近更新」为准（COALESCE 兜底未编辑项用创建时间），
+            // 按发布时间排序（纯 created_at，不受编辑刷新影响）
+            "published_at" if sort_order == "asc" => "ORDER BY d.created_at ASC",
+            "published_at" => "ORDER BY d.created_at DESC",
+            // 默认/created_at：时间排序以「最近更新」为准（COALESCE 兜底未编辑项用创建时间），
             // 让编辑过的帖排序靠前，作者无需重新发帖来置顶
             _ if sort_order == "asc" => "ORDER BY COALESCE(d.updated_at, d.created_at) ASC",
             _ => "ORDER BY COALESCE(d.updated_at, d.created_at) DESC",

@@ -7,6 +7,13 @@
     "updateFound": "New version v{{version}} found. Click to go to Settings to update",
     "loading": "Loading..."
   },
+  "guide": {
+    "title": "What's New",
+    "gotIt": "Got it",
+    "content": {
+      "workshop-sort": "Workshop sorting now offers \"Edited\" and \"Newly published\" to browse by latest edit or publish time"
+    }
+  },
   "window": {
     "minimize": "Minimize",
     "maximize": "Maximize",
@@ -437,7 +444,8 @@
     "notifLike": "Like",
     "notifLikeHint": "Someone liked your mod",
     "sortBy": "Sort by",
-    "sortNewest": "Newest",
+    "sortRecent": "Edited",
+    "sortNewest": "Newly published",
     "sortLikes": "Most likes",
     "sortRating": "Top rated",
     "sortTime": "Time order",

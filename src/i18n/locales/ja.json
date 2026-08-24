@@ -7,6 +7,13 @@
     "updateFound": "新しいバージョン v{{version}} が見つかりました。設定ページで更新してください",
     "loading": "読み込み中..."
   },
+  "guide": {
+    "title": "更新内容",
+    "gotIt": "OK",
+    "content": {
+      "workshop-sort": "クリエイティブ工房の並び替えに「編集あり」「新規公開」を追加しました"
+    }
+  },
   "window": {
     "minimize": "最小化",
     "maximize": "最大化",
@@ -437,7 +444,8 @@
     "notifLike": "いいね",
     "notifLikeHint": "あなたのModにいいねされました",
     "sortBy": "並び替え",
-    "sortNewest": "最新",
+    "sortRecent": "編集あり",
+    "sortNewest": "新規公開",
     "sortLikes": "いいね順",
     "sortRating": "評価が高い順",
     "sortTime": "時間順",

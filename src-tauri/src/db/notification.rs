@@ -119,8 +119,10 @@ pub async fn db_get_unread_count(
             (user_id,),
         ).map_err(|e| e.to_string())?.unwrap_or(0i64);
 
+        // 点赞/评分无未读概念（前端有独立「点赞/评分」tab），且通知列表只展示带
+        // comment_id 的评论/回复类通知；历史遗留的 new_like/new_rating 通知不计入未读。
         let unread_mod: i64 = conn.exec_first(
-            "SELECT COUNT(*) FROM mod_notifications WHERE user_id = ? AND is_read = 0",
+            "SELECT COUNT(*) FROM mod_notifications WHERE user_id = ? AND is_read = 0 AND type NOT IN ('new_like', 'new_rating')",
             (user_id,),
         ).map_err(|e| e.to_string())?.unwrap_or(0i64);
 

@@ -142,7 +142,10 @@ pub async fn db_list_mods(
         let order_sql = match sort_by.as_str() {
             "likes" => "ORDER BY m.like_count DESC, m.created_at DESC",
             "rating" => "ORDER BY m.rating_avg DESC, m.rating_count DESC, m.created_at DESC",
-            // 时间排序以「最近更新」为准（COALESCE 兜底未编辑项用创建时间），
+            // 按发布时间排序（纯 created_at，不受编辑刷新影响）
+            "published_at" if sort_order == "asc" => "ORDER BY m.created_at ASC",
+            "published_at" => "ORDER BY m.created_at DESC",
+            // 默认/created_at：时间排序以「最近更新」为准（COALESCE 兜底未编辑项用创建时间），
             // 让编辑过的 item 排序靠前，作者无需重新发帖来置顶
             _ if sort_order == "asc" => "ORDER BY COALESCE(m.updated_at, m.created_at) ASC",
             _ => "ORDER BY COALESCE(m.updated_at, m.created_at) DESC",
@@ -258,8 +261,8 @@ pub async fn db_list_mods(
                 "language": val_to_string(r[14].clone()),
                 "files": batch.files_by_mod.remove(&mid).unwrap_or_default(),
                 "translations": batch.trans_by_mod.remove(&mid).unwrap_or_default(),
-                "created_at": val_to_string(r[5].clone()),
-                "updated_at": val_to_string(r[6].clone()),
+                "created_at": val_to_string(r[6].clone()),
+                "updated_at": val_to_string(r[7].clone()),
             })
         }).collect();
 
@@ -338,7 +341,8 @@ pub async fn db_list_my_mods(
                 "rating_count": rating_count,
                 "files": batch.files_by_mod.remove(&mid).unwrap_or_default(),
                 "translations": batch.trans_by_mod.remove(&mid).unwrap_or_default(),
-                "created_at": val_to_string(r[5].clone()),
+                "created_at": val_to_string(r[6].clone()),
+                "updated_at": val_to_string(r[7].clone()),
             })
         }).collect();
 

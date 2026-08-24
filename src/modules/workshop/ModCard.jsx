@@ -84,7 +84,9 @@ export function ModCard({ mod, onClick, onMouseEnter, onMouseLeave, onMouseDown 
               <Text size={100} className={styles.meta} truncate>{mod.author_name}</Text>
             </div>
             <Text size="small" className={styles.meta}>
-              {mod.updated_at && mod.updated_at !== mod.created_at ? mod.updated_at : mod.created_at}
+              {mod.updated_at && mod.updated_at > mod.created_at
+                ? `${t('workshop.updatedAt')}: ${mod.updated_at}`
+                : mod.created_at}
             </Text>
           </div>
         }

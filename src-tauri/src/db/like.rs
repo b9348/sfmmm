@@ -13,6 +13,7 @@ pub async fn db_like_mod(
         if device_id.is_empty() {
             return Ok(ApiResponse::err("Device ID is required"));
         }
+        crate::db::ensure_mod_updated_at_semantics(conn)?;
         let exists: Option<(u64,)> = conn.exec_first(
             "SELECT id FROM mod_likes WHERE mod_id = ? AND device_id = ?",
             (mod_id, &device_id),
@@ -28,16 +29,6 @@ pub async fn db_like_mod(
             "UPDATE mods SET like_count = like_count + 1 WHERE id = ?",
             (mod_id,),
         ).map_err(|e| e.to_string())?;
-
-        let author: Option<(u64,)> = conn.exec_first(
-            "SELECT author_id FROM mods WHERE id = ?", (mod_id,)
-        ).map_err(|e| e.to_string())?;
-        if let Some((author_id,)) = author {
-            conn.exec_drop(
-                "INSERT INTO mod_notifications (user_id, mod_id, type) VALUES (?, ?, 'new_like')",
-                (author_id, mod_id),
-            ).map_err(|e| e.to_string())?;
-        }
 
         let new_count: i64 = conn.exec_first(
             "SELECT like_count FROM mods WHERE id = ?", (mod_id,)
@@ -56,6 +47,7 @@ pub async fn db_unlike_mod(
         if device_id.is_empty() {
             return Ok(ApiResponse::err("Device ID is required"));
         }
+        crate::db::ensure_mod_updated_at_semantics(conn)?;
         let exists: Option<(u64,)> = conn.exec_first(
             "SELECT id FROM mod_likes WHERE mod_id = ? AND device_id = ?",
             (mod_id, &device_id),

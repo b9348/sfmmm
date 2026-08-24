@@ -3,7 +3,7 @@ use mysql::*;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::Mutex as AsyncMutex;
 
@@ -303,6 +303,39 @@ pub(crate) fn val_to_string(v: Value) -> String {
         Value::Double(d) => d.to_string(),
         _ => String::new(),
     }
+}
+
+/// 进程内仅执行一次：确保 mods.updated_at 不带 ON UPDATE CURRENT_TIMESTAMP。
+/// 原因：点赞/评分会 UPDATE mods 的计数列（like_count/rating_avg 等），
+/// 若 updated_at 自动刷新，互动时间会被误当作「最后编辑时间」，
+/// 污染「有编辑」排序与列表展示。修改后 updated_at 仅由编辑操作显式刷新
+/// （含开放他人编辑的场景，见 db_update_mod）。
+static MOD_UPDATED_AT_SEMANTICS: OnceLock<()> = OnceLock::new();
+
+pub(crate) fn ensure_mod_updated_at_semantics<C: Queryable>(conn: &mut C) -> Result<(), String> {
+    if MOD_UPDATED_AT_SEMANTICS.get().is_some() {
+        return Ok(());
+    }
+    // 读取 updated_at 的类型与附加属性；仅当含 ON UPDATE 时才去掉（幂等，避免无谓 ALTER）
+    let col: Option<(String, String)> = conn
+        .exec_first(
+            "SELECT COLUMN_TYPE, EXTRA FROM information_schema.COLUMNS
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'mods' AND COLUMN_NAME = 'updated_at'",
+            (),
+        )
+        .map_err(|e| e.to_string())?;
+    if let Some((col_type, extra)) = col {
+        if extra.to_lowercase().contains("on update") {
+            let sql = format!(
+                "ALTER TABLE mods MODIFY COLUMN updated_at {} DEFAULT CURRENT_TIMESTAMP",
+                col_type
+            );
+            conn.exec_drop(sql, ())
+                .map_err(|e| format!("无法去除 mods.updated_at 的 ON UPDATE 属性: {}", e))?;
+        }
+    }
+    let _ = MOD_UPDATED_AT_SEMANTICS.set(());
+    Ok(())
 }
 
 pub(crate) fn val_to_i64(v: &Value) -> i64 {

@@ -440,8 +440,9 @@ export function BrowseMods({ initialModId, initialCommentId, onConsumeNavTarget,
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
             <Text size="small">{t('workshop.sortBy')}</Text>
-            <Select size="small" value={sortBy} onChange={(_, d) => { const v = d.value; setSortBy(v); setPage(1); fetchMods(1, search, categoryFilter, v, sortOrder) }} disabled={loading}>
-              <option value="created_at">{t('workshop.sortNewest')}</option>
+            <Select data-tour="workshop-sort-select" size="small" value={sortBy} onChange={(_, d) => { const v = d.value; setSortBy(v); setPage(1); fetchMods(1, search, categoryFilter, v, sortOrder) }} disabled={loading}>
+              <option value="created_at">{t('workshop.sortRecent')}</option>
+              <option value="published_at">{t('workshop.sortNewest')}</option>
               <option value="likes">{t('workshop.sortLikes')}</option>
               <option value="rating">{t('workshop.sortRating')}</option>
             </Select>
@@ -452,7 +453,7 @@ export function BrowseMods({ initialModId, initialCommentId, onConsumeNavTarget,
               size="small"
               value={sortOrder}
               onChange={(_, d) => { const v = d.value; setSortOrder(v); saveSortOrder(v); setPage(1); fetchMods(1, search, categoryFilter, sortBy, v) }}
-              disabled={loading || sortBy !== 'created_at'}
+              disabled={loading || (sortBy !== 'created_at' && sortBy !== 'published_at')}
             >
               <option value="desc">{t('workshop.sortNewestFirst')}</option>
               <option value="asc">{t('workshop.sortOldestFirst')}</option>

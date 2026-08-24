@@ -3,6 +3,7 @@ import { listen } from '@tauri-apps/api/event'
 import { FluentProvider, webLightTheme, webDarkTheme, Dialog, DialogSurface, DialogBody, DialogTitle, DialogContent, DialogActions, DialogTrigger, Button, Text, Toaster } from '@fluentui/react-components'
 import { makeStyles, tokens } from '@fluentui/react-components'
 import { TabNavigation, WelcomeScreen, TitleBar } from './components'
+import SpotlightGuide from './components/common/SpotlightGuide'
 import { SaveManagement, ImportExport, GameSettings, Workshop, LocalMods, NotifyPage } from './modules'
 import { AuthProvider } from './contexts/AuthContext.jsx'
 import { UserNavProvider } from './contexts/UserNavProvider.jsx'
@@ -46,6 +47,10 @@ const useStyles = makeStyles({
     backgroundColor: tokens.colorNeutralBackground2,
   },
 })
+
+// 漫游引导：每个引导有独立 id；已读记录用 SQLite config 按 id 存版本号，互不影响、便于后续扩展其他引导
+const WORKSHOP_SORT_GUIDE = 'workshop-sort'
+const GUIDE_SEEN_KEY = 'guide_seen_versions'
 
 const initialState = { isFirstRun: null, config: null }
 
@@ -266,10 +271,17 @@ function App() {
 
     const initialize = async () => {
       try {
-        const configMap = await getConfigs(['language', 'selected_tab', 'initialized', 'game_path', 'exe_path', 'theme_mode'])
+        const configMap = await getConfigs(['language', 'selected_tab', 'initialized', 'game_path', 'exe_path', 'theme_mode', GUIDE_SEEN_KEY])
 
         if (!isMounted) {
           return
+        }
+
+        // 已见引导版本映射：{ [guideId]: version }，各漫游引导独立记录（存 SQLite config，跨 WebView 缓存稳定）
+        try {
+          setGuideSeenMap(JSON.parse(configMap[GUIDE_SEEN_KEY] || '{}'))
+        } catch {
+          setGuideSeenMap({})
         }
 
         // 应用已保存的主题模式（未保存时保持跟随系统）
@@ -343,6 +355,38 @@ function App() {
   const [uninstallTarget, setUninstallTarget] = useState(null)
   const [uninstalling, setUninstalling] = useState(false)
   const [modListKey, setModListKey] = useState(0)
+  // 版本更新引导：升级用户首次进入本版本时弹一次「更新说明」；全新安装（走过欢迎屏）不打扰。
+  // 已见版本记录在 SQLite config 表（应用数据目录），不依赖 WebView localStorage，避免缓存/清理导致误判
+  const [showGuide, setShowGuide] = useState(false)
+  const [guideSeenMap, setGuideSeenMap] = useState({})
+  const sawWelcomeRef = useRef(false)
+  useEffect(() => {
+    if (state.isFirstRun) sawWelcomeRef.current = true
+  }, [state.isFirstRun])
+  useEffect(() => {
+    if (state.isFirstRun !== false) return
+    // 全新安装（走过欢迎屏）不弹更新说明
+    if (sawWelcomeRef.current) return
+    // 该引导未在本版本看过则触发（多引导各自记录已看版本，互不影响）
+    if (guideSeenMap[WORKSHOP_SORT_GUIDE] !== APP_VERSION) setShowGuide(true)
+  }, [state.isFirstRun, guideSeenMap])
+  const handleCloseGuide = () => {
+    setShowGuide(false)
+    setGuideSeenMap((prev) => {
+      const next = { ...prev, [WORKSHOP_SORT_GUIDE]: APP_VERSION }
+      setConfig(GUIDE_SEEN_KEY, JSON.stringify(next)).catch((e) => {
+        console.warn('[Guide] 记录已读版本失败:', e)
+      })
+      return next
+    })
+  }
+
+  // 漫游引导激活时自动切到创意工坊「云」tab（排序下拉框所在页），组件内部会轮询定位目标元素
+  useEffect(() => {
+    if (!showGuide) return
+    setSelectedTab('workshop')
+    window.location.hash = '#/workshop/browse'
+  }, [showGuide])
 
   const handleUninstallMod = (mod) => {
     setUninstallTarget(mod)
@@ -454,6 +498,9 @@ function App() {
           </DialogSurface>
         </Dialog>
 
+        {showGuide && (
+          <SpotlightGuide targetSelector="[data-tour='workshop-sort-select']" guideId={WORKSHOP_SORT_GUIDE} onDone={handleCloseGuide} />
+        )}
       </AuthProvider>
       <Toaster position="top-end" />
     </FluentProvider>

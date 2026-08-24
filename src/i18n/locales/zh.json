@@ -7,6 +7,13 @@
     "updateFound": "发现新版本 v{{version}}，点击前往设置页更新",
     "loading": "加载中..."
   },
+  "guide": {
+    "title": "更新说明",
+    "gotIt": "知道了",
+    "content": {
+      "workshop-sort": "创意工坊排序新增「有编辑」「新发布」两种方式，可按最近编辑或发布时间浏览"
+    }
+  },
   "window": {
     "minimize": "最小化",
     "maximize": "最大化",
@@ -437,7 +444,8 @@
     "notifLike": "点赞",
     "notifLikeHint": "有人赞了你的模组",
     "sortBy": "排序",
-    "sortNewest": "最新",
+    "sortRecent": "有编辑",
+    "sortNewest": "新发布",
     "sortLikes": "最多赞",
     "sortRating": "评分最高",
     "sortTime": "时间方向",

@@ -103,8 +103,8 @@ export function DiscussionCard({ discussion, onClick, onMouseEnter, onMouseLeave
               <Text size={100} className={styles.meta} truncate>{discussion.author_name}</Text>
             </div>
             <Text size="small" className={styles.meta}>
-              {discussion.updated_at && discussion.updated_at !== discussion.created_at
-                ? discussion.updated_at
+              {discussion.updated_at && discussion.updated_at > discussion.created_at
+                ? `${t('workshop.updatedAt')}: ${discussion.updated_at}`
                 : discussion.created_at}
             </Text>
           </div>
