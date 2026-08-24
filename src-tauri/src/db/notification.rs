@@ -151,13 +151,15 @@ pub async fn db_get_my_notifications(
         let page_size = page_size.unwrap_or(20).min(100);
         let offset = (page - 1) * page_size;
 
-        // 合并两类通知：mod_notifications（mod 评论/回复）+ discussion_notifications（讨论区评论/回复）
+        // 合并两类通知：mod_notifications（mod 评论/回复）+ discussion_notifications（讨论区评论/回复）。
+        // 只统计评论仍存在（未删除）的通知：删除评论后其通知行仍残留，若 LEFT JOIN 会得到 content/作者为 NULL
+        // 的"幽灵"卡片（重复显示且缺作者信息），故按评论存在性过滤，并保证 total 与列表项数一致。
         let total_mod: i64 = conn.exec_first(
-            "SELECT COUNT(*) FROM mod_notifications WHERE user_id = ?",
+            "SELECT COUNT(*) FROM mod_notifications n JOIN mod_comments c ON n.comment_id = c.id WHERE n.user_id = ?",
             (user_id,),
         ).map_err(|e| e.to_string())?.unwrap_or(0i64);
         let total_disc: i64 = conn.exec_first(
-            "SELECT COUNT(*) FROM discussion_notifications WHERE user_id = ?",
+            "SELECT COUNT(*) FROM discussion_notifications n JOIN discussion_comments c ON n.comment_id = c.id WHERE n.user_id = ?",
             (user_id,),
         ).map_err(|e| e.to_string())?.unwrap_or(0i64);
         let total = total_mod + total_disc;
@@ -170,7 +172,7 @@ pub async fn db_get_my_notifications(
                     c.content as comment_content, u.username as comment_author, u.avatar as comment_author_avatar, c.author_id
              FROM mod_notifications n
              JOIN mods m ON n.mod_id = m.id
-             LEFT JOIN mod_comments c ON n.comment_id = c.id
+             JOIN mod_comments c ON n.comment_id = c.id
              LEFT JOIN users u ON c.author_id = u.id
              WHERE n.user_id = ?
              UNION ALL
@@ -178,7 +180,7 @@ pub async fn db_get_my_notifications(
                     c.content as comment_content, u.username as comment_author, u.avatar as comment_author_avatar, c.author_id
              FROM discussion_notifications n
              JOIN discussions d ON n.discussion_id = d.id
-             LEFT JOIN discussion_comments c ON n.comment_id = c.id
+             JOIN discussion_comments c ON n.comment_id = c.id
              LEFT JOIN users u ON c.author_id = u.id
              WHERE n.user_id = ?
              ORDER BY created_at DESC

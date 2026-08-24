@@ -1247,6 +1247,24 @@ pub async fn db_delete_discussion_comment(
             return Ok(ApiResponse::err("You can only delete your own comments"));
         }
 
+        // 收集待删除的评论 id（评论自身 + 其楼中楼），先清除对应的通知行，
+        // 否则删除评论后通知列表会残留 content/作者为 NULL 的"幽灵"卡片（重复显示且缺作者信息）
+        let mut pending_ids: Vec<u64> = vec![comment_id];
+        conn.exec_map(
+            "SELECT id FROM discussion_comments WHERE parent_id = ?",
+            (comment_id,),
+            |row: Row| {
+                let r: Vec<Value> = row.unwrap();
+                pending_ids.push(val_to_i64(&r[0]) as u64);
+            },
+        ).map_err(|e| e.to_string())?;
+        for id in pending_ids {
+            conn.exec_drop(
+                "DELETE FROM discussion_notifications WHERE comment_id = ?",
+                (id,),
+            ).map_err(|e| e.to_string())?;
+        }
+
         // 删除评论及其楼中楼，并回写 comment_count
         conn.exec_drop("DELETE FROM discussion_comments WHERE parent_id = ?", (comment_id,))
             .map_err(|e| e.to_string())?;
