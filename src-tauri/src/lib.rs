@@ -518,7 +518,9 @@ fn launch_game(game_path: String) -> Result<(), String> {
         // 中文路径兼容：下面经 CreateProcessW 启动本身支持任意 Unicode 路径，
         // 但游戏本体是日文程序，内部多用 ANSI 接口（中文系统为 GBK）定位自身资源，
         // 安装在含中文的目录下会因编码不符而闪退。转为纯 ASCII 的 8.3 短路径启动
-        // 即可绕开；卷禁用 8.3 名生成或转换失败时原样回退，行为与旧版一致。
+        // 即可绕开；纯 ASCII 路径不做转换（8.3 短名会截断 exe 文件名，Unity 按
+        // exe 名查找 <exe>_Data 文件夹会失败），卷禁用 8.3 名生成或转换失败时
+        // 原样回退，行为与旧版一致。
         let exe_launch = short_ascii_path(&exe_path).unwrap_or_else(|| exe_path.clone());
         let dir_launch = short_ascii_path(&game_dir).unwrap_or_else(|| game_dir.clone());
 
@@ -540,16 +542,25 @@ fn launch_game(game_path: String) -> Result<(), String> {
     Ok(())
 }
 
-/// 取路径的 8.3 短路径（GetShortPathNameW）。ASCII 在各代码页下字节一致，
-/// 可供内部走 ANSI 接口的老程序安全使用。注意短名只保证 OEM 代码页可表示，
-/// 中文系统下可能仍含非 ASCII 双字节字符，故拿到结果后复查，含非 ASCII
-/// （如卷关闭了 8.3 名生成时返回原长路径）则返回 None，由调用方回退到原始
-/// 路径。文件必须已存在；路径本身是纯 ASCII 时转换等价于原样返回，无副作用。
+/// 取路径的 8.3 短路径（GetShortPathNameW），仅用于含非 ASCII 字符（如中文）
+/// 的路径：ASCII 在各代码页下字节一致，可供内部走 ANSI 接口的老程序安全使用。
+/// 路径本身已是纯 ASCII 时必须原样返回、不做转换——GetShortPathNameW 会把超过
+/// 8.3 格式的长文件名截断成短名（如 SecretFlasherManaka.exe → SECRET~1.EXE），
+/// Unity 按 exe 文件名推断 Data 文件夹（SECRET1_Data）将找不到实际的
+/// <长名>_Data 目录导致游戏无法启动。注意短名只保证 OEM 代码页可表示，中文
+/// 系统下可能仍含非 ASCII 双字节字符，故拿到结果后复查，含非 ASCII（如卷关闭
+/// 了 8.3 名生成时返回原长路径）则返回 None，由调用方回退到原始路径。文件必须已存在。
 #[cfg(target_os = "windows")]
 fn short_ascii_path(p: &std::path::Path) -> Option<std::path::PathBuf> {
     use std::ffi::OsString;
     use std::iter::once;
     use std::os::windows::ffi::{OsStrExt, OsStringExt};
+
+    // 纯 ASCII 路径无需也无法安全转换：短名截断会破坏 Unity 的
+    // <exe 名>_Data 文件夹查找，直接原样返回。
+    if p.as_os_str().encode_wide().all(|c| c <= 0x7F) {
+        return Some(p.to_path_buf());
+    }
 
     type DWORD = u32;
     type LPCWSTR = *const u16;
