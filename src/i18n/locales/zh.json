@@ -165,7 +165,9 @@
     "bepInExManualHintLink": "点此访问作者原网站",
     "bepInExManualHint2": "，选择「BepInEx Unity (IL2CPP) for Windows (x64) games」下载。下载后请将压缩包中的内容直接解压到游戏根目录（BepInEx 文件夹所在目录），不要额外创建压缩包名的文件夹。",
     "bepInExVersionMismatch": "检测到 BepInEx 框架版本兼容性问题（当前 {{current}}，推荐 {{recommended}}），建议更换为 SFMMM 推荐版本以防 mod 不兼容。如无问题可忽略. 下方按钮均为 BepInEx框架稳定兼容版的不同下载点, 如遇网络错误可更换下载源按钮. 无需全部下载, 任选其一即可",
-    "reinstallRecommendedBepInEx": "重新安装推荐版本框架"
+    "reinstallRecommendedBepInEx": "重新安装推荐版本框架",
+    "gameVersionMismatch": "检测到游戏版本可能不是官方最新版",
+    "gameVersionHint": "启动游戏后右下角会显示版本，若非官方最新版v1.1.3，则可能出现功能不全或模组不兼容问题"
   },
   "saves": {
     "openFolder": "打开存档目录",

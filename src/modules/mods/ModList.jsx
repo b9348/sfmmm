@@ -16,6 +16,7 @@ import {
   Pause24Regular,
   Delete24Regular,
   ArrowDownload24Regular,
+  Warning24Regular,
 } from '@fluentui/react-icons'
 import { makeStyles, tokens, mergeClasses } from '@fluentui/react-components'
 import { invoke } from '@tauri-apps/api/core'
@@ -40,6 +41,17 @@ const useStyles = makeStyles({
   toolbarCard: {
     padding: '8px',
     flexShrink: 0,
+  },
+  // 游戏版本提示卡片（复用 BepInEx 前置警示卡片的视觉样式，警告色，仅提示不提供下载）
+  versionBanner: {
+    padding: '12px 14px',
+    flexShrink: 0,
+    border: `1px solid ${tokens.colorStatusWarningStroke1}`,
+    borderRadius: tokens.borderRadiusLarge,
+    backgroundColor: tokens.colorNeutralBackground1,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '8px',
   },
   toolbarRow: {
     display: 'flex',
@@ -205,7 +217,9 @@ export function ModList({ config, onUninstall }) {
   const [bepInExSpeed, setBepInExSpeed] = useState(0)
   const [bepInExStage, setBepInExStage] = useState('')
   const bepInExTaskIdRef = useRef(null)
-  const { installed, updates, modDetails } = useInstalledMods()
+  const { installed, updates, modDetails, cloudInfo } = useInstalledMods()
+  // 游戏版本检测：主程序 hash 与官方最新版不一致时在列表上方提示
+  const [versionMismatch, setVersionMismatch] = useState(false)
 
   const scanMods = useCallback(async () => {
     if (!gamePath) {
@@ -235,6 +249,18 @@ export function ModList({ config, onUninstall }) {
     Promise.resolve().then(scanMods)
   }, [scanMods])
 
+  // 游戏版本检测：所选游戏目录主程序 hash 与内置官方最新版（v1.1.3）基准比对
+  useEffect(() => {
+    if (!gamePath) return
+    let cancelled = false
+    invoke('check_game_version', { gamePath })
+      .then((res) => {
+        if (!cancelled) setVersionMismatch(res.exeExists === true && res.hashMatches === false)
+      })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [gamePath])
+
   const filteredMods = useMemo(() => {
     const keyword = search.trim().toLowerCase()
 
@@ -250,12 +276,14 @@ export function ModList({ config, onUninstall }) {
   const workshopInfo = useMemo(() => {
     const map = new Map()
     for (const mod of mods) {
-      const key = mod.name.replace(/\.\w+$/, '').replace(/\/$/, '') // DLL 去扩展名，目录去斜杠
+      // 只剥已知模组扩展名（mod_key 可含点号，/\.\w+$/ 会误伤），目录去斜杠
+      const key = mod.name.replace(/\.(?:dll|json)$/i, '').replace(/\/$/, '')
       if (installed.has(key)) {
         const detail = modDetails.get(key)
         const cloud = cloudInfo.get(key)
         map.set(mod.id, {
           isWorkshop: true,
+          key,
           hasUpdate: updates.has(key),
           version: detail?.version,
           langCode: detail?.langCode,
@@ -531,6 +559,19 @@ export function ModList({ config, onUninstall }) {
         <Text size="small" className={styles.pathLine} title={pathText}>{pathText}</Text>
       </Card>
 
+      {/* 游戏版本提示：hash 与官方最新版不一致时显示，仅提示、不提供任何下载入口 */}
+      {versionMismatch && (
+        <Card className={styles.versionBanner}>
+          <div className={styles.toolbarRow}>
+            <Warning24Regular style={{ color: tokens.colorStatusWarningForeground1, flexShrink: 0 }} />
+            <Text size="small" weight="semibold" style={{ color: tokens.colorStatusWarningForeground1 }}>
+              {t('mods.gameVersionMismatch')}
+            </Text>
+          </div>
+          <Text size="small" className={styles.muted}>{t('mods.gameVersionHint')}</Text>
+        </Card>
+      )}
+
       <div className={styles.listPanel}>
         {filteredMods.length === 0 ? renderEmptyState() : filteredMods.map(mod => (
           <div key={mod.id} className={styles.row}>
@@ -560,7 +601,7 @@ export function ModList({ config, onUninstall }) {
                     icon={<Delete24Regular />}
                     appearance="subtle"
                     className={styles.toggleButton}
-                    onClick={() => onUninstall?.(mod)}
+                    onClick={() => onUninstall?.({ ...mod, modKey: workshopInfo.get(mod.id)?.key ?? mod.name })}
                   />
                 </Tooltip>
               )}

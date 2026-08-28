@@ -206,9 +206,9 @@ async function listFiles(dir) {
       entries.filter(e => !e.name?.startsWith('.') && !isIgnoredListingName(e.name))
         .map(async (e) => {
           const name = e.name
-          // 检测 [ban] 禁用标记：xxx[ban]json 或 xxx[ban]dll
-          const lower = name.toLowerCase()
-          const isBanned = lower.endsWith('[ban]json') || lower.endsWith('[ban]dll')
+          // 检测 [ban] 禁用标记（任意扩展名：xxx[ban]json / xxx[ban]dll / xxx[ban]code），
+          // 与 Rust toggle_mod_enabled 的改名规则保持一致
+          const isBanned = /\[ban\][a-z0-9]+$/.test(name.toLowerCase())
           // readDir 对符号链接 / 目录交接点(junction) 的 isDirectory 不可靠（常同时报
           // isDirectory:false 与 isSymlink:false），导致文件夹被误判为文件 → 渲染成
           // FileCard，点它的“打开所在目录”图标会误打开上层父目录。先以 readDir 的 flag
@@ -274,11 +274,19 @@ function getExt(name) {
 }
 
 // 归一化名称用于解析创意工坊 mod_key：去扩展名、去 [ban] 禁用标记。
-// 禁用是重命名为 xxx[ban]dll/json（[ban] 后直接跟无点号的扩展名），必须连同其后缀
-// 一起去掉，否则 foo[ban]json 会归一化成 foojson 而失配。即：改名不影响来源识别，
-// 来源仍以 installed_workshop_mods（SQLite）里的 mod_key 为准。
+// 禁用是重命名为 xxx[ban]<ext>（任意扩展名，点号被 [ban] 替代，与 Rust 端
+// toggle_target_name 规则一致），必须连同其后缀一起去掉，否则 foo[ban]json
+// 会归一化成 foojson 而失配。即：改名不影响来源识别，来源仍以
+// installed_workshop_mods（SQLite）里的 mod_key 为准。
 function getWorkshopKey(name) {
-  return name.replace(/\.\w+$/, '').replace(/\[ban\][^./]*$/i, '').replace(/\/$/, '')
+  // 只剥已知扩展名 —— mod_key 本身可含点号（如 "Manaka's Challenge v0.2"），
+  // 通用 /\.\w+$/ 会把 v0.2 的 .2 当扩展名误剥，退订时查不到安装记录。
+  // [ban] 标记不限扩展名（.code 任务脚本同样可禁用）；文件名与 manifest 首段
+  // 两侧必须用同一套归一化，禁用改名后文件才能继续归属同一 mod 分组。
+  return name
+    .replace(/\.(?:dll|json|code|zip|rar|7z)$/i, '')
+    .replace(/\[ban\][a-z0-9]+$/i, '')
+    .replace(/\/$/, '')
 }
 
 // 由 MissionFolder 的 subfolder 推断 mod 类别，供后端预检使用
@@ -321,7 +329,7 @@ function ModCardActions({ modKey, hasUpdate, onViewDetail, onUpdate, onUninstall
       )}
       {onUninstall && (
         <Tooltip content={t('mods.uninstall')} relationship="label">
-          <Button size="small" icon={<Delete24Regular />} appearance="subtle" onClick={(e) => { e.stopPropagation(); onUninstall({ name: modKey }) }} />
+          <Button size="small" icon={<Delete24Regular />} appearance="subtle" onClick={(e) => { e.stopPropagation(); onUninstall({ name: modKey, modKey }) }} />
         </Tooltip>
       )}
     </div>
@@ -610,11 +618,9 @@ export function MissionFolder({ config, subfolder, onUninstall, focusModKey }) {
       if (!d.manifest) continue
       try {
         const paths = JSON.parse(d.manifest)
-        // manifest 首段可能带扩展名（如旧安装记录的 "xxx.zip"），一并归一化后再比
-        if (paths.some(p => {
-          const seg = String(p).split('/')[0].replace(/\.\w+$/, '').replace(/\/$/, '')
-          return seg === key
-        })) return mk
+        // manifest 首段与成员文件名用同一套归一化（getWorkshopKey）：旧记录首段
+        // "xxx.zip"、v2 任务脚本 "actions.code" 去扩展名后才能与文件名对上
+        if (paths.some(p => getWorkshopKey(String(p).split('/')[0]) === key)) return mk
       } catch { /* 忽略损坏的 manifest */ }
     }
     return null

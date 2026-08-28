@@ -396,7 +396,9 @@ function App() {
     if (!uninstallTarget) return
     setUninstalling(true)
     try {
-      await uninstallMod({ modKey: uninstallTarget.name.replace(/\.\w+$/, '').replace(/\/$/, '') })
+      // modKey 由卡片侧（ModCardActions）解析后透传，勿再用 name 做去扩展名等
+      // 字符串加工 —— mod_key 本身可含点号（如 "Manaka's Challenge v0.2"）
+      await uninstallMod({ modKey: uninstallTarget.modKey || uninstallTarget.name.replace(/\/$/, '') })
       setUninstallTarget(null)
       setModListKey(k => k + 1)
     } catch (e) {

@@ -659,6 +659,62 @@ async fn download_and_extract_7z(
     Ok(())
 }
 
+// 通用禁用/启用改名规则：{stem}.{ext} ⇄ {stem}[ban]{ext}（[ban] 直接替代原扩展名的
+// 点号，游戏按扩展名扫描时即不再识别该文件）。不限 dll/json —— v2 任务脚本 (.code)
+// 等任意带扩展名的文件都需要可禁用。返回 (新文件名, 改名后是否为禁用名)。
+fn toggle_target_name(file_name: &str) -> Option<(String, bool)> {
+    let lower = file_name.to_lowercase();
+    // 已禁用：末尾为 [ban]<ext>（ext 非空、纯字母数字且不含点）
+    if let Some(pos) = lower.rfind("[ban]") {
+        let ext = &lower[pos + 5..];
+        if !ext.is_empty()
+            && !ext.contains('.')
+            && ext.bytes().all(|b| b.is_ascii_alphanumeric())
+        {
+            // to_lowercase 对个别非 ASCII 字符可能改变字节长度，get 保证下标落在字符边界
+            let stem = file_name.get(..pos)?;
+            return Some((format!("{}.{}", stem, ext), false));
+        }
+    }
+    // 未禁用：取最后一个点号后的扩展名挂上 [ban] 标记
+    // （rfind 用 lower 而非 file_name：to_lowercase 极少数情况下会改变字节长度，
+    //   统一在 lower 上取下标，stem 再用 get 安全切原串）
+    let dot = lower.rfind('.')?;
+    if dot == 0 {
+        return None; // 点开头的隐藏文件没有可挂标记的扩展名
+    }
+    let ext = &lower[dot + 1..];
+    if ext.is_empty() || !ext.bytes().all(|b| b.is_ascii_alphanumeric()) {
+        return None;
+    }
+    let stem = file_name.get(..dot)?;
+    Some((format!("{}[ban]{}", stem, ext), true))
+}
+
+#[cfg(test)]
+mod toggle_target_name_tests {
+    use super::toggle_target_name;
+
+    #[test]
+    fn ban_restore_roundtrip() {
+        // v2 任务脚本 .code（本次修复的目标场景）
+        assert_eq!(toggle_target_name("actions.code"), Some(("actions[ban]code".into(), true)));
+        assert_eq!(toggle_target_name("actions[ban]code"), Some(("actions.code".into(), false)));
+        // 原有 dll/json 行为不变
+        assert_eq!(toggle_target_name("Foo.dll"), Some(("Foo[ban]dll".into(), true)));
+        assert_eq!(toggle_target_name("Foo[ban]json"), Some(("Foo.json".into(), false)));
+        // 多段点号的 stem 保留完整
+        assert_eq!(toggle_target_name("my.mod.code"), Some(("my.mod[ban]code".into(), true)));
+        assert_eq!(toggle_target_name("my.mod[ban]code"), Some(("my.mod.code".into(), false)));
+        // 大写扩展名统一转小写
+        assert_eq!(toggle_target_name("README.CODE"), Some(("README[ban]code".into(), true)));
+        // 无扩展名 / 点开头的隐藏文件不可禁用
+        assert_eq!(toggle_target_name("LICENSE"), None);
+        assert_eq!(toggle_target_name(".gitkeep"), None);
+        assert_eq!(toggle_target_name("readme"), None);
+    }
+}
+
 #[tauri::command]
 fn toggle_mod_enabled(path: String) -> Result<(bool, String), String> {
     let path = PathBuf::from(&path);
@@ -676,33 +732,8 @@ fn toggle_mod_enabled(path: String) -> Result<(bool, String), String> {
         .ok_or("无法获取父目录")?
         .to_path_buf();
 
-    let (new_name, is_banned) = if file_name.to_lowercase().ends_with("[ban]dll") {
-        let lower = file_name.to_lowercase();
-        let stem_len = lower.trim_end_matches("[ban]dll").len();
-        let stem = &file_name[..stem_len];
-        let new_name = format!("{}.dll", stem);
-        (new_name, false)
-    } else if file_name.to_lowercase().ends_with(".dll") {
-        let lower = file_name.to_lowercase();
-        let stem_len = lower.trim_end_matches(".dll").len();
-        let stem = &file_name[..stem_len];
-        let new_name = format!("{}[ban]dll", stem);
-        (new_name, true)
-    } else if file_name.to_lowercase().ends_with("[ban]json") {
-        let lower = file_name.to_lowercase();
-        let stem_len = lower.trim_end_matches("[ban]json").len();
-        let stem = &file_name[..stem_len];
-        let new_name = format!("{}.json", stem);
-        (new_name, false)
-    } else if file_name.to_lowercase().ends_with(".json") {
-        let lower = file_name.to_lowercase();
-        let stem_len = lower.trim_end_matches(".json").len();
-        let stem = &file_name[..stem_len];
-        let new_name = format!("{}[ban]json", stem);
-        (new_name, true)
-    } else {
-        return Err("无法识别的文件格式".into());
-    };
+    let (new_name, is_banned) = toggle_target_name(&file_name)
+        .ok_or("无法识别的文件格式")?;
 
     let new_path = parent.join(&new_name);
     fs::rename(&path, &new_path).map_err(|e| format!("重命名失败: {}", e))?;
@@ -730,35 +761,16 @@ fn batch_toggle_mod_enabled(dir: String, ban: bool) -> Result<(usize, usize), St
             Some(n) => n.to_string_lossy().into_owned(),
             None => continue,
         };
-        let lower = file_name.to_lowercase();
-
-        let (new_name, should_rename) = if ban {
-            if lower.ends_with(".dll") && !lower.ends_with("[ban]dll") {
-                let stem = &file_name[..file_name.len() - 4];
-                (format!("{}[ban]dll", stem), true)
-            } else if lower.ends_with(".json") && !lower.ends_with("[ban]json") {
-                let stem = &file_name[..file_name.len() - 5];
-                (format!("{}[ban]json", stem), true)
-            } else {
-                (file_name.clone(), false)
-            }
-        } else {
-            if lower.ends_with("[ban]dll") {
-                let stem = &file_name[..file_name.len() - 8];
-                (format!("{}.dll", stem), true)
-            } else if lower.ends_with("[ban]json") {
-                let stem = &file_name[..file_name.len() - 9];
-                (format!("{}.json", stem), true)
-            } else {
-                (file_name.clone(), false)
-            }
-        };
-
-        if should_rename {
-            let new_path = dir.join(&new_name);
-            match fs::rename(&path, &new_path) {
-                Ok(_) => success += 1,
-                Err(_) => failed += 1,
+        // 通用规则（同 toggle_mod_enabled / toggle_target_name）：
+        // 禁用只处理未禁用的文件，启用只处理已禁用的，
+        // 其余（已处于目标状态、无扩展名等无法识别的文件）原样跳过
+        if let Some((new_name, is_banned)) = toggle_target_name(&file_name) {
+            if is_banned == ban {
+                let new_path = dir.join(&new_name);
+                match fs::rename(&path, &new_path) {
+                    Ok(_) => success += 1,
+                    Err(_) => failed += 1,
+                }
             }
         }
     }
@@ -801,6 +813,32 @@ async fn http_request(url: String, method: String, body: Option<String>) -> Resu
     // 返回 JSON 字符串
     let result = format!("{{\"status\":{},\"body\":{}}}", status, serde_json::to_string(&body_text).map_err(|e| e.to_string())?);
     Ok(result)
+}
+
+/// 官方最新版（v1.1.3）游戏主程序的 SHA-256，本地游戏版本校验基准。
+const OFFICIAL_GAME_EXE_SHA256: &str = "01d0b5f4b7a727432b23fd556753ecf543bd612698dd7a1cdd5687875b4de300";
+/// 游戏主程序文件名（版本校验对象）。
+const GAME_EXE_NAME: &str = "SecretFlasherManaka.exe";
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GameVersionCheckResult {
+    /// 游戏目录下是否存在主程序
+    exe_exists: bool,
+    /// 主程序 hash 是否与官方最新版一致
+    hash_matches: bool,
+}
+
+/// 校验所选游戏目录的主程序 SHA-256 是否与官方最新版（v1.1.3）一致。
+/// 主程序缺失时返回 exe_exists=false（不视为错误，前端据此跳过版本提示）。
+#[tauri::command]
+fn check_game_version(game_path: String) -> Result<GameVersionCheckResult, String> {
+    let exe_path = PathBuf::from(game_path).join(GAME_EXE_NAME);
+    if !exe_path.is_file() {
+        return Ok(GameVersionCheckResult { exe_exists: false, hash_matches: false });
+    }
+    let hash = sha256_hex_file(&exe_path)?;
+    Ok(GameVersionCheckResult { exe_exists: true, hash_matches: hash == OFFICIAL_GAME_EXE_SHA256 })
 }
 
 #[tauri::command]
@@ -1501,7 +1539,7 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_http::init())
         .invoke_handler(tauri::generate_handler![
-            open_folder, launch_game, scan_mods, toggle_mod_enabled, batch_toggle_mod_enabled, http_request, download_and_extract_7z,
+            open_folder, launch_game, scan_mods, check_game_version, toggle_mod_enabled, batch_toggle_mod_enabled, http_request, download_and_extract_7z,
             list_save_files, backup_save_file, restore_save_file, rename_save_file, get_save_dir,
             db::db_login, db::db_register, db::db_update_profile,
             db::db_list_mods, db::db_list_my_mods, db::db_list_liked_mods, db::db_list_rated_mods,
