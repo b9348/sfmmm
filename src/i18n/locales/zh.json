@@ -152,6 +152,7 @@
     "updateNoFile": "未找到可更新的文件",
     "updateFailed": "更新失败：{{msg}}",
     "groupCount": "共 {{count}} 项",
+    "modKeyLabel": "模组标识",
     "cloudflareDownload": "cloudflare 下载点",
     "builtinDownloadPoint": "内置下载点",
     "huggingfaceDownloadPoint": "HuggingFace 备用下载点",

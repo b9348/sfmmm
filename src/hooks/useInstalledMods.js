@@ -8,7 +8,7 @@ import { getDb } from '../services/dbHelper'
  *   installed: Set<string>,
  *   updates: Map<string, string>,
  *   modDetails: Map<string, object>,
- *   cloudInfo: Map<string, { displayName?: string, latestVersion: string, latestFileHash?: string, hasUpdate: boolean }>,
+ *   cloudInfo: Map<string, { displayName?: string, description?: string, latestVersion: string, latestFileHash?: string, hasUpdate: boolean }>,
  *   loading: boolean
  * }}
  */
@@ -60,6 +60,7 @@ export function useInstalledMods() {
               if (u.has_update) updateMap.set(u.mod_key, u.latest_version)
               cloudMap.set(u.mod_key, {
                 displayName: u.display_name || undefined,
+                description: u.description || undefined,
                 latestVersion: u.latest_version || '',
                 latestFileHash: u.latest_file_hash || undefined,
                 ratingAvg: u.rating_avg || 0,

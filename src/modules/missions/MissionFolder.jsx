@@ -181,6 +181,30 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground3,
     marginTop: '2px',
   },
+  // 创意工坊订阅卡片的信息区：显示名+mod_key 合并标题行 / 简介
+  workshopInfo: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '4px',
+    minWidth: '0',
+  },
+  workshopKey: {
+    color: tokens.colorNeutralForeground3,
+    fontSize: tokens.fontSizeXSmall,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  // 简介：最多两行，超出省略（与创意工坊 ModCard 的 description 同款）
+  workshopDescription: {
+    display: '-webkit-box',
+    WebkitLineClamp: 2,
+    WebkitBoxOrient: 'vertical',
+    overflow: 'hidden',
+    color: tokens.colorNeutralForeground2,
+    fontSize: tokens.fontSizeSmall,
+    lineHeight: '1.4',
+  },
   buttonRow: {
     display: 'flex',
     gap: '4px',
@@ -311,6 +335,44 @@ async function openInExplorer(dir, items) {
   }
 }
 
+// 从 mod_key 中剥离末尾版本号，返回 { base, version }
+// mod_key 常把版本号附在末尾（如 "Freer 1.1.4.4"、"Manaka's Challenge v0.2"），
+// 优先用已安装版本（installed_version）精确匹配末尾；匹配不到时正则兜底点分版本号。
+function splitModKeyTitle(modKey, installedVersion) {
+  const k = String(modKey || '').trim()
+  if (!k) return { base: '', version: '' }
+  const v = String(installedVersion || '').trim()
+  if (v && k.endsWith(v)) {
+    const base = k.slice(0, -v.length).replace(/[\s\-_]+$/, '')
+    return { base: base || k, version: v }
+  }
+  const m = k.match(/^(.*?)\s*v?((?:\d+\.)+\d+)\s*$/)
+  if (m) return { base: m[1].trim() || k, version: m[2] }
+  return { base: k, version: '' }
+}
+
+// 创意工坊订阅标题行：有显示名（且与文件名不同）时合并为「显示名 - 基础名 v(版本)」单行，
+// 显示名加粗醒目、其余灰色；无显示名时退回「模组标识: mod_key」。
+function WorkshopTitleLine({ name, modKey, displayName, version }) {
+  const { t } = useTranslation()
+  const styles = useStyles()
+  if (!modKey) return null
+  const showDisplay = displayName && displayName !== name
+  const { base, version: ver } = showDisplay ? splitModKeyTitle(modKey, version) : { base: modKey, version: '' }
+  return (
+    <Text size="xSmall" className={styles.workshopKey} title={modKey}>
+      {showDisplay ? (
+        <>
+          <Text weight="semibold" as="span" style={{ color: tokens.colorNeutralForeground1 }}>{displayName}</Text>
+          {' - '}{base}{ver ? ` v(${ver})` : ''}
+        </>
+      ) : (
+        `${t('mods.modKeyLabel')}: ${modKey}`
+      )}
+    </Text>
+  )
+}
+
 // 创意工坊 mod 的操作按钮组：查看详情 / 更新（仅当有更新）/ 退订，三者并排
 // 单卡片与分组组头共用，替代原来的三点菜单
 function ModCardActions({ modKey, hasUpdate, onViewDetail, onUpdate, onUninstall, pushRight = true }) {
@@ -376,6 +438,15 @@ function FolderCard({ name, fullPath, onNavigate, isWorkshop, workshopDetail, cl
           </Text>
         )}
       </div>
+      {/* 创意工坊订阅卡片：显示名+mod_key 合并标题行，与云端简介 */}
+      {showWorkshopInfo && (
+        <div className={styles.workshopInfo}>
+          <WorkshopTitleLine name={name} modKey={modKey} displayName={cloudInfo?.displayName} version={workshopDetail?.version} />
+          {cloudInfo?.description && (
+            <Text size="small" className={styles.workshopDescription}>{cloudInfo.description}</Text>
+          )}
+        </div>
+      )}
       <div className={styles.buttonRow}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexWrap: 'wrap', marginRight: 'auto' }}>
           {showWorkshopInfo && <Badge appearance="filled" color="success" size="small">{t('mods.workshopBadge')}</Badge>}
@@ -421,6 +492,15 @@ function FileCard({ name, fullPath, isBanned, onToggle, isWorkshop, hasUpdate, w
           <Text size="small" weight="semibold" className={styles.fileName}>{name}</Text>
         </div>
       </div>
+      {/* 创意工坊订阅卡片：显示名+mod_key 合并标题行，与云端简介 */}
+      {showWorkshopInfo && (
+        <div className={styles.workshopInfo}>
+          <WorkshopTitleLine name={name} modKey={modKey} displayName={cloudInfo?.displayName} version={workshopDetail?.version} />
+          {cloudInfo?.description && (
+            <Text size="small" className={styles.workshopDescription}>{cloudInfo.description}</Text>
+          )}
+        </div>
+      )}
       <div className={styles.buttonRow}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexWrap: 'wrap', marginRight: 'auto' }}>
           <Badge appearance="outline" size="small">{ext.toUpperCase()}</Badge>
@@ -468,6 +548,13 @@ function ModGroupCard({ modKey, items, children, workshopDetail, cloudInfo, hasU
         <Tooltip content={modKey} relationship="label">
           <Text size="small" weight="semibold" className={styles.fileName}>{title}</Text>
         </Tooltip>
+      </div>
+      {/* 订阅级信息：mod_key 与云端简介 */}
+      <div className={styles.workshopInfo}>
+        <Text size="xSmall" className={styles.workshopKey}>{t('mods.modKeyLabel')}: {modKey}</Text>
+        {cloudInfo?.description && (
+          <Text size="small" className={styles.workshopDescription}>{cloudInfo.description}</Text>
+        )}
       </div>
       <div className={styles.groupInnerGrid} style={{ gridTemplateColumns: `repeat(${itemsPerRow}, minmax(0, 1fr))` }}>
         {children}

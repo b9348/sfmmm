@@ -152,6 +152,7 @@
     "updateNoFile": "更新可能なファイルがありません",
     "updateFailed": "更新失敗：{{msg}}",
     "groupCount": "全 {{count}} 件",
+    "modKeyLabel": "MODキー",
     "cloudflareDownload": "Cloudflare ダウンロード",
     "builtinDownloadPoint": "内蔵ダウンロードポイント",
     "huggingfaceDownloadPoint": "HuggingFace ミラーダウンロードポイント",

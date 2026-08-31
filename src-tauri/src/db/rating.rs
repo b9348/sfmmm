@@ -130,14 +130,8 @@ pub async fn db_rate_mod(
             return Ok(ApiResponse::err("Mod not found"));
         }
 
-        // 是否首次评分（用于决定是否通知作者）
-        let existing: Option<(u64,)> = conn
-            .exec_first(
-                "SELECT id FROM mod_ratings WHERE mod_id = ? AND user_id = ?",
-                (mod_id, user_id),
-            )
-            .map_err(|e| e.to_string())?;
-
+        // 说明：首次评分时通知作者的逻辑尚未实现；若未来实现，需在此先按
+        // (mod_id, user_id) 查询是否已有记录，以区分首次评分（INSERT）与改评（UPDATE）。
         conn.exec_drop(
             "INSERT INTO mod_ratings (mod_id, user_id, rating) VALUES (?, ?, ?)
              ON DUPLICATE KEY UPDATE rating = VALUES(rating)",

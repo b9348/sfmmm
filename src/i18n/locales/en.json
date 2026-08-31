@@ -152,6 +152,7 @@
     "updateNoFile": "No file available to update",
     "updateFailed": "Update failed: {{msg}}",
     "groupCount": "{{count}} items",
+    "modKeyLabel": "Mod Key",
     "cloudflareDownload": "Cloudflare Download",
     "builtinDownloadPoint": "Built-in Download Point",
     "huggingfaceDownloadPoint": "HuggingFace Mirror Download Point",

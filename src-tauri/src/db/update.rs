@@ -23,7 +23,7 @@ pub async fn db_check_updates(
             if mod_key.is_empty() { continue; }
 
             let row: Option<Row> = conn.exec_first(
-                "SELECT t.version, t.name, f.file_hash, m.rating_avg, m.rating_count
+                "SELECT t.version, t.name, t.description, f.file_hash, m.rating_avg, m.rating_count
                  FROM mods m
                  LEFT JOIN mod_translations t ON t.mod_id = m.id AND t.lang_code = ?
                  LEFT JOIN mod_files f ON f.mod_id = m.id AND f.lang_code = ?
@@ -32,18 +32,19 @@ pub async fn db_check_updates(
                 (lang_code, lang_code, encrypt_det(&mod_key)?),
             ).map_err(|e| e.to_string())?;
 
-            let (latest_ver, display_name, latest_file_hash, rating_avg, rating_count) = match row {
+            let (latest_ver, display_name, description, latest_file_hash, rating_avg, rating_count) = match row {
                 Some(r) => {
                     let vals: Vec<Value> = r.unwrap();
                     (
                         val_to_string(vals[0].clone()),
                         decrypt_str(&val_to_string(vals[1].clone())),
-                        val_to_string(vals[2].clone()),
-                        val_to_f64(&vals[3]),
-                        val_to_i64(&vals[4]),
+                        decrypt_str(&val_to_string(vals[2].clone())),
+                        val_to_string(vals[3].clone()),
+                        val_to_f64(&vals[4]),
+                        val_to_i64(&vals[5]),
                     )
                 }
-                None => (String::new(), String::new(), String::new(), 0.0, 0),
+                None => (String::new(), String::new(), String::new(), String::new(), 0.0, 0),
             };
             let has_update = !latest_ver.is_empty() && semver_cmp(&latest_ver, &installed_ver) > 0;
 
@@ -52,6 +53,7 @@ pub async fn db_check_updates(
                 "installed_version": installed_ver,
                 "latest_version": latest_ver,
                 "display_name": display_name,
+                "description": description,
                 "latest_file_hash": latest_file_hash,
                 "rating_avg": rating_avg,
                 "rating_count": rating_count,
