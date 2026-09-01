@@ -1274,6 +1274,58 @@ fn rename_save_file(app: tauri::AppHandle, name: String, new_name: String) -> Re
     Ok(())
 }
 
+/// 从 config.db 同步读取上次窗口几何并应用（尺寸/位置）。
+/// 仅恢复，不负责 show/maximize——窗口在 tauri.conf.json 中 visible:false，
+/// 由前端 WebView 首帧渲染后调用 show()，消除「默认尺寸白屏 → 跳变上次尺寸」的闪变。
+/// maximize 不能在此调用：Windows 上 SW_MAXIMIZE 会显示隐藏窗口，提前调用会破坏防闪变设计，
+/// 正常路径由前端在 show() 之后执行，兜底路径由调用处的兜底线程处理。
+/// 返回 (是否成功读到配置, 上次是否处于最大化)。
+fn restore_window_geometry(window: &tauri::WebviewWindow, db_path: Option<&std::path::Path>) -> (bool, bool) {
+    let Some(db_path) = db_path else { return (false, false) };
+    if !db_path.exists() {
+        return (false, false);
+    }
+    let Ok(conn) = rusqlite::Connection::open(db_path) else { return (false, false) };
+    let read = |key: &str| -> Option<String> {
+        conn.query_row(
+            "SELECT value FROM config WHERE `key` = ?1",
+            [key],
+            |r| r.get::<_, String>(0),
+        )
+        .ok()
+    };
+    let maximized = read("window_maximized").as_deref() == Some("true");
+    let w: i32 = read("window_width").and_then(|v| v.parse().ok()).unwrap_or(0);
+    let h: i32 = read("window_height").and_then(|v| v.parse().ok()).unwrap_or(0);
+    let x: i32 = read("window_x").and_then(|v| v.parse().ok()).unwrap_or(-32000);
+    let y: i32 = read("window_y").and_then(|v| v.parse().ok()).unwrap_or(-32000);
+
+    if w > 100 && h > 100 {
+        let _ = window.set_size(tauri::PhysicalSize::new(w as u32, h as u32));
+    }
+    // 位置合法性：排除最小化残留值（Windows 约 -32000），且窗口矩形须与任一显示器相交（防离屏）
+    if x > -30000 && y > -30000 {
+        // 尺寸无效（如解析失败默认 0）时用 tauri.conf.json 默认尺寸参与校验，避免退化值导致校验失真
+        let (vw, vh) = if w > 100 && h > 100 { (w, h) } else { (800, 600) };
+        let on_screen = window
+            .available_monitors()
+            .map(|monitors| {
+                monitors.iter().any(|m| {
+                    let mp = m.position();
+                    let ms = m.size();
+                    let (mx, my) = (mp.x, mp.y);
+                    let (mw, mh) = (ms.width as i32, ms.height as i32);
+                    x < mx + mw && x + vw > mx && y < my + mh && y + vh > my
+                })
+            })
+            .unwrap_or(false);
+        if on_screen {
+            let _ = window.set_position(tauri::PhysicalPosition::new(x, y));
+        }
+    }
+    (true, maximized)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // 启动前检测 WebView2 运行时；缺失则弹 Windows 原生 MessageBox
@@ -1610,6 +1662,29 @@ pub fn run() {
 
             // 启动 MySQL 连接池空闲检查器：超过 60 秒无请求则释放连接
             app.state::<db::DbState>().pool.start_idle_checker();
+
+            // 窗口几何恢复（窗口在 tauri.conf.json 中 visible:false）：
+            // 此处先同步应用上次尺寸/位置，WebView 首帧渲染完成后由前端调用 show()，
+            // 用户看到的第一个画面就是最终几何；4 秒兜底强制显示，防前端异常导致窗口不出现
+            if let Some(window) = app.get_webview_window("main") {
+                let db_path = app.path().app_config_dir().ok().map(|d| d.join("config.db"));
+                let (restored, maximized) = restore_window_geometry(&window, db_path.as_deref());
+                if !restored {
+                    log::info!("无可用窗口几何记录，按默认尺寸显示");
+                }
+                let win = window.clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_secs(4));
+                    if !win.is_visible().unwrap_or(true) {
+                        let _ = win.show();
+                        // maximize 必须在 show 之后：SW_MAXIMIZE 会显示隐藏窗口，不能提前调用
+                        if maximized {
+                            let _ = win.maximize();
+                        }
+                        log::warn!("前端未按时显示窗口，已兜底强制显示");
+                    }
+                });
+            }
 
             if cfg!(debug_assertions) {
                 app.handle().plugin(

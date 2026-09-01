@@ -79,10 +79,13 @@ export function usePersistUI() {
     let unlistenResize, unlistenMove
 
     ;(async () => {
+      // 记录上次是否最大化：maximize 需延迟到 show() 之后执行（见下方说明）
+      let wasMaximized = false
       try {
         appWindow.current = getCurrentWindow()
 
         const cfg = await readConfig(['window_x', 'window_y', 'window_width', 'window_height', 'window_maximized'])
+        wasMaximized = cfg.window_maximized === 'true'
         const w = parseInt(cfg.window_width)
         const h = parseInt(cfg.window_height)
         if (w > 100 && h > 100) {
@@ -93,9 +96,6 @@ export function usePersistUI() {
         // Ignore minimized/off-screen coordinates (Windows may report -32000 when minimized)
         if (!isNaN(x) && !isNaN(y) && x > -30000 && y > -30000) {
           await appWindow.current.setPosition(new PhysicalPosition(x, y))
-        }
-        if (cfg.window_maximized === 'true') {
-          await appWindow.current.maximize()
         }
 
         // Debounced save: only write when user stops resizing/moving for 600ms
@@ -128,6 +128,18 @@ export function usePersistUI() {
         unlistenMove = await appWindow.current.onMoved(() => { saveWindowState() })
       } catch (e) {
         console.warn('[usePersistUI] window init error:', e)
+      }
+      // 几何恢复完成、React 已挂载渲染，此时才显示窗口（启动时 visible:false），
+      // 消除「默认尺寸白屏 → 跳变上次尺寸」的闪变；Rust 侧另有 4 秒兜底强制显示
+      try {
+        await appWindow.current?.show()
+        // maximize 必须在 show() 之后：Windows 上 SW_MAXIMIZE 会显示隐藏窗口，
+        // 提前调用会在首帧渲染前露出白屏，破坏防闪变设计
+        if (wasMaximized) {
+          try { await appWindow.current.maximize() } catch (e) { console.warn('[usePersistUI] maximize error:', e) }
+        }
+      } catch (e) {
+        console.warn('[usePersistUI] show error:', e)
       }
       setWindowReady(true)
     })()

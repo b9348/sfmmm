@@ -288,6 +288,11 @@ export function BepInExPrereqBanner({ gamePath, onInstalled, category = 'dll', p
             <Warning24Regular style={{ color: tokens.colorStatusWarningForeground1 }} />
             <Text size="small" className={styles.prereqText} style={{ color: tokens.colorStatusWarningForeground1 }}>
               {t('mods.bepInExVersionMismatch', { current: status.doorstopVersion || '?', recommended: RECOMMENDED_DOORSTOP_VERSION })}
+              {t('mods.bepInExSelfUpdatePrefix')}
+              <a href="https://builds.bepinex.dev/projects/bepinex_be" target="_blank" rel="noopener noreferrer">
+                {t('mods.bepInExSelfUpdateLink')}
+              </a>
+              {t('mods.bepInExSelfUpdateSuffix')}
             </Text>
           </div>
         )}

@@ -166,6 +166,9 @@
     "bepInExManualHintLink": "Click here to visit the author's official site",
     "bepInExManualHint2": ", select \"BepInEx Unity (IL2CPP) for Windows (x64) games\" to download. After downloading, extract the contents directly to the game root directory (the same directory as the BepInEx folder). Do NOT create an extra folder named after the archive.",
     "bepInExVersionMismatch": "BepInEx framework version compatibility issue detected (current {{current}}, recommended {{recommended}}). Switch to the SFMMM recommended framework to avoid mod incompatibility. You can ignore this if everything works fine. The buttons below are different download points for the same stable-compatible BepInEx framework; if you encounter network errors, you can switch to another download source. No need to download all of them — choose any one.",
+    "bepInExSelfUpdatePrefix": " (You can also ",
+    "bepInExSelfUpdateLink": "download BepInEx Unity (IL2CPP) for Windows (x64) games from the author's official site",
+    "bepInExSelfUpdateSuffix": " to update)",
     "reinstallRecommendedBepInEx": "Reinstall recommended framework",
     "gameVersionMismatch": "Game version may not be the official latest",
     "gameVersionHint": "After launching the game, the version is shown at the bottom-right corner. If it is not the official latest v1.1.3, some features may be missing or mods may be incompatible."

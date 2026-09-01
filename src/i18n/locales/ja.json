@@ -166,6 +166,9 @@
     "bepInExManualHintLink": "こちらから作者の公式サイトにアクセス",
     "bepInExManualHint2": "し、「BepInEx Unity (IL2CPP) for Windows (x64) games」を選択してダウンロードしてください。ダウンロード後、アーカイブの中身をゲームのルートディレクトリ（BepInEx フォルダと同じ階層）に直接展開してください。アーカイブ名のフォルダを追加で作成しないでください。",
     "bepInExVersionMismatch": "BepInEx フレームワークのバージョン互換性の問題を検出しました（現在 {{current}}、推奨 {{recommended}}）。mod の非互換を防ぐため、SFMMM 推奨バージョンへの交換をおすすめします。問題がなければ無視して構いません。下のボタンはすべて同じ安定互換版の BepInEx フレームワークの異なるダウンロード元です。ネットワークエラーが発生した場合はダウンロード元のボタンを切り替えてください。すべてをダウンロードする必要はありません。いずれか 1 つを選べば十分です",
+    "bepInExSelfUpdatePrefix": "（公式サイトから",
+    "bepInExSelfUpdateLink": "BepInEx Unity (IL2CPP) for Windows (x64) games をダウンロードして更新することもできます",
+    "bepInExSelfUpdateSuffix": "）",
     "reinstallRecommendedBepInEx": "推奨フレームワークを再インストール",
     "gameVersionMismatch": "ゲームのバージョンが公式最新版ではない可能性があります",
     "gameVersionHint": "ゲーム起動後、画面右下にバージョンが表示されます。公式最新版 v1.1.3 でない場合、機能が不完全になったり mod が非互換になったりする可能性があります。"

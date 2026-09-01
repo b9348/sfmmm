@@ -355,8 +355,8 @@ function App() {
   const [uninstallTarget, setUninstallTarget] = useState(null)
   const [uninstalling, setUninstalling] = useState(false)
   const [modListKey, setModListKey] = useState(0)
-  // 版本更新引导：升级用户首次进入本版本时弹一次「更新说明」；全新安装（走过欢迎屏）不打扰。
-  // 已见版本记录在 SQLite config 表（应用数据目录），不依赖 WebView localStorage，避免缓存/清理导致误判
+  // 漫游引导：看过一次就不再弹（记录在 SQLite config 表，跨版本/跨 WebView 缓存稳定）。
+  // 判断依据是 guideId 是否存在于已看映射，而非版本号相等——按版本比较会导致每次升级都重复弹出
   const [showGuide, setShowGuide] = useState(false)
   const [guideSeenMap, setGuideSeenMap] = useState({})
   const sawWelcomeRef = useRef(false)
@@ -367,8 +367,8 @@ function App() {
     if (state.isFirstRun !== false) return
     // 全新安装（走过欢迎屏）不弹更新说明
     if (sawWelcomeRef.current) return
-    // 该引导未在本版本看过则触发（多引导各自记录已看版本，互不影响）
-    if (guideSeenMap[WORKSHOP_SORT_GUIDE] !== APP_VERSION) setShowGuide(true)
+    // 该引导从未看过才触发（多引导各自记录，互不影响）
+    if (!guideSeenMap[WORKSHOP_SORT_GUIDE]) setShowGuide(true)
   }, [state.isFirstRun, guideSeenMap])
   const handleCloseGuide = () => {
     setShowGuide(false)
