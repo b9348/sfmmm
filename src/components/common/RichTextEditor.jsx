@@ -609,7 +609,7 @@ export function MarkdownContent({ markdown, onImageClick }) {
   )
 }
 
-export function RichTextContent({ html }) {
+export function RichTextContent({ html, onImageClick }) {
   const styles = useContentStyles()
   const ref = useRef(null)
 
@@ -617,10 +617,20 @@ export function RichTextContent({ html }) {
 
   if (!html) return null
 
+  // 事件委托：捕获内容区域内的图片点击，回调图片地址（与 MarkdownContent 同模式）
+  const handleClick = (e) => {
+    if (!onImageClick) return
+    const target = e.target
+    if (target && target.tagName === 'IMG') {
+      onImageClick(target.getAttribute('src') || '')
+    }
+  }
+
   return (
     <div
       ref={ref}
       className={styles.content}
+      onClick={handleClick}
       dangerouslySetInnerHTML={{ __html: html }}
     />
   )

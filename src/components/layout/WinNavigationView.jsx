@@ -151,6 +151,9 @@ export function WinNavigationView({
   // 选中指示条定位
   const itemRefs = useRef({})
   const indicatorRef = useRef(null)
+  // 面板菜单滚动容器：滚动时菜单项相对固定定位的指示条轨道位移，
+  // 必须监听滚动重新测量，否则蓝标与 active 项错位
+  const menuScrollRef = useRef(null)
   const [indicatorTop, setIndicatorTop] = useState(null)
   // 布局过渡（折叠/展开、分组收展）期间蓝标进入跟随模式：
   // 禁用自身过渡，位置由 JS 逐帧跟随目标条目，形成 WinUI 风格的推动感
@@ -260,6 +263,28 @@ export function WinNavigationView({
     ro.observe(shell)
     return () => ro.disconnect()
   }, [gatedUpdate])
+
+  // 菜单滚动时重新测量蓝标位置：菜单是滚动容器，蓝标轨道是面板级固定定位，
+  // 滚动会改变菜单项相对轨道的位置，不重测则蓝标与 active 项错位。
+  // rAF 合并滚动事件，且过渡窗口内跳过（与 gatedUpdate 同规则）
+  useEffect(() => {
+    const menu = menuScrollRef.current
+    if (!menu) return
+    let raf = 0
+    const onScroll = () => {
+      cancelAnimationFrame(raf)
+      raf = requestAnimationFrame(() => {
+        if (performance.now() < transitioningUntilRef.current) return
+        updateIndicator()
+      })
+    }
+    menu.addEventListener('scroll', onScroll, { passive: true })
+    return () => {
+      menu.removeEventListener('scroll', onScroll)
+      cancelAnimationFrame(raf)
+    }
+    // paneOpen/isLeftMinimal 变化会令菜单条件渲染重挂载，需重新绑定监听
+  }, [updateIndicator, paneOpen, isLeftMinimal])
 
   // 分组高度动画由 CSS grid-template-rows 0fr/1fr 过渡实现，无需 JS 测量
   const handleItemClick = (item) => {
@@ -444,7 +469,7 @@ export function WinNavigationView({
                 />
               </div>
               {paneHeader && <div className="winnv-pane-header">{paneHeader}</div>}
-              <div className="winnv-menu">
+              <div className="winnv-menu" ref={menuScrollRef}>
                 {normalizedMenu.map((item) => renderMenuItem(item))}
               </div>
               <div className="winnv-footer">

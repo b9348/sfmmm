@@ -17,6 +17,7 @@ import {
 import { installMod, uninstallMod } from '../../services/installMod'
 import { listen } from '@tauri-apps/api/event'
 import { RichTextContent, MarkdownContent } from '../../components/common/RichTextEditor'
+import { Lightbox } from '../../components/common/Lightbox'
 import { invoke } from '@tauri-apps/api/core'
 import { useAuth } from '../../contexts/useAuth'
 import { submitApplication, likeMod, unlikeMod, getDeviceId, rateMod, unrateMod, addComment, getComments, getCommentReplies, deleteComment, editComment, locateModComment } from '../../services/workshopApi'
@@ -144,6 +145,8 @@ export default function ModDetailPage({ mod, onBack, onEdit, scrollToCommentId }
   const [likeCount, setLikeCount] = useState(mod.like_count || 0)
   const [isLiked, setIsLiked] = useState(!!mod.is_liked)
   const [likeBusy, setLikeBusy] = useState(false)
+  // 灯箱预览：点击「详细说明」内嵌图片查看大图（与讨论区/评论区同模式）
+  const [lightboxSrc, setLightboxSrc] = useState(null)
   const [ratingAvg, setRatingAvg] = useState(mod.rating_avg || 0)
   const [ratingCount, setRatingCount] = useState(mod.rating_count || 0)
   const [myRating, setMyRating] = useState(mod.my_rating || 0)
@@ -617,15 +620,15 @@ export default function ModDetailPage({ mod, onBack, onEdit, scrollToCommentId }
                     {trans.name && <Text size="small" weight="semibold">{trans.name}</Text>}
                   </div>
                   {(trans.instructions_format || 'markdown') === 'richtext'
-                    ? <RichTextContent html={trans.instructions} />
-                    : <MarkdownContent markdown={trans.instructions} />}
+                    ? <RichTextContent html={trans.instructions} onImageClick={setLightboxSrc} />
+                    : <MarkdownContent markdown={trans.instructions} onImageClick={setLightboxSrc} />}
                 </div>
               )
             }) : (
               <>
                 {(mod.instructions_format || 'markdown') === 'richtext'
-                  ? <RichTextContent html={mod.instructions} />
-                  : <MarkdownContent markdown={mod.instructions} />}
+                  ? <RichTextContent html={mod.instructions} onImageClick={setLightboxSrc} />
+                  : <MarkdownContent markdown={mod.instructions} onImageClick={setLightboxSrc} />}
               </>
             )}
           </div>
@@ -782,6 +785,9 @@ export default function ModDetailPage({ mod, onBack, onEdit, scrollToCommentId }
           scrollToCommentId={scrollToCommentId}
         />
       </div>
+
+      {/* 图片灯箱预览（与讨论区/评论区同模式） */}
+      <Lightbox src={lightboxSrc} onClose={() => setLightboxSrc(null)} />
 
       <Dialog open={applyOpen} onOpenChange={(_, { open }) => !open && setApplyOpen(false)}>
         <DialogSurface>

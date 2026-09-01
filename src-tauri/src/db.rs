@@ -54,6 +54,14 @@ const IO_TIMEOUT_SECS: u64 = 15;
 // 后续查询拿新池新连接，互不卡死；旧任务由 IO 超时兜底自行结束。
 // 需大于最坏合法路径（握手 10s + ping 探活/重试两轮 IO 15s×2 = 40s），取 45s
 const CALL_SOFT_TIMEOUT_SECS: u64 = 45;
+// 僵尸连接清理：服务器 wait_timeout=8h（SQLPub 不可调），手机切网/杀进程留下的
+// 半开死连接会一直占用账号并发名额，撞满上限后所有用户都连不上。
+// 本 app 设计 60s 即回收闲置连接，服务器端 Sleep 超过该阈值必为半开残留；
+// 同账号 KILL 其他连接无需 SUPER 权限（已实测验证），活跃 app 被误杀也能经
+// ping 探活失败 → 丢池重连自愈，无感知。
+const ZOMBIE_IDLE_SECS: u64 = 120;
+// 两次僵尸清理的最小间隔，避免连接风暴下反复 KILL
+const CLEANUP_COOLDOWN_SECS: i64 = 60;
 
 pub(crate) fn semver_cmp(a: &str, b: &str) -> i32 {
     let parse = |s: &str| -> Vec<u32> {
@@ -90,6 +98,11 @@ struct ManagedPoolInner {
     db_url: String,
     last_activity: AtomicI64,
     checker_started: AtomicBool,
+    /// 最近是否出现过连接失败（get_conn 失败/ping 探活失败/软超时）。
+    /// 置位后下一次成功建连时顺手清理服务器端僵尸连接（带冷却）。
+    recent_failure: AtomicBool,
+    /// 上次僵尸清理时间戳（秒），用于冷却
+    last_cleanup: AtomicI64,
     /// 查询串行锁：单连接（DB_POOL_MAX=1）下，所有 db_* 调用通过此锁排队，
     /// 排队在 async 层发生，不占用 tokio blocking 线程，也不被 mysql crate 内部
     /// 不可观测的 wait queue 阻塞。拿到锁后才 spawn_blocking 执行 get_conn + 查询。
@@ -137,6 +150,55 @@ impl ManagedPoolInner {
         );
         Ok(pool)
     }
+
+    /// 清理本账号下闲置超过 ZOMBIE_IDLE_SECS 的服务器端连接（半开僵尸）。
+    /// 非特权用户在 PROCESSLIST 中只能看到自己的连接，KILL 同账号连接无需 SUPER。
+    /// 返回 KILL 掉的连接数；清理失败静默忽略（不影响本次查询）。
+    fn kill_zombie_conns(conn: &mut PooledConn) -> usize {
+        // query_first 返回 Option<T>（首行首列），无行时视为清理失败静默跳过
+        let my_id: u64 = match conn.query_first("SELECT CONNECTION_ID()") {
+            Ok(Some(v)) => v,
+            _ => return 0,
+        };
+        let rows: Vec<(u64, String, u64)> = match conn.query(
+            "SELECT id, command, COALESCE(time, 0) FROM information_schema.PROCESSLIST",
+        ) {
+            Ok(v) => v,
+            Err(_) => return 0,
+        };
+        let mut killed = 0;
+        for (id, command, time) in rows {
+            if id != my_id && command == "Sleep" && time > ZOMBIE_IDLE_SECS {
+                // id 来自 PROCESSLIST 整型列，无注入风险；KILL 不支持占位参数，只能拼接
+                if conn.query_drop(format!("KILL {}", id)).is_ok() {
+                    killed += 1;
+                }
+            }
+        }
+        if killed > 0 {
+            println!(
+                "[ManagedPool] 已清理 {} 个僵尸连接（服务器端闲置 > {}s）",
+                killed, ZOMBIE_IDLE_SECS
+            );
+        }
+        killed
+    }
+
+    /// 最近出现过连接失败时，在成功建连的连接上顺手清理僵尸连接（冷却期内跳过）
+    fn maybe_cleanup_zombies(&self, conn: &mut PooledConn) {
+        if !self.recent_failure.swap(false, Ordering::Relaxed) {
+            return;
+        }
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i64;
+        if now - self.last_cleanup.load(Ordering::Relaxed) < CLEANUP_COOLDOWN_SECS {
+            return;
+        }
+        self.last_cleanup.store(now, Ordering::Relaxed);
+        Self::kill_zombie_conns(conn);
+    }
 }
 
 impl ManagedPool {
@@ -147,6 +209,8 @@ impl ManagedPool {
                 db_url,
                 last_activity: AtomicI64::new(0),
                 checker_started: AtomicBool::new(false),
+                recent_failure: AtomicBool::new(false),
+                last_cleanup: AtomicI64::new(0),
                 serial: AsyncMutex::new(()),
             }),
         }
@@ -186,14 +250,30 @@ impl ManagedPool {
     pub fn get_conn(&self) -> Result<PooledConn, String> {
         let inner = &*self.inner;
         let pool = inner.current_pool()?;
-        let mut conn = pool.get_conn().map_err(|e| e.to_string())?;
+        let mut conn = match pool.get_conn() {
+            Ok(c) => c,
+            Err(e) => {
+                inner.recent_failure.store(true, Ordering::Relaxed);
+                inner.reset_pool("get_conn failed");
+                let pool = inner.current_pool()?;
+                match pool.get_conn() {
+                    Ok(c) => c,
+                    // 重建后的错误更能反映服务器当前状态（如 too many connections），拼接保留
+                    Err(e2) => return Err(format!("{e}; 重建连接失败: {e2}")),
+                }
+            }
+        };
         if conn.as_mut().ping().is_ok() {
+            inner.maybe_cleanup_zombies(&mut conn);
             return Ok(conn);
         }
         drop(conn);
+        inner.recent_failure.store(true, Ordering::Relaxed);
         inner.reset_pool("stale connection (ping failed)");
         let pool = inner.current_pool()?;
-        pool.get_conn().map_err(|e| e.to_string())
+        let mut conn = pool.get_conn().map_err(|e| e.to_string())?;
+        inner.maybe_cleanup_zombies(&mut conn);
+        Ok(conn)
     }
 }
 
@@ -233,6 +313,7 @@ where
     match tokio::time::timeout(Duration::from_secs(CALL_SOFT_TIMEOUT_SECS), fut).await {
         Ok(r) => r,
         Err(_) => {
+            pool.inner.recent_failure.store(true, Ordering::Relaxed);
             pool.inner.reset_pool("call soft timeout");
             Err(format!(
                 "数据库请求超时（超过 {} 秒），连接已重置，请稍后重试",
