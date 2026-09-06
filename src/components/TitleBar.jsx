@@ -50,9 +50,10 @@ const useStyles = makeStyles({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: 'transparent',
+    color: tokens.colorNeutralForeground1,
     border: 'none',
     cursor: 'pointer',
-    transition: 'background-color 0.1s ease',
+    transition: 'background-color 0.1s ease, color 0.1s ease',
     '&:hover': {
       backgroundColor: tokens.colorNeutralBackground1Hover,
     },
@@ -67,9 +68,10 @@ const useStyles = makeStyles({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: 'transparent',
+    color: tokens.colorNeutralForeground1,
     border: 'none',
     cursor: 'pointer',
-    transition: 'background-color 0.1s ease',
+    transition: 'background-color 0.1s ease, color 0.1s ease',
     '&:hover': {
       backgroundColor: '#e81123',
       color: '#ffffff',
