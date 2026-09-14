@@ -231,7 +231,7 @@
     "checking": "检查中...",
     "checkUpdateBtn": "检测更新",
     "ghDownloadUpdate": "GitHub 下载源",
- "quarkDownload": "打开夸克网盘",
+    "quarkDownload": "打开夸克网盘",
     "ghNotReady": "GitHub 源尚未发布 v{{version}}，请稍后重试",
     "ghNoAsset": "GitHub 源未找到安装包资产",
     "downloadUpdate": "默认下载源",
@@ -607,5 +607,11 @@
     "likeFailed": "点赞失败：",
     "loginRequired": "请先登录",
     "postDeleted": "该讨论已删除"
+  },
+  "errors": {
+    "tooManyConnections": "服务器连接数已满，请稍后重试",
+    "serverBusy": "服务器繁忙，请刷新重试",
+    "queryTimeout": "数据库响应超时，请刷新重试",
+    "network": "网络异常，请检查网络后重试"
   }
 }

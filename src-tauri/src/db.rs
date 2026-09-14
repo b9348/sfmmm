@@ -46,14 +46,32 @@ const DB_POOL_MAX: usize = 1;
 const IDLE_TIMEOUT_SECS: i64 = 60;
 const IDLE_CHECK_INTERVAL_SECS: u64 = 10;
 // 连接/读写超时：TCP+MySQL 握手慢归 CONNECT_TIMEOUT 管；查一页数据正常 <1s，
-// read/write 15s 只为兜底偶发慢查询与半开（黑洞）连接，不再给病态场景留 60s 余量
-const CONNECT_TIMEOUT_SECS: u64 = 10;
-const IO_TIMEOUT_SECS: u64 = 15;
-// 单次 db_* 调用总软超时（含串行锁排队时间）。超时后丢弃整个连接池强制重建：
-// 旧 spawn_blocking 任务不可取消、仍占着旧连接，但旧连接随旧池作废，
-// 后续查询拿新池新连接，互不卡死；旧任务由 IO 超时兜底自行结束。
-// 需大于最坏合法路径（握手 10s + ping 探活/重试两轮 IO 15s×2 = 40s），取 45s
-const CALL_SOFT_TIMEOUT_SECS: u64 = 45;
+// read/write 5s 只为兜底偶发慢查询与半开（黑洞）连接。
+// 免费库国内时延通常 <50ms，正常查询数百 ms 内完成；5s 已远超合法慢查询，
+// 再长只会让「半开连接」白等更久（用户看到的就是转圈）
+const CONNECT_TIMEOUT_SECS: u64 = 5;
+const IO_TIMEOUT_SECS: u64 = 5;
+// 单次 db_* 调用「执行段」软超时（不含排队等待，排队时长由 QUEUE_WAIT_TIMEOUT_SECS 单独管）。
+// 超时后丢弃整个连接池强制重建：旧 spawn_blocking 任务不可取消、仍占着旧连接，
+// 但旧连接随旧池作废，后续查询拿新池新连接，互不卡死；旧任务由 IO 超时兜底自行结束。
+// 预算：最坏合法路径 = 握手 5s + 探活 ping 5s + 重建握手 5s + 重试 ping/查询 5s ≈ 20s，
+// 取 25s 留安全余量（原 45s 过宽，等于把用户按在转圈界面白等）
+const CALL_SOFT_TIMEOUT_SECS: u64 = 25;
+// 串行排队（等锁）独立超时：单连接下所有 db_* 查询排队串行执行，
+// 若前面已有一个卡住的查询，后面排队的请求不应陪着一起等满 CALL_SOFT_TIMEOUT。
+// 排队超时直接快速失败，让前端立刻提示「服务器繁忙，请刷新重试」。
+//
+// 取值依据（勿随意调小）：首屏会并发发出约 3 个查询——BrowseMods 的 listMods、
+// 预加载下一个 tab 的讨论列表、TabNavigation 的未读数——它们在单连接上串行排队。
+// 正常每个数百 ms，但慢网络下（国内到 SQLPub 单次往返数百 ms）3 个串行可能吃掉 2-3s。
+// 本值必须大于「首屏正常并发查询数 × 单查询最坏正常耗时」，
+// 否则会把正常负载误判为繁忙、首屏直接报错。取 10s 给慢网络留足余量：
+// 超过 10s 仍未拿到锁，才说明前序请求确实卡住了，此时快速失败优于白等。
+const QUEUE_WAIT_TIMEOUT_SECS: u64 = 10;
+// get_conn 内部「从池里取连接」的等待上限。池满（max=1 且连接被占）时不应无限阻塞：
+// mysql crate 的 Pool::get_conn() 是 timeout=None 的 condvar.wait（永久阻塞），
+// 必须改用 try_get_conn(Duration) 才能保证有界。
+const POOL_ACQUIRE_TIMEOUT_SECS: u64 = 5;
 // 僵尸连接清理：服务器 wait_timeout=8h（SQLPub 不可调），手机切网/杀进程留下的
 // 半开死连接会一直占用账号并发名额，撞满上限后所有用户都连不上。
 // 本 app 设计 60s 即回收闲置连接，服务器端 Sleep 超过该阈值必为半开残留；
@@ -62,6 +80,53 @@ const CALL_SOFT_TIMEOUT_SECS: u64 = 45;
 const ZOMBIE_IDLE_SECS: u64 = 120;
 // 两次僵尸清理的最小间隔，避免连接风暴下反复 KILL
 const CLEANUP_COOLDOWN_SECS: i64 = 60;
+
+/// 数据库调用失败的可判别类别，前端据此展示差异化提示。
+/// 以固定前缀编码进错误字符串（`[DBERR:<code>] <人类可读信息>`），
+/// 前端 `parseDbError` 解析前缀得到 code，避免依赖中英文案匹配。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DbErrorKind {
+    /// 服务器连接数已达上限（MySQL 1040 ER_CON_COUNT_ERROR）
+    TooManyConnections,
+    /// 排队等待超时：前序查询卡住，本请求未能及时拿到执行权
+    QueueTimeout,
+    /// 执行段超时：已拿到执行权但查询/建连超过软超时
+    QueryTimeout,
+    /// 连接被占满且等待取连接超时（池内单连接被占用过久）
+    PoolBusy,
+    /// 其余网络/协议类失败
+    Network,
+}
+
+impl DbErrorKind {
+    pub(crate) fn code(self) -> &'static str {
+        match self {
+            DbErrorKind::TooManyConnections => "TOO_MANY_CONNECTIONS",
+            DbErrorKind::QueueTimeout => "QUEUE_TIMEOUT",
+            DbErrorKind::QueryTimeout => "QUERY_TIMEOUT",
+            DbErrorKind::PoolBusy => "POOL_BUSY",
+            DbErrorKind::Network => "NETWORK",
+        }
+    }
+}
+
+/// 按 `[DBERR:<code>]` 前缀包装错误信息
+pub(crate) fn db_err(kind: DbErrorKind, msg: impl std::fmt::Display) -> String {
+    format!("[DBERR:{}] {}", kind.code(), msg)
+}
+
+/// 从 mysql crate 错误对象判定类别（可读到结构化 code 时更准确）
+fn classify_mysql_error(e: &mysql::Error) -> DbErrorKind {
+    if let mysql::Error::MySqlError(me) = e {
+        if me.code == 1040 {
+            return DbErrorKind::TooManyConnections;
+        }
+    }
+    match e {
+        mysql::Error::DriverError(mysql::DriverError::Timeout) => DbErrorKind::PoolBusy,
+        _ => DbErrorKind::Network,
+    }
+}
 
 pub(crate) fn semver_cmp(a: &str, b: &str) -> i32 {
     let parse = |s: &str| -> Vec<u32> {
@@ -127,7 +192,9 @@ impl ManagedPoolInner {
     fn current_pool(&self) -> Result<Pool, String> {
         let mut guard = self.pool.lock().unwrap_or_else(|e| e.into_inner());
         if guard.is_none() {
-            let opts = Opts::from_url(&self.db_url).map_err(|e| e.to_string())?;
+            let opts = Opts::from_url(&self.db_url).map_err(|e| {
+                db_err(DbErrorKind::Network, format!("数据库连接串无效: {e}"))
+            })?;
             let pool_opts = opts
                 .get_pool_opts()
                 .clone()
@@ -138,7 +205,9 @@ impl ManagedPoolInner {
                 .read_timeout(Some(Duration::from_secs(IO_TIMEOUT_SECS)))
                 .write_timeout(Some(Duration::from_secs(IO_TIMEOUT_SECS)))
                 .into();
-            *guard = Some(Pool::new(opts).map_err(|e| e.to_string())?);
+            *guard = Some(Pool::new(opts).map_err(|e| {
+                db_err(DbErrorKind::Network, format!("创建连接池失败: {e}"))
+            })?);
         }
         let pool = guard.as_ref().unwrap().clone();
         self.last_activity.store(
@@ -246,20 +315,38 @@ impl ManagedPool {
 
     /// 取连接并 ping 探活：免费库按 wait_timeout 掐断的僵尸连接，ping 会毫秒级失败，
     /// 不必等 read_timeout 才发现。ping 失败 → 弃池重建 → 从新池重试一次。
-    /// （半开黑洞连接 ping 仍可能吃满 IO 超时，由 read_timeout=15s 兜底。）
+    ///
+    /// 关键：一律用 `try_get_conn(超时)` 而非 `get_conn()`。
+    /// mysql crate 的 `Pool::get_conn()` 在池满时是 `condvar.wait`（timeout=None）
+    /// 无限阻塞，一旦池内连接被异常任务长期持有，调用方会永久卡死——
+    /// 连外层软超时都救不回（spawn_blocking 不可取消）。有界等待才能保证快速失败。
+    ///
+    /// 错误统一经 `db_err` 打上类别前缀，便于前端区分「连接数已满 / 池被占用 / 网络异常」。
     pub fn get_conn(&self) -> Result<PooledConn, String> {
         let inner = &*self.inner;
         let pool = inner.current_pool()?;
-        let mut conn = match pool.get_conn() {
+        let wait = Duration::from_secs(POOL_ACQUIRE_TIMEOUT_SECS);
+
+        let mut conn = match pool.try_get_conn(wait) {
             Ok(c) => c,
             Err(e) => {
+                let kind = classify_mysql_error(&e);
                 inner.recent_failure.store(true, Ordering::Relaxed);
+                // 连接数已满属服务端状态，重建池无益（反而多占连接），直接快速失败
+                if kind == DbErrorKind::TooManyConnections {
+                    return Err(db_err(kind, "服务器连接数已达上限，请稍后重试"));
+                }
                 inner.reset_pool("get_conn failed");
                 let pool = inner.current_pool()?;
-                match pool.get_conn() {
+                match pool.try_get_conn(wait) {
                     Ok(c) => c,
                     // 重建后的错误更能反映服务器当前状态（如 too many connections），拼接保留
-                    Err(e2) => return Err(format!("{e}; 重建连接失败: {e2}")),
+                    Err(e2) => {
+                        return Err(db_err(
+                            classify_mysql_error(&e2),
+                            format!("获取连接失败: {e}; 重建连接失败: {e2}"),
+                        ));
+                    }
                 }
             }
         };
@@ -267,11 +354,14 @@ impl ManagedPool {
             inner.maybe_cleanup_zombies(&mut conn);
             return Ok(conn);
         }
+        // ping 失败：该连接是死连接。丢弃池（含这条坏连接）后重建重试一次。
         drop(conn);
         inner.recent_failure.store(true, Ordering::Relaxed);
         inner.reset_pool("stale connection (ping failed)");
         let pool = inner.current_pool()?;
-        let mut conn = pool.get_conn().map_err(|e| e.to_string())?;
+        let mut conn = pool
+            .try_get_conn(wait)
+            .map_err(|e| db_err(classify_mysql_error(&e), format!("重连失败: {e}")))?;
         inner.maybe_cleanup_zombies(&mut conn);
         Ok(conn)
     }
@@ -288,39 +378,69 @@ impl DbState {
     }
 }
 
-/// 查询串行化执行 + 软超时兜底：
+/// 查询串行化执行 + 两段式超时兜底：
 /// 1. 单连接（DB_POOL_MAX=1）下，所有 db_* 调用通过 async Mutex 排队，
 ///    排队在 async 层发生，不占用 tokio blocking 线程；拿到锁后才 spawn_blocking
 ///    执行 get_conn + 查询。
-/// 2. 软超时包住「排队 + 执行」整段。超时后 spawn_blocking 不可取消、仍占着
-///    旧连接，但 reset_pool 会丢弃整个池——旧连接随旧池作废，后续查询拿新池
-///    新连接，互不卡死；旧任务由 IO 超时（IO_TIMEOUT_SECS）兜底自行结束。
+/// 2. **排队与执行分开计时**（关键修正）：
+///    - 排队段用 `QUEUE_WAIT_TIMEOUT_SECS`：拿不到锁就快速失败，返回 QUEUE_TIMEOUT，
+///      前端提示「服务器繁忙，请刷新重试」。这样前面有查询卡住时，后面的请求
+///      不会陪着一起等到软超时才报错（旧实现把排队时间算进总超时，导致集体白等 45s）。
+///    - 执行段用 `CALL_SOFT_TIMEOUT_SECS`：已拿到执行权后，超时丢弃整个连接池强制重建——
+///      旧 spawn_blocking 任务不可取消、仍占着旧连接，但旧连接随旧池作废，
+///      后续查询拿新池新连接，互不卡死；旧任务由 IO 超时兜底自行结束。
 async fn run_serial<F, R>(pool: ManagedPool, f: F) -> Result<R, String>
 where
     F: FnOnce(&mut PooledConn) -> Result<R, String> + Send + 'static,
     R: Send + 'static,
 {
-    let fut = async {
-        let _guard = pool.inner.serial.lock().await;
-        let pool_for_blocking = pool.clone();
+    // ── 第一段：排队等锁，独立且更短的上限 ──
+    let guard = match tokio::time::timeout(
+        Duration::from_secs(QUEUE_WAIT_TIMEOUT_SECS),
+        pool.inner.serial.lock(),
+    )
+    .await
+    {
+        Ok(g) => g,
+        Err(_) => {
+            // 排队超时不重置连接池：此时前序请求可能仍在正常执行，
+            // 贸然重置会把正在跑的查询连池一起废弃，反而放大故障。
+            return Err(db_err(
+                DbErrorKind::QueueTimeout,
+                format!(
+                    "服务器繁忙（排队超过 {} 秒未获得执行机会），请刷新重试",
+                    QUEUE_WAIT_TIMEOUT_SECS
+                ),
+            ));
+        }
+    };
+
+    // ── 第二段：已持有锁，执行 get_conn + 查询，只有这段计入软超时 ──
+    let pool_for_blocking = pool.clone();
+    let fut = async move {
         tokio::task::spawn_blocking(move || {
             let mut conn = pool_for_blocking.get_conn()?;
             f(&mut conn)
         })
         .await
-        .map_err(|e| format!("数据库任务失败: {}", e))?
+        .map_err(|e| db_err(DbErrorKind::Network, format!("数据库任务失败: {}", e)))?
     };
-    match tokio::time::timeout(Duration::from_secs(CALL_SOFT_TIMEOUT_SECS), fut).await {
+    let result = match tokio::time::timeout(Duration::from_secs(CALL_SOFT_TIMEOUT_SECS), fut).await {
         Ok(r) => r,
         Err(_) => {
             pool.inner.recent_failure.store(true, Ordering::Relaxed);
             pool.inner.reset_pool("call soft timeout");
-            Err(format!(
-                "数据库请求超时（超过 {} 秒），连接已重置，请稍后重试",
-                CALL_SOFT_TIMEOUT_SECS
+            Err(db_err(
+                DbErrorKind::QueryTimeout,
+                format!(
+                    "数据库请求超时（超过 {} 秒），连接已重置，请稍后重试",
+                    CALL_SOFT_TIMEOUT_SECS
+                ),
             ))
         }
-    }
+    };
+    drop(guard);
+    result
 }
 
 pub(crate) async fn with_conn<F, R>(state: &DbState, f: F) -> Result<R, String>

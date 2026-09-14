@@ -199,7 +199,8 @@ export function BrowseMods({ initialModId, initialCommentId, onConsumeNavTarget,
       setTotal(data.total || 0)
       setPage(data.page || 1)
     } catch (e) {
-      setError(e.message)
+      // 存 Error 对象而非 e.message：AsyncView 需要 dbErrorCode 做差异化翻译
+      setError(e)
       setMods([])
     } finally {
       setLoading(false)

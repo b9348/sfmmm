@@ -231,7 +231,7 @@
     "checking": "確認中...",
     "checkUpdateBtn": "更新を確認",
     "ghDownloadUpdate": "GitHub ソース",
- "quarkDownload": "夸克ネットドライブを開く",
+    "quarkDownload": "夸克ネットドライブを開く",
     "ghNotReady": "GitHub ソースは v{{version}} をまだ公開していません。後でもう一度お試しください",
     "ghNoAsset": "GitHub ソースにインストーラーのアセットが見つかりません",
     "downloadUpdate": "既定のソース",
@@ -606,5 +606,11 @@
     "likeFailed": "いいねに失敗しました：",
     "loginRequired": "先にログインしてください",
     "postDeleted": "このディスカッションは削除されました"
+  },
+  "errors": {
+    "tooManyConnections": "サーバーの接続数が上限に達しました。しばらくしてから再試行してください。",
+    "serverBusy": "サーバーが混雑しています。更新して再試行してください。",
+    "queryTimeout": "データベースの応答がタイムアウトしました。更新して再試行してください。",
+    "network": "ネットワークエラーです。接続を確認して再試行してください。"
   }
 }

@@ -14,11 +14,60 @@ function extractError(e) {
   return String(e)
 }
 
+// 后端错误类别前缀：`[DBERR:<CODE>] <人类可读信息>`（见 src-tauri/src/db.rs）
+// 前端据此展示差异化提示，而不是把原始错误串直接抛给用户
+const DBERR_RE = /^\[DBERR:([A-Z_]+)\]\s*/
+
+/**
+ * 解析错误，返回 { code, message }。
+ * 兼容两种输入：已结构化的 Error（读 dbErrorCode）与原始错误串（解析前缀）。
+ * code 为 null 表示非结构化错误（如前端自身超时兜底）。
+ */
+export function parseDbError(raw) {
+  // dbCall 抛出的 Error 已剥离前缀，类别存在 dbErrorCode 上
+  if (raw && typeof raw === 'object' && raw.dbErrorCode !== undefined) {
+    return { code: raw.dbErrorCode, message: raw.message }
+  }
+  const text = typeof raw === 'string' ? raw : extractError(raw)
+  const m = text.match(DBERR_RE)
+  if (!m) return { code: null, message: text }
+  return { code: m[1], message: text.replace(DBERR_RE, '') }
+}
+
+/**
+ * 错误类别 → i18n key 映射。
+ * 无类别（前端超时兜底等）走通用加载失败文案。
+ */
+const DBERR_I18N_KEY = {
+  TOO_MANY_CONNECTIONS: 'errors.tooManyConnections',
+  QUEUE_TIMEOUT: 'errors.serverBusy',
+  QUERY_TIMEOUT: 'errors.queryTimeout',
+  POOL_BUSY: 'errors.serverBusy',
+  NETWORK: 'errors.network',
+}
+
+/**
+ * 把错误转成面向用户的提示文案（已翻译）。
+ * 翻译缺失时退回后端原始信息，不露出 i18n key。
+ * @param {string|Error} raw 原始错误串或 dbCall 抛出的 Error
+ * @param {(k: string) => string} [t] i18n 翻译函数；省略则返回剥前缀后的原文
+ */
+export function formatDbError(raw, t) {
+  const { code, message } = parseDbError(raw)
+  const key = code && DBERR_I18N_KEY[code]
+  if (key && t) {
+    const translated = t(key)
+    if (translated && translated !== key) return translated
+  }
+  return message
+}
+
 // ── 通用请求包装 ──
 
-// 单次 db_* 调用的前端超时：前端仅作兜底。后端已有 45s 软超时（含串行排队），
-// 超时会主动重置连接并返回错误，前端只需比 45s 略宽即可
-const DB_CALL_TIMEOUT_MS = 60_000
+// 单次 db_* 调用的前端超时：前端仅作兜底。
+// 后端两段式超时：排队 5s（QUEUE_WAIT_TIMEOUT_SECS）+ 执行 20s（CALL_SOFT_TIMEOUT_SECS），
+// 最坏约 25s 内后端必然返回结构化错误，前端取 35s 略宽即可，不必再等 60s。
+const DB_CALL_TIMEOUT_MS = 35_000
 
 function withTimeout(promise, ms) {
   return new Promise((resolve, reject) => {
@@ -34,14 +83,17 @@ async function dbCall(command, args = {}) {
   try {
     const result = await withTimeout(invoke(command, args), DB_CALL_TIMEOUT_MS)
     if (!result.success) {
-      const err = new Error(result.message || '操作失败')
-      throw err
+      throw new Error(result.message || '操作失败')
     }
     return result
   } catch (e) {
-    const msg = extractError(e)
-    const error = new Error(msg)
+    const raw = extractError(e)
+    const { code, message } = parseDbError(raw)
+    // message 已剥离 [DBERR:*] 前缀，现有所有 e.message 消费点（alert / setError）
+    // 都不会露出内部协议标记；类别另存 dbErrorCode 供 UI 做差异化翻译与分支
+    const error = new Error(message)
     error.httpCode = 'DB_ERROR'
+    error.dbErrorCode = code
     throw error
   }
 }
