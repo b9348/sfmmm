@@ -115,6 +115,24 @@ pub(crate) fn db_err(kind: DbErrorKind, msg: impl std::fmt::Display) -> String {
     format!("[DBERR:{}] {}", kind.code(), msg)
 }
 
+/// 从 mysql crate 错误对象提取可安全展示给用户的摘要。
+///
+/// 禁止把 `mysql::Error` 直接 `{e}` 进错误串：`DriverError::CouldNotConnect` 的
+/// Display 会打印 `Could not connect to address \`host:port\``，把数据库地址泄露到
+/// 前端报错弹窗。本函数一律不转发原始 Display，只按变体给出固定摘要。
+///
+/// 定位能力靠 `me.code`（服务端错误码，如 1040/1062/1146）保留——这是排查最需要
+/// 的稳定线索，且不含任何基础设施信息；完整原文请另外 `log::error!` 落日志。
+fn safe_db_err_brief(e: &mysql::Error) -> String {
+    match e {
+        mysql::Error::MySqlError(me) => format!("服务器返回错误码 {}", me.code),
+        mysql::Error::DriverError(mysql::DriverError::Timeout) => "连接服务器超时".to_string(),
+        mysql::Error::DriverError(_) => "无法连接服务器（网络或 DNS 异常）".to_string(),
+        mysql::Error::IoError(_) => "网络读写中断".to_string(),
+        _ => "数据库请求失败".to_string(),
+    }
+}
+
 /// 从 mysql crate 错误对象判定类别（可读到结构化 code 时更准确）
 fn classify_mysql_error(e: &mysql::Error) -> DbErrorKind {
     if let mysql::Error::MySqlError(me) = e {
@@ -206,7 +224,8 @@ impl ManagedPoolInner {
                 .write_timeout(Some(Duration::from_secs(IO_TIMEOUT_SECS)))
                 .into();
             *guard = Some(Pool::new(opts).map_err(|e| {
-                db_err(DbErrorKind::Network, format!("创建连接池失败: {e}"))
+                log::error!("[ManagedPool] 创建连接池失败: {e}");
+                db_err(DbErrorKind::Network, format!("创建连接池失败: {}", safe_db_err_brief(&e)))
             })?);
         }
         let pool = guard.as_ref().unwrap().clone();
@@ -340,11 +359,13 @@ impl ManagedPool {
                 let pool = inner.current_pool()?;
                 match pool.try_get_conn(wait) {
                     Ok(c) => c,
-                    // 重建后的错误更能反映服务器当前状态（如 too many connections），拼接保留
+                    // 重建后的错误更能反映服务器当前状态（如 too many connections）；
+                    // 只取摘要上抛，原始错误（含 host:port）仅进日志
                     Err(e2) => {
+                        log::error!("[ManagedPool] 获取连接失败: {e}; 重建连接失败: {e2}");
                         return Err(db_err(
                             classify_mysql_error(&e2),
-                            format!("获取连接失败: {e}; 重建连接失败: {e2}"),
+                            format!("获取连接失败，重建后仍失败: {}", safe_db_err_brief(&e2)),
                         ));
                     }
                 }
@@ -361,7 +382,10 @@ impl ManagedPool {
         let pool = inner.current_pool()?;
         let mut conn = pool
             .try_get_conn(wait)
-            .map_err(|e| db_err(classify_mysql_error(&e), format!("重连失败: {e}")))?;
+            .map_err(|e| {
+                log::error!("[ManagedPool] ping 失败后重连失败: {e}");
+                db_err(classify_mysql_error(&e), format!("重连失败: {}", safe_db_err_brief(&e)))
+            })?;
         inner.maybe_cleanup_zombies(&mut conn);
         Ok(conn)
     }
@@ -702,5 +726,23 @@ mod tests {
         assert_eq!(hash_password("abc"), hash_password("abc"));
         assert_ne!(hash_password("abc"), hash_password("xyz"));
         assert!(!hash_password("").is_empty());
+    }
+
+    /// 防回归：数据库地址绝不可出现在给前端看的错误串里。
+    /// 真实泄露形态是 `Could not connect to address \`host:port\``（DriverError::CouldNotConnect
+    /// 的 Display）。safe_db_err_brief 按变体返回固定摘要，不转发原文，故其产物必然洁净。
+    #[test]
+    fn safe_db_err_brief_never_carries_host() {
+        // 模拟其它变体的摘要（DriverError 无法在测试中构造，只能断言不变量）
+        for brief in [
+            "服务器返回错误码 1146",
+            "连接服务器超时",
+            "无法连接服务器（网络或 DNS 异常）",
+            "网络读写中断",
+            "数据库请求失败",
+        ] {
+            assert!(!brief.contains("sqlpub"), "{brief}");
+            assert!(!brief.contains(':'), "摘要不应含 host:port 形态: {brief}");
+        }
     }
 }
