@@ -1686,13 +1686,19 @@ pub fn run() {
                 });
             }
 
-            if cfg!(debug_assertions) {
-                app.handle().plugin(
-                    tauri_plugin_log::Builder::default()
-                        .level(log::LevelFilter::Info)
-                        .build(),
-                )?;
-            }
+            // 日志必须 release 也落盘：后端会在上抛错误前把原始详情（含数据库地址、
+            // 表名等基础设施信息）写进 log::error!，返回给前端的只是脱敏摘要。
+            // 若只在 debug 构建注册，线上出问题时将没有任何排查依据。
+            // 落盘位置：%APPDATA%\com.sfmmm.app\logs\（由 tauri-plugin-log 按 identifier 决定）。
+            // Info 级别只收业务日志；依赖库的 Detail 级噪声（tauri/wry 逐帧输出）不采。
+            // 单文件限 2MB 且只保留最近 1 个滚动文件，避免长期运行堆积占满磁盘。
+            app.handle().plugin(
+                tauri_plugin_log::Builder::default()
+                    .level(log::LevelFilter::Info)
+                    .max_file_size(2 * 1024 * 1024)
+                    .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepOne)
+                    .build(),
+            )?;
             Ok(())
         })
         .run(tauri::generate_context!())
