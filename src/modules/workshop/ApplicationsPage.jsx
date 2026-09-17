@@ -11,17 +11,7 @@ import { useAuth } from '../../contexts/useAuth'
 import { useNotification } from '../../contexts/NotificationContext'
 import { listApplications, handleApplication, getMyNotifications, markRead } from '../../services/workshopApi'
 import { Pagination, EmptyState, UserLink } from '../../components'
-
-// 从 markdown/html 正文中提取第一张图片 URL（图床图片），并返回去掉图片语法后的纯文本摘要
-function extractFirstImage(content) {
-  if (!content) return { image: null, text: '' }
-  const imgRegex = /!\[[^\]]*\]\((https?:\/\/[^)\s]+)\)|<img[^>]+src=["'](https?:\/\/[^"']+)["']/gi
-  const matches = [...content.matchAll(imgRegex)]
-  const image = matches.length > 0 ? (matches[0][1] || matches[0][2] || null) : null
-  // 仅将图片语法替换为空，保留其余正文文本
-  const text = content.replace(imgRegex, ' ').replace(/\s+/g, ' ').trim()
-  return { image, text }
-}
+import { extractFirstImage } from '../../utils/extractFirstImage'
 
 const useStyles = makeStyles({
   root: {
