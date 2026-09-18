@@ -102,6 +102,55 @@ pub(crate) fn read_game_path(app_handle: &tauri::AppHandle) -> Result<String, St
     Ok(path)
 }
 
+/// 校验安装记录指向的文件是否仍存在于指定游戏目录下。
+///
+/// install_manifest（subscribe.rs 中记录写回处）对每个 category 都存**相对该
+/// category 目标根目录**的路径，与 uninstallMod（src/services/installMod.js）
+/// 逐项删除时的拼接方式一致：
+///   - v1        → <base>\CustomMissions      （manifest 项形如 "Warp_DowntownToPark.json"）
+///   - v2        → <base>\CustomMissions2\<mod_key>
+///   - dll       → <base>\BepInEx\plugins
+///   - composite → 收窄后的 target_dir（首个文件推断的顶层目录），此时 manifest
+///                 项才是相对游戏根的全路径
+/// 返回 None 表示"已安装且文件确实在"，Some(原因) 表示判定为失效。
+///
+/// 只有 manifest 非空时才做逐项探测：老记录（该列引入前的数据）没有文件清单，
+/// 无从判断，保持原有"记录在即视为已安装"的语义，避免把正常安装误判为失效
+/// 而触发重复下载。
+fn install_files_present(base: &str, mod_key: &str, category: &str, manifest: &str) -> Option<String> {
+    let files: Vec<String> = match serde_json::from_str(manifest) {
+        Ok(v) => v,
+        // manifest 为空或非数组：无法探测，按已安装处理
+        Err(_) => return None,
+    };
+    if files.is_empty() {
+        return None;
+    }
+    let root = match category {
+        "dll" => format!("{}\\BepInEx\\plugins", base),
+        "v2" => format!("{}\\CustomMissions2\\{}", base, mod_key),
+        "composite" => {
+            // manifest 为相对游戏根的全路径，先按首个文件推断收窄后的顶层目录
+            let first = files[0].replace('/', "\\");
+            let segs: Vec<&str> = first.split('\\').collect();
+            if segs.len() > 1 {
+                format!("{}\\{}", base, segs[..segs.len() - 1].join("\\"))
+            } else {
+                base.to_string()
+            }
+        }
+        _ => format!("{}\\CustomMissions", base), // v1 及兜底
+    };
+    for f in &files {
+        let rel = f.replace('/', "\\");
+        let full = PathBuf::from(&root).join(&rel);
+        if !full.is_file() {
+            return Some(format!("目标文件不存在: {}", full.display()));
+        }
+    }
+    None
+}
+
 // ── 任务状态写回（每阶段更新 + 前端可查）─────────────────
 fn update_task_status(
     app_handle: &tauri::AppHandle,
@@ -590,43 +639,81 @@ pub async fn db_subscribe_mod(
     display_name: Option<String>,
     description: Option<String>,
     translations: Option<String>,
+    // 用户手动点"重新安装"时置 true：跳过一切去重，强制重下重装。
+    // 用于兜底"文件被误删/被改坏但 manifest 探测察觉不到"的场景——
+    // 去重只看文件是否存在，无法发现内容损坏，故必须由用户显式表达意图。
+    force: Option<bool>,
 ) -> Result<serde_json::Value, String> {
-    // 1) 去重：同 mod_key + version + file_hash 若已有进行中或已完成任务，直接返回该 task_id
-    //    避免多次退订/订阅产生重复订阅记录（同一 mod 同版本同 hash 视为同一任务）
+    let force = force.unwrap_or(false);
+    // 1) 去重：同 mod_key + version + file_hash + lang_code 若已有进行中或已完成任务，
+    //    直接返回该 task_id，避免多次退订/订阅产生重复订阅记录
+    //    （同一 mod 同版本同 hash 同语言视为同一任务；不同语言各自独立，互不复用）
     //    - 进行中（pending/downloading/extracting/recording）：复用，不重下
     //    - 已完成（done）：幂等返回，不重下——但若 installed_workshop_mods 里对应
     //      安装记录已不在（被退订删掉），done 视为失效允许新建重下重装
     //    - failed/cancelled：不命中，允许新建（视为重试）
+    //    - force=true：以上规则全部跳过，只要不是"进行中"就强制新建重下
     let conn = open_sqlite(&app_handle)?;
-    // 1.5) 覆盖旧记录：新订阅意味着同 mod_key+版本+hash 的旧失败/取消行已失效，
-    //     删除它们，保证任意时刻同 mod 同版本只一条有效记录——
-    //     否则"首次失败 → 重试成功 → 退订"后，旧的 failed 行与新 done(已退订) 行并存
+    // 1.5) 覆盖旧记录：新订阅意味着同 mod_key+版本+hash+语言的旧失败/取消行已失效，
+    //     删除它们，保证任意时刻同 mod 同版本同语言只一条有效记录——
+    //     否则"首次失败 → 重试成功 → 退订"后，旧的 failed 行与新 done(已退订) 行并存。
+    //     lang_code 不可省：否则重装 en 会连带删掉 zh 的 failed 行，而 zh 的任务
+    //     尚未重建，用户在订阅记录页就看不到 zh 的失败原因了。
     let _ = conn.execute(
         "DELETE FROM subscription_tasks
-         WHERE mod_key = ? AND version = ? AND file_hash = ?
+         WHERE mod_key = ? AND version = ? AND file_hash = ? AND lang_code = ?
            AND status IN ('failed', 'cancelled')",
-        rusqlite::params![mod_key, version, file_hash],
+        rusqlite::params![mod_key, version, file_hash, lang_code],
     );
+    // 去重键含 lang_code：同 mod 不同语言是各自独立的安装（installed_workshop_mods
+    // 也是按 mod_key+lang_code 分别记录），若仅按 mod_key+version+file_hash 选行，
+    // 多语言 mod 的各语言会互相命中同一行——在 en 上点"重新安装"会把该行的
+    // lang_code 改写成 en，下次 zh 的探测与复用都读到 en 的字段。
     let existing: Option<i64> = conn
         .query_row(
             "SELECT id FROM subscription_tasks
-             WHERE mod_key = ? AND version = ? AND file_hash = ?
+             WHERE mod_key = ? AND version = ? AND file_hash = ? AND lang_code = ?
                AND status IN ('pending', 'downloading', 'extracting', 'recording', 'done')
              ORDER BY id DESC LIMIT 1",
-            rusqlite::params![mod_key, version, file_hash],
+            rusqlite::params![mod_key, version, file_hash, lang_code],
             |r| r.get(0),
         )
         .ok();
     let (task_id, is_new) = if let Some(id) = existing {
         // 命中已有任务：进行中直接复用；done 需校验安装记录是否还在
-        let need_reinstall = conn
+        // 注意：安装记录是 mod 级、与游戏路径无关的表；在设置里改游戏目录不会清理它，
+        // 因此仅凭"记录存在"会把新目录下并不存在的 mod 判为已安装，从而永久返回
+        // deduplicated 且不 spawn 任务，前端"等待中"占位卡死。这里必须同时校验
+        // 安装记录存在 **且** 目标文件在当前游戏目录下真实存在。
+        let recorded: Option<(String, String)> = conn
             .query_row(
-                "SELECT 1 FROM installed_workshop_mods WHERE mod_key = ? LIMIT 1",
+                "SELECT category, manifest FROM installed_workshop_mods WHERE mod_key = ? LIMIT 1",
                 rusqlite::params![mod_key],
-                |_| Ok(1),
+                |r| Ok((r.get(0)?, r.get(1)?)),
             )
-            .is_err(); // 查不到行 = 安装记录已不在 = 视为失效
-        // 查这个任务的当前状态是否 done（进行中的不进重装分支）
+            .ok();
+        // force=true 时不探测：用户已明确要求重装，磁盘检测结论无意义（它只能
+        // 发现文件缺失，发现不了内容被改坏），省掉一次全量文件遍历
+        let need_reinstall = !force
+            && match recorded {
+                // 查不到行 = 安装记录已不在 = 视为失效
+                None => true,
+                Some((category, manifest)) => {
+                    // 记录在，但文件可能已随游戏目录切换而落在别处：按 manifest 逐项探测。
+                    // install_files_present 的契约是 None=文件都在、Some(原因)=失效，
+                    // 故 is_some() 才是"需要重装"。
+                    match read_game_path(&app_handle) {
+                        Ok(game_path) => {
+                            let base = game_path.trim_end_matches('\\');
+                            install_files_present(base, &mod_key, &category, &manifest).is_some()
+                        }
+                        // 游戏目录本身无效：交由重新入队的任务在 run_subscribe_task 里
+                        // 报 GAME_DIR_INVALID，比静默复用 done 更易诊断
+                        Err(_) => true,
+                    }
+                }
+            };
+        // 查这个任务的当前状态（进行中 vs 已完成）
         let task_status: String = conn
             .query_row(
                 "SELECT status FROM subscription_tasks WHERE id = ?",
@@ -634,9 +721,18 @@ pub async fn db_subscribe_mod(
                 |r| r.get(0),
             )
             .unwrap_or_default();
-        if task_status == "done" && need_reinstall {
-            // done 但安装记录已被退订删掉：视为失效，新建任务重下重装
-            // 直接删掉旧 done 行（不置 superseded 改名），让同 mod_key+版本任意时刻只一条有效记录
+        // 进行中：无论 force 与否都复用，避免并发写同一目标文件
+        let in_progress = matches!(
+            task_status.as_str(),
+            "pending" | "downloading" | "extracting" | "recording"
+        );
+        if !in_progress && (force || need_reinstall) {
+            // 需要重下重装，两种情况：
+            //   - force=true：用户手动点"重新安装"，跳过一切检测强制重下
+            //   - need_reinstall：安装记录已失效（被退订删掉 / 文件已不在）
+            // 直接删掉旧行（不置 superseded 改名），让同 mod_key+版本+语言任意时刻只一条有效记录。
+            // 删除范围严格限定在本次的 lang_code：existing 已按 lang_code 选出，
+            // 此处只动它自己，不会波及其他语言的进行中/已完成任务。
             let _ = conn.execute(
                 "DELETE FROM subscription_tasks WHERE id = ?",
                 rusqlite::params![id],

@@ -391,7 +391,22 @@ export default function ModDetailPage({ mod, onBack, onEdit, scrollToCommentId }
         displayName: mod.display_name,
         description: mod.description,
         translations: mod.translations,
+        // 已安装时按钮语义是"重新安装/更新"——用户明确要求覆盖重装，必须跳过后端去重。
+        // 去重只看磁盘文件是否存在，发现不了"文件被删错/被改坏但同名文件还在"的情况，
+        // 仅凭它会让重装按钮在文件完好时变成空操作。
+        force: !!installedByLang[file.lang_code],
       })
+      // 命中后端去重（deduplicated=true）：旧任务已 done 且后端确认文件在，
+      // 不会再有 subscription-progress 事件，绝不能写"等待中"占位——否则
+      // disabled={!!subscribeProgress[lang]} 会永久禁用按钮且无人清除。
+      // 直接重查安装态刷新（打开目录按钮等就位）。
+      if (result?.deduplicated) {
+        // 该 taskId 不归本次调用，清掉可能残留的映射，避免它被后端复用后
+        // 事件打进来、本页误认作自己的任务而更新进度
+        delete activeTaskByLangRef.current[file.lang_code]
+        await checkInstalled()
+        return
+      }
       // 记录 lang→taskId 映射，listen 回调凭 taskId 匹配回 lang 更新进度
       if (result?.taskId != null) {
         activeTaskByLangRef.current[file.lang_code] = result.taskId
@@ -401,11 +416,6 @@ export default function ModDetailPage({ mod, onBack, onEdit, scrollToCommentId }
           ...prev,
           [file.lang_code]: { percent: 0, stage: t('workshop.stage.pending', { defaultValue: 'pending' }), status: 'pending', error: '' },
         }))
-      }
-      // 命中去重（deduplicated=true）：旧任务已 done，前端进度不会再来，
-      // 复用 checkInstalled 重查 SQLite 刷已安装态（打开目录按钮等就位），不另写旁路显示
-      if (result?.deduplicated) {
-        checkInstalled()
       }
     } catch (e) {
       setInstallError(e.message)
@@ -436,11 +446,21 @@ export default function ModDetailPage({ mod, onBack, onEdit, scrollToCommentId }
           speed: payload.speed ?? 0,
         },
       }))
-      // 任务终结：清活跃映射。done 时复用 checkInstalled 重查 SQLite 刷已安装态
+      // 任务终结：清活跃映射 + 清该 lang 的进度占位。占位不清会让
+      // disabled={... || !!subscribeProgress[lang]} 永久置灰按钮，无法再次重装。
+      // done 时复用 checkInstalled 重查 SQLite 刷已安装态
       // （installedByLang/isInstalled/installedDir/installedFiles 全套和切屏回来一致），
       // 不另写旁路显示避免样式不一致 + 打开目录按钮拿不到 installedDir 点不动
       if (['done', 'failed', 'cancelled'].includes(payload.status)) {
         delete activeTaskByLangRef.current[lang]
+        if (payload.status === 'failed') {
+          setInstallError(payload.error || '')
+        }
+        setSubscribeProgress(prev => {
+          const next = { ...prev }
+          delete next[lang]
+          return next
+        })
         if (payload.status === 'done') {
           checkInstalled()
         }

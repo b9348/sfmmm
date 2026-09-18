@@ -17,7 +17,7 @@ import {
 import { makeStyles, tokens } from '@fluentui/react-components'
 import { open } from '@tauri-apps/plugin-dialog'
 import { exists } from '@tauri-apps/plugin-fs'
-import { setConfig } from '../services/dbHelper'
+import { setConfig, deriveExePath } from '../services/dbHelper'
 import i18n, { detectSystemLanguage } from '../i18n'
 
 const useStyles = makeStyles({
@@ -76,7 +76,7 @@ export function WelcomeScreen({ onComplete }) {
       return
     }
 
-    const exePath = gamePath.replace(/\\+$/, '') + '\\SecretFlasherManaka.exe'
+    const exePath = deriveExePath(gamePath)
 
     const exeExists = await exists(exePath)
     if (!exeExists) {
@@ -86,11 +86,10 @@ export function WelcomeScreen({ onComplete }) {
 
     try {
       await setConfig('game_path', gamePath)
-      await setConfig('exe_path', exePath)
       await setConfig('initialized', 'true')
       await setConfig('language', language)
 
-      onComplete({ game_path: gamePath, exe_path: exePath, initialized: 'true', language })
+      onComplete({ game_path: gamePath, initialized: 'true', language })
     } catch (e) {
       setError(t('welcome.errSaveFailed') + ': ' + (e?.message || String(e)))
     }

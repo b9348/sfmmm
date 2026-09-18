@@ -13,9 +13,14 @@ import { getGamePath, getDb } from './dbHelper'
  * @param {string} [params.displayName] - 冗余存的工坊卡片显示名（订阅记录页离线展示用）
  * @param {string} [params.description] - 冗余存的简介
  * @param {object} [params.translations] - {zh:{name,…},…} 工坊翻译表，原样 JSON.stringify 存表
- * @returns {Promise<{ taskId: number, manifest: string|null }>} 任务已入队，立即返回
+ * @param {boolean} [params.force] - 用户手动点"重新安装"：跳过后端去重强制重下重装。
+ *   用于兜底"文件被误删/被改坏但磁盘探测察觉不到"的场景——后端只校验文件是否存在，
+ *   发现不了内容损坏，故需用户显式表达意图。
+ * @returns {Promise<{ taskId: number, manifest: string|null, deduplicated: boolean }>}
+ *   deduplicated=true 表示后端命中去重、未新建任务（不会再有 subscription-progress
+ *   事件），调用方必须据此避免写"等待中"占位，否则按钮会永久禁用。
  */
-export async function installMod({ modKey, category, fileUrl, version, fileHash, langCode, manifest, displayName, description, translations }) {
+export async function installMod({ modKey, category, fileUrl, version, fileHash, langCode, manifest, displayName, description, translations, force }) {
   const result = await invoke('db_subscribe_mod', {
     mod_key: modKey,
     mod_id: null,
@@ -28,9 +33,12 @@ export async function installMod({ modKey, category, fileUrl, version, fileHash,
     display_name: displayName || '',
     description: description || '',
     translations: translations ? JSON.stringify(translations) : '',
+    force: !!force,
   })
-  // manifest 参数保留兼容旧调用签名，后端会从解压结果自行生成
-  return { taskId: result.taskId, manifest }
+  // deduplicated 必须透传：后端命中去重时不会 spawn 任务，也就不会广播任何
+  // subscription-progress 事件；调用方若不知情就会写下一个永不被兑现的"等待中"占位。
+  // manifest 参数保留兼容旧调用签名，后端会从解压结果自行生成。
+  return { taskId: result.taskId, manifest, deduplicated: !!result.deduplicated }
 }
 
 export async function uninstallMod({ modKey }) {

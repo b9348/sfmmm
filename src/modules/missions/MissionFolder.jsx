@@ -839,6 +839,9 @@ export function MissionFolder({ config, subfolder, onUninstall, focusModKey }) {
         displayName: mod.display_name,
         description: mod.description,
         translations: mod.translations,
+        // 用户主动点"更新"，要求覆盖现有安装：跳过后端去重（去重只看文件是否存在，
+        // 无法发现内容被改坏），否则云端文件已变但本地同名文件还在时会被拦成空操作
+        force: true,
       })
       refresh()
     } catch (e) {

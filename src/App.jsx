@@ -52,16 +52,18 @@ const useStyles = makeStyles({
 const WORKSHOP_SORT_GUIDE = 'workshop-sort'
 const GUIDE_SEEN_KEY = 'guide_seen_versions'
 
-const initialState = { isFirstRun: null, config: null }
+const initialState = { isFirstRun: null, config: null, sawWelcome: false }
 
 function appReducer(state, action) {
   switch (action.type) {
     case 'INIT_COMPLETE':
-      return { isFirstRun: false, config: action.config }
+      // 冷启动直通主界面：本次启动没走过欢迎屏，仍需弹漫游引导
+      return { isFirstRun: false, config: action.config, sawWelcome: false }
     case 'FIRST_RUN':
-      return { isFirstRun: true, config: null }
+      return { isFirstRun: true, config: null, sawWelcome: false }
     case 'WELCOME_COMPLETE':
-      return { isFirstRun: false, config: action.config }
+      // 刚在欢迎屏配好游戏目录：全新安装，不弹引导
+      return { isFirstRun: false, config: action.config, sawWelcome: true }
     case 'UPDATE_CONFIG':
       return { ...state, config: { ...state.config, ...action.config } }
     default:
@@ -266,12 +268,22 @@ function App() {
     return () => { cancelled = true; unlisten?.() }
   }, [])
 
+  const { t } = useTranslation()
+  const [uninstallTarget, setUninstallTarget] = useState(null)
+  const [uninstalling, setUninstalling] = useState(false)
+  const [modListKey, setModListKey] = useState(0)
+  // 漫游引导：看过一次就不再弹（记录在 SQLite config 表，跨版本/跨 WebView 缓存稳定）。
+  // 判断依据是 guideId 是否存在于已看映射，而非版本号相等——按版本比较会导致每次升级都重复弹出。
+  // 注意：这些 state 必须声明在下方 initialize effect 之前——该 effect 会调
+  // setGuideSeenMap，声明在后面会命中 react-hooks/immutability 的 TDZ 检查。
+  const [guideSeenMap, setGuideSeenMap] = useState({})
+
   useEffect(() => {
     let isMounted = true
 
     const initialize = async () => {
       try {
-        const configMap = await getConfigs(['language', 'selected_tab', 'initialized', 'game_path', 'exe_path', 'theme_mode', GUIDE_SEEN_KEY])
+        const configMap = await getConfigs(['language', 'selected_tab', 'initialized', 'game_path', 'theme_mode', GUIDE_SEEN_KEY])
 
         if (!isMounted) {
           return
@@ -314,7 +326,9 @@ function App() {
           }
         }
 
-        if (configMap.initialized === 'true' || (configMap.game_path && configMap.exe_path)) {
+        // 游戏目录配好即视为初始化完成。无需再校验 exe_path——它是从 game_path
+        // 派生的死字段（启动游戏由 Rust 端 launch_game 自行 join 文件名），已删除。
+        if (configMap.initialized === 'true' || configMap.game_path) {
           dispatch({ type: 'INIT_COMPLETE', config: { ...configMap, initialized: 'true' } })
         } else {
           dispatch({ type: 'FIRST_RUN' })
@@ -351,27 +365,29 @@ function App() {
     }
   }
 
-  const { t } = useTranslation()
-  const [uninstallTarget, setUninstallTarget] = useState(null)
-  const [uninstalling, setUninstalling] = useState(false)
-  const [modListKey, setModListKey] = useState(0)
-  // 漫游引导：看过一次就不再弹（记录在 SQLite config 表，跨版本/跨 WebView 缓存稳定）。
-  // 判断依据是 guideId 是否存在于已看映射，而非版本号相等——按版本比较会导致每次升级都重复弹出
-  const [showGuide, setShowGuide] = useState(false)
-  const [guideSeenMap, setGuideSeenMap] = useState({})
-  const sawWelcomeRef = useRef(false)
-  useEffect(() => {
-    if (state.isFirstRun) sawWelcomeRef.current = true
-  }, [state.isFirstRun])
-  useEffect(() => {
-    if (state.isFirstRun !== false) return
+  // 是否弹出漫游引导：纯粹由 state 推导，渲染期直接算，不落 effect——
+  // 落 effect 再 setState 会多一轮渲染，也命中 react-hooks/set-state-in-effect。
+  // 一旦用户点过「知道了」，handleCloseGuide 会写入 guideSeenMap，本表达式随即转 false。
+  const shouldShowGuide =
+    state.isFirstRun === false &&
     // 全新安装（走过欢迎屏）不弹更新说明
-    if (sawWelcomeRef.current) return
+    !state.sawWelcome &&
     // 该引导从未看过才触发（多引导各自记录，互不影响）
-    if (!guideSeenMap[WORKSHOP_SORT_GUIDE]) setShowGuide(true)
-  }, [state.isFirstRun, guideSeenMap])
+    !guideSeenMap[WORKSHOP_SORT_GUIDE]
+
+  // 引导激活时切到创意工坊「云」tab——排序下拉框在该页，SpotlightGuide 靠轮询定位它。
+  // 用 setSelectedTab 而非 handleTabChange，避免覆盖用户上次停留的 tab 持久化值。
+  // 这里是「同步到外部系统」（DOM hash），非 effect 内 setState，符合规则要求。
+  useEffect(() => {
+    if (!shouldShowGuide) return
+    window.location.hash = '#/workshop/browse'
+  }, [shouldShowGuide])
+
+  // 上面若判定要弹引导，就渲染在工坊页——同样在渲染期推导，与 shouldShowGuide 同源。
+  // 首帧 selectedTab 可能仍是上次停留的 tab，故用 shouldShowGuide 覆盖它。
+  const activeTab = shouldShowGuide ? 'workshop' : selectedTab
+
   const handleCloseGuide = () => {
-    setShowGuide(false)
     setGuideSeenMap((prev) => {
       const next = { ...prev, [WORKSHOP_SORT_GUIDE]: APP_VERSION }
       setConfig(GUIDE_SEEN_KEY, JSON.stringify(next)).catch((e) => {
@@ -380,13 +396,6 @@ function App() {
       return next
     })
   }
-
-  // 漫游引导激活时自动切到创意工坊「云」tab（排序下拉框所在页），组件内部会轮询定位目标元素
-  useEffect(() => {
-    if (!showGuide) return
-    setSelectedTab('workshop')
-    window.location.hash = '#/workshop/browse'
-  }, [showGuide])
 
   const handleUninstallMod = (mod) => {
     setUninstallTarget(mod)
@@ -446,7 +455,7 @@ function App() {
           <TitleBar />
           <div className={styles.appShell}>
             <TabNavigation
-             value={selectedTab}
+             value={activeTab}
              onChange={handleTabChange}
              isCollapsed={sidebarCollapsed}
              onToggleCollapse={toggleSidebar}
@@ -456,11 +465,11 @@ function App() {
              onNavigateToSettings={() => handleTabChange('settings')}
            >
             <main className={styles.tabContent}>
-              {selectedTab === 'localmods' && <LocalMods key={`localmods-${state.config?.game_path || ''}-${modListKey}`} config={state.config} onUninstall={handleUninstallMod} />}
-              {selectedTab === 'saves' && <SaveManagement config={state.config} />}
-              {selectedTab === 'import-export' && <ImportExport config={state.config} />}
-              {selectedTab === 'workshop' && <Workshop initialModId={navTarget?.modId} initialCommentId={navTarget?.commentId} onConsumeNavTarget={() => setNavTarget(null)} />}
-              {selectedTab === 'notify' && <NotifyPage onNavigate={(entity, targetId, commentId) => {
+              {activeTab === 'localmods' && <LocalMods key={`localmods-${state.config?.game_path || ''}-${modListKey}`} config={state.config} onUninstall={handleUninstallMod} />}
+              {activeTab === 'saves' && <SaveManagement config={state.config} />}
+              {activeTab === 'import-export' && <ImportExport config={state.config} />}
+              {activeTab === 'workshop' && <Workshop initialModId={navTarget?.modId} initialCommentId={navTarget?.commentId} onConsumeNavTarget={() => setNavTarget(null)} />}
+              {activeTab === 'notify' && <NotifyPage onNavigate={(entity, targetId, commentId) => {
                 if (entity === 'discussion') {
                   // 讨论区通知：设置 #/discuss/<id>?comment=<cid>，Workshop hashchange 自动切到讨论区并打开对应楼层
                   window.location.hash = commentId ? `#/discuss/${targetId}?comment=${commentId}` : `#/discuss/${targetId}`
@@ -473,7 +482,7 @@ function App() {
                   handleTabChange('workshop')
                 }
               }} />}
-              {selectedTab === 'settings' && <GameSettings config={state.config} onConfigChange={handleConfigChange} appUpdateInfo={updateInfo} />}
+              {activeTab === 'settings' && <GameSettings config={state.config} onConfigChange={handleConfigChange} appUpdateInfo={updateInfo} />}
             </main>
           </TabNavigation>
           </div>
@@ -500,7 +509,7 @@ function App() {
           </DialogSurface>
         </Dialog>
 
-        {showGuide && (
+        {shouldShowGuide && (
           <SpotlightGuide targetSelector="[data-tour='workshop-sort-select']" guideId={WORKSHOP_SORT_GUIDE} onDone={handleCloseGuide} />
         )}
       </AuthProvider>

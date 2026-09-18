@@ -186,7 +186,7 @@ export function SubscriptionRecords({ active = true }) {
       // 新记录覆盖旧记录（前端展示层兜底）：同 mod_key + version + lang_code 只保留 id 最大的一条。
       // 历史遗留场景：旧 failed 行 + 新 done(已退订) 行并存——修复前 failed/cancelled 行从不清理，
       // 首次订阅失败留下 failed，重试成功后退订，done 行虚拟显示为已退订，导致同 mod 同版本两条。
-      // 后端 db_subscribe_mod 已在新订阅时清理同 mod+版本+hash 的旧 failed/cancelled 行，
+      // 后端 db_subscribe_mod 已在新订阅时清理同 mod+版本+hash+语言的旧 failed/cancelled 行，
       // 这里对既有数据做展示层去重，不回写 SQLite。
       const latestById = new Map()
       for (const r of rows) {
