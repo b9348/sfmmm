@@ -512,6 +512,11 @@ export default function ModDetailPage({ mod, onBack, onEdit, scrollToCommentId }
         <div className={styles.toolbarRow}>
         <BackButton onClick={onBack} />
         <Text weight="semibold">{mod.mod_key}</Text>
+        {mod.is_original && (
+          <Badge color="brand" appearance="filled" size="small">
+            {t('workshop.isOriginalBadge')}
+          </Badge>
+        )}
         <div style={{ flex: 1 }} />
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
           <Text size="small">{t('workshop.displayLang')}</Text>

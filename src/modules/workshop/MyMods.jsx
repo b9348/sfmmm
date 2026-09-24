@@ -2,9 +2,10 @@ import { useTranslation } from 'react-i18next'
 import { useState, useEffect, useCallback, useRef } from 'react'
 import {
   Card, CardHeader, Text, Button,
-  Input, Select, makeStyles, tokens,
+  Input, Select, makeStyles, mergeClasses, tokens,
   Badge, Dialog, DialogTrigger, DialogSurface,
   DialogBody, DialogTitle, DialogContent,
+  Checkbox,
   TabList, Tab,
 } from '@fluentui/react-components'
 import {
@@ -72,6 +73,12 @@ const useStyles = makeStyles({
     '&:hover': {
       boxShadow: tokens.shadow4,
     },
+  },
+  cardOriginal: {
+    // 用 CSS outline 画品牌色描边（运行时 makeStyles 不支持 '::after' 伪元素 key，
+    // 详见 ModCard.jsx 同名注释）。outline 不占文档流，零布局位移。
+    outline: `2px solid ${tokens.colorCompoundBrandStroke}`,
+    outlineOffset: '-2px',
   },
   meta: {
     color: tokens.colorNeutralForeground2,
@@ -182,6 +189,7 @@ export function CreateModPage({ onClose, onCreated }) {
   const { user } = useAuth()
   const [modKey, setModKey] = useState('')
   const [category, setCategory] = useState('v1')
+  const [isOriginal, setIsOriginal] = useState(false)
   const [translations, setTranslations] = useState({ zh: { name: '', description: '', instructions: '', instructions_format: 'markdown', changelog: '', version: '1.0.0' } })
   const allLangs = LANGUAGES.map(l => l.value)
   const langList = Object.keys(translations)
@@ -292,7 +300,7 @@ export function CreateModPage({ onClose, onCreated }) {
       for (const [lang, trans] of Object.entries(translations)) {
         emptyInstructionsTranslations[lang] = { ...trans, instructions: '' }
       }
-      const createResult = await createMod({ author_id: user.user_id, mod_key: modKey.trim(), translations: emptyInstructionsTranslations, category })
+      const createResult = await createMod({ author_id: user.user_id, mod_key: modKey.trim(), translations: emptyInstructionsTranslations, category, is_original: isOriginal })
       const newModId = createResult.data.mod_id
 
       // 3. 上传 mod 文件（所有 category 统一走 runReplaceFlow 的"压缩+上传+进度+错误收集"流程）
@@ -339,7 +347,7 @@ export function CreateModPage({ onClose, onCreated }) {
 
       // 4. 上传说明中的图片并替换占位符
       const resolvedTranslations = await resolveTranslationImages(translations, newModId)
-      await updateMod({ author_id: user.user_id, mod_id: newModId, category, translations: resolvedTranslations })
+      await updateMod({ author_id: user.user_id, mod_id: newModId, category, translations: resolvedTranslations, is_original: isOriginal })
 
       // 5. 保存权限设置
       if (permissions.mode !== 'author_only') {
@@ -368,13 +376,24 @@ export function CreateModPage({ onClose, onCreated }) {
       <div style={{ flex: 1, overflow: 'auto', padding: '8px', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
         <div className={styles.formRow}>
           <Text className={styles.formLabel}>{t('workshop.modId')}</Text>
-          <Input
-            size="small"
-            placeholder={t('workshop.modIdCreatePlaceholder')}
-            value={modKey}
-            maxLength={64}
-            onChange={(_, d) => setModKey(d.value)}
-          />
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <Input
+              size="small"
+              placeholder={t('workshop.modIdCreatePlaceholder')}
+              value={modKey}
+              maxLength={64}
+              onChange={(_, d) => setModKey(d.value)}
+              style={{ flex: 1, minWidth: 0 }}
+            />
+            <Checkbox
+              size="small"
+              checked={isOriginal}
+              disabled={busy}
+              onChange={(_, d) => setIsOriginal(!!d.checked)}
+              label={t('workshop.isOriginalLabel')}
+              style={{ whiteSpace: 'nowrap' }}
+            />
+          </div>
         </div>
 
         <div className={styles.formRow}>
@@ -484,6 +503,7 @@ export function EditModPage({ mod: initialMod, onClose, onUpdated }) {
   const { user } = useAuth()
   const [modKey] = useState(initialMod.mod_key || '')
   const [category, setCategory] = useState(initialMod.category || 'v1')
+  const [isOriginal, setIsOriginal] = useState(!!initialMod.is_original)
 
   const initTrans = () => {
     const raw = initialMod.translations || {}
@@ -797,7 +817,7 @@ export function EditModPage({ mod: initialMod, onClose, onUpdated }) {
       }
 
       // 4. 更新翻译信息
-      await updateMod({ author_id: user.user_id, mod_id: initialMod.id, category, translations: resolvedTranslations })
+      await updateMod({ author_id: user.user_id, mod_id: initialMod.id, category, translations: resolvedTranslations, is_original: isOriginal })
       cleanupImages()
 
       // 5. 保存权限设置
@@ -840,7 +860,17 @@ export function EditModPage({ mod: initialMod, onClose, onUpdated }) {
       <div style={{ flex: 1, overflow: 'auto', padding: '8px', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
         <div className={styles.formRow}>
           <Text className={styles.formLabel}>{t('workshop.modId')}</Text>
-          <Input size="small" value={modKey} disabled />
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <Input size="small" value={modKey} disabled style={{ flex: 1, minWidth: 0 }} />
+            <Checkbox
+              size="small"
+              checked={isOriginal}
+              disabled={busy || !canEditModInfo}
+              onChange={(_, d) => setIsOriginal(!!d.checked)}
+              label={t('workshop.isOriginalLabel')}
+              style={{ whiteSpace: 'nowrap' }}
+            />
+          </div>
         </div>
 
         <div className={styles.formRow}>
@@ -1149,7 +1179,7 @@ export function MyMods({ active = true }) {
         ) : (
         <div className={styles.list}>
           {mods.map(mod => (
-            <Card key={mod.id} className={styles.card} appearance="outline" onClick={() => handleDetail(mod)} style={{ cursor: 'pointer' }}>
+            <Card key={mod.id} className={mergeClasses(styles.card, mod.is_original && styles.cardOriginal)} appearance="outline" onClick={() => handleDetail(mod)} style={{ cursor: 'pointer' }}>
               <CardHeader
                 header={
                   <Text size="small" className={styles.meta} truncate>{mod.mod_key}</Text>

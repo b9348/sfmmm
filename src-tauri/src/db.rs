@@ -18,6 +18,7 @@ pub mod download;
 
 mod user;
 mod mod_ops;
+mod mod_meta;
 mod file;
 mod comment;
 mod like;

@@ -282,6 +282,8 @@
     "noAccount": "没有账号？注册",
     "publishMod": "发布模组",
     "modId": "Mod 标识名 *",
+    "isOriginalLabel": "完全原创（未修改他人内容）",
+    "isOriginalBadge": "原创",
     "modIdEmpty": "Mod 标识名不能为空",
     "modIdInvalid": "Mod 标识名只能包含字母、数字、下划线和连字符",
     "modIdPlaceholder": "英文唯一标识，如 my_awesome_mod",

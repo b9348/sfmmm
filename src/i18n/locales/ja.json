@@ -282,6 +282,8 @@
     "noAccount": "アカウントがありませんか？登録",
     "publishMod": "Mod を公開",
     "modId": "Mod ID *",
+    "isOriginalLabel": "完全オリジナル（他人のコンテンツ未改変）",
+    "isOriginalBadge": "オリジナル",
     "modIdEmpty": "Mod ID は必須です",
     "modIdInvalid": "Mod ID に使用できるのは英数字、アンダースコア、ハイフンのみです",
     "modIdPlaceholder": "英語の一意識別子（例：my_awesome_mod）",

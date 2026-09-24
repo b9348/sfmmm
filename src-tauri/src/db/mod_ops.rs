@@ -131,6 +131,7 @@ pub async fn db_list_mods(
     category: Option<String>,
 ) -> Result<ApiResponse, String> {
     with_conn(state.inner(), move |conn: &mut PooledConn| {
+        crate::db::mod_meta::ensure_mod_is_original_column(conn)?;
         let lang = lang.filter(|s| !s.is_empty()).unwrap_or_else(|| "en".into());
         let page = page.unwrap_or(1).max(1);
         let limit = limit.unwrap_or(20).min(100);
@@ -188,7 +189,7 @@ pub async fn db_list_mods(
                     COALESCE(mt_t.instructions_format, mt_en.instructions_format, 'markdown'),
                     COALESCE(mt_t.changelog, mt_en.changelog, ''),
                     CASE WHEN mt_t.name IS NOT NULL THEN ? WHEN mt_en.name IS NOT NULL THEN 'en' ELSE 'default' END,
-                    u.avatar, u.id
+                    u.avatar, u.id, m.is_original
              FROM mods m
              JOIN users u ON m.author_id = u.id
              LEFT JOIN mod_translations mt_t ON m.id = mt_t.mod_id AND mt_t.lang_code = ?
@@ -263,6 +264,7 @@ pub async fn db_list_mods(
                 "translations": batch.trans_by_mod.remove(&mid).unwrap_or_default(),
                 "created_at": val_to_string(r[6].clone()),
                 "updated_at": val_to_string(r[7].clone()),
+                "is_original": val_to_i64(&r[17]) != 0,
             })
         }).collect();
 
@@ -280,6 +282,7 @@ pub async fn db_list_my_mods(
     device_id: Option<String>,
 ) -> Result<ApiResponse, String> {
     with_conn(state.inner(), move |conn: &mut PooledConn| {
+        crate::db::mod_meta::ensure_mod_is_original_column(conn)?;
         let lang = lang.filter(|s| !s.is_empty()).unwrap_or_else(|| "en".into());
         let page = page.unwrap_or(1).max(1);
         let page_size = page_size.unwrap_or(20).min(100);
@@ -298,7 +301,7 @@ pub async fn db_list_my_mods(
                     COALESCE(mt_t.instructions_format, mt_en.instructions_format, 'markdown'),
                     COALESCE(mt_t.changelog, mt_en.changelog, ''),
                     CASE WHEN mt_t.name IS NOT NULL THEN ? WHEN mt_en.name IS NOT NULL THEN 'en' ELSE 'default' END,
-                    u.avatar, u.id
+                    u.avatar, u.id, m.is_original
              FROM mods m
              JOIN users u ON m.author_id = u.id
              LEFT JOIN mod_translations mt_t ON m.id = mt_t.mod_id AND mt_t.lang_code = ?
@@ -359,6 +362,7 @@ pub async fn db_list_liked_mods(
     page_size: Option<u64>,
 ) -> Result<ApiResponse, String> {
     with_conn(state.inner(), move |conn: &mut PooledConn| {
+        crate::db::mod_meta::ensure_mod_is_original_column(conn)?;
         let device_id = device_id.filter(|s| !s.is_empty()).unwrap_or_default();
         if device_id.is_empty() {
             return Ok(ApiResponse::err("Device ID is required"));
@@ -381,7 +385,7 @@ pub async fn db_list_liked_mods(
                     COALESCE(mt_t.instructions_format, mt_en.instructions_format, 'markdown'),
                     COALESCE(mt_t.changelog, mt_en.changelog, ''),
                     CASE WHEN mt_t.name IS NOT NULL THEN ? WHEN mt_en.name IS NOT NULL THEN 'en' ELSE 'default' END,
-                    u.avatar, u.id
+                    u.avatar, u.id, m.is_original
              FROM mod_likes ml
              JOIN mods m ON m.id = ml.mod_id
              JOIN users u ON m.author_id = u.id
@@ -431,6 +435,7 @@ pub async fn db_list_liked_mods(
                 "translations": batch.trans_by_mod.remove(&mid).unwrap_or_default(),
                 "created_at": val_to_string(r[6].clone()),
                 "updated_at": val_to_string(r[7].clone()),
+                "is_original": val_to_i64(&r[17]) != 0,
             })
         }).collect();
 
@@ -449,6 +454,7 @@ pub async fn db_list_rated_mods(
     with_conn(state.inner(), move |conn: &mut PooledConn| {
         // 幂等确保 mod_ratings 表存在，兼容服务端尚未迁移的旧库
         crate::db::rating::ensure_rating_schema(conn)?;
+        crate::db::mod_meta::ensure_mod_is_original_column(conn)?;
 
         let lang = lang.filter(|s| !s.is_empty()).unwrap_or_else(|| "en".into());
         let page = page.unwrap_or(1).max(1);
@@ -468,7 +474,7 @@ pub async fn db_list_rated_mods(
                     COALESCE(mt_t.instructions_format, mt_en.instructions_format, 'markdown'),
                     COALESCE(mt_t.changelog, mt_en.changelog, ''),
                     CASE WHEN mt_t.name IS NOT NULL THEN ? WHEN mt_en.name IS NOT NULL THEN 'en' ELSE 'default' END,
-                    u.avatar, u.id, mr.rating
+                    u.avatar, u.id, mr.rating, m.is_original
              FROM mod_ratings mr
              JOIN mods m ON m.id = mr.mod_id
              JOIN users u ON m.author_id = u.id
@@ -520,6 +526,7 @@ pub async fn db_list_rated_mods(
                 "translations": batch.trans_by_mod.remove(&mid).unwrap_or_default(),
                 "created_at": val_to_string(r[6].clone()),
                 "updated_at": val_to_string(r[7].clone()),
+                "is_original": val_to_i64(&r[18]) != 0,
             })
         }).collect();
 
@@ -537,6 +544,7 @@ pub async fn db_get_mod_detail(
     device_id: Option<String>,
 ) -> Result<ApiResponse, String> {
     with_conn(state.inner(), move |conn: &mut PooledConn| {
+        crate::db::mod_meta::ensure_mod_is_original_column(conn)?;
         let lang = lang.filter(|s| !s.is_empty()).unwrap_or_else(|| "en".into());
 
         let row: Option<Row> = conn.exec_first(
@@ -548,7 +556,7 @@ pub async fn db_get_mod_detail(
                     COALESCE(mt_t.instructions_format, mt_en.instructions_format, 'markdown'),
                     COALESCE(mt_t.changelog, mt_en.changelog, ''),
                     CASE WHEN mt_t.name IS NOT NULL THEN ? WHEN mt_en.name IS NOT NULL THEN 'en' ELSE 'default' END,
-                    u.avatar, u.id
+                    u.avatar, u.id, m.is_original
              FROM mods m
              JOIN users u ON m.author_id = u.id
              LEFT JOIN mod_translations mt_t ON m.id = mt_t.mod_id AND mt_t.lang_code = ?
@@ -666,6 +674,7 @@ pub async fn db_get_mod_detail(
                         "updated_at": val_to_string(vals[7].clone()),
                         "translations": translations,
                         "user_permissions": user_permissions,
+                        "is_original": val_to_i64(&vals[17]) != 0,
                     }
                 }), "OK"))
             }
@@ -681,12 +690,13 @@ pub async fn db_get_mod_for_edit(
     user_id: u64,
 ) -> Result<ApiResponse, String> {
     with_conn(state.inner(), move |conn: &mut PooledConn| {
-        let mod_row: Option<(u64, String, String)> = conn.exec_first(
-            "SELECT author_id, mod_id, category FROM mods WHERE id = ?", (id,)
+        crate::db::mod_meta::ensure_mod_is_original_column(conn)?;
+        let mod_row: Option<(u64, String, String, i8)> = conn.exec_first(
+            "SELECT author_id, mod_id, category, is_original FROM mods WHERE id = ?", (id,)
         ).map_err(|e| e.to_string())?;
 
-        let (author_id, mod_key, cat) = match mod_row {
-            Some((aid, mk, c)) => (aid, decrypt_str(&mk), c),
+        let (author_id, mod_key, cat, is_original) = match mod_row {
+            Some((aid, mk, c, io)) => (aid, decrypt_str(&mk), c, io != 0),
             None => return Ok(ApiResponse::err("Mod not found")),
         };
 
@@ -760,6 +770,7 @@ pub async fn db_get_mod_for_edit(
             "id": id,
             "mod_key": mod_key,
             "category": cat,
+            "is_original": is_original,
             "files": files,
             "translations": translations,
             "user_permissions": user_permissions,
@@ -775,8 +786,10 @@ pub async fn db_create_mod(
     mod_key: String,
     translations: Vec<serde_json::Value>,
     category: Option<String>,
+    is_original: Option<bool>,
 ) -> Result<ApiResponse, String> {
     with_conn(state.inner(), move |conn: &mut PooledConn| {
+        crate::db::mod_meta::ensure_mod_is_original_column(conn)?;
         let cat = category.unwrap_or_else(|| "v1".into());
 
         // mods.mod_id 列为 varchar(64)（按字符计），超长时 MySQL 会报 ERROR 1406，
@@ -796,9 +809,10 @@ pub async fn db_create_mod(
         // mod_key 原样加密（保真，与本地文件夹/安装记录一致）；大小写变体重名由
         // DB 的 utf8mb4_unicode_ci 唯一索引兜底，捕获 1062 转为友好错误；
         // 迁移前列宽不足（1406 data too long）同样转为友好提示
+        let is_original_val: i8 = if is_original.unwrap_or(false) { 1 } else { 0 };
         if let Err(e) = conn.exec_drop(
-            "INSERT INTO mods (author_id, mod_id, category) VALUES (?, ?, ?)",
-            (author_id, &enc_mod_key, &cat),
+            "INSERT INTO mods (author_id, mod_id, category, is_original) VALUES (?, ?, ?, ?)",
+            (author_id, &enc_mod_key, &cat, is_original_val),
         ) {
             let msg = e.to_string();
             let lower = msg.to_lowercase();
@@ -850,8 +864,10 @@ pub async fn db_update_mod(
     author_id: u64,
     category: Option<String>,
     translations: Vec<serde_json::Value>,
+    is_original: Option<bool>,
 ) -> Result<ApiResponse, String> {
     with_conn(state.inner(), move |conn: &mut PooledConn| {
+        crate::db::mod_meta::ensure_mod_is_original_column(conn)?;
         let perm = get_user_permissions(conn, mod_id, author_id)?;
         let can_edit_mod_info = perm["can_edit_mod_info"].as_bool().unwrap_or(false);
         let can_edit_all_langs = perm["can_edit_all_langs"].as_bool().unwrap_or(false);
@@ -866,6 +882,14 @@ pub async fn db_update_mod(
         if can_edit_mod_info {
             if let Some(cat) = &category {
                 conn.exec_drop("UPDATE mods SET category = ? WHERE id = ?", (cat, mod_id))
+                    .map_err(|e| e.to_string())?;
+                edited = true;
+            }
+            // 原创标：仅 author 级权限（can_edit_mod_info）可改；
+            // 协作者/翻译者（仅 can_edit_all_langs）提交被静默忽略
+            if let Some(io) = is_original {
+                let v: i8 = if io { 1 } else { 0 };
+                conn.exec_drop("UPDATE mods SET is_original = ? WHERE id = ?", (v, mod_id))
                     .map_err(|e| e.to_string())?;
                 edited = true;
             }

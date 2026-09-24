@@ -1,7 +1,7 @@
 import { useTranslation } from 'react-i18next'
 import {
   Card, CardHeader, Text, Avatar,
-  makeStyles, tokens, Badge,
+  makeStyles, mergeClasses, tokens, Badge,
 } from '@fluentui/react-components'
 import {
   HeartRegular,
@@ -29,6 +29,20 @@ const useStyles = makeStyles({
     '&:hover': {
       boxShadow: tokens.shadow4,
     },
+  },
+  cardOriginal: {
+    // 两处坑（都踩过）：
+    // 1) 不能用 '::after' 覆盖 Fluent 的边框：本项目的 makeStyles 是「运行时」模式
+    //    （未安装 griffel 编译插件），运行时解析器对伪元素 key 静默不产出任何规则
+    //    （实测 resolveStyleRules({ '::after': {...} }) 返回空 map）。Fluent 能写
+    //    ::after 是因为它走 AOT，CSS 文本在编译期固化。
+    // 2) 应用时两个 slot 必须经 mergeClasses 合并（见下方 Card 的 className）：
+    //    griffel 的序列类（___xxx）一个字符串只能含一个，用模板字符串拼接会静默丢弃后者。
+    // 故用 CSS outline 画品牌色描边：独立于 Fluent 的 ::after 边框、不占文档流（零布局
+    // 位移）；outlineOffset:-2px 让描边内缩与 Fluent 1px 边框重合，视觉上覆盖它。
+    // 此手法与 Fluent 自身给 Card 画 focus 样式的方式一致。
+    outline: `2px solid ${tokens.colorCompoundBrandStroke}`,
+    outlineOffset: '-2px',
   },
   cardBody: {
     display: 'flex',
@@ -58,7 +72,7 @@ export function ModCard({ mod, onClick, onMouseEnter, onMouseLeave, onMouseDown 
 
   return (
     <Card
-      className={styles.card}
+      className={mergeClasses(styles.card, mod.is_original && styles.cardOriginal)}
       appearance="outline"
       onClick={onClick}
       onMouseEnter={onMouseEnter}

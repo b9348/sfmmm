@@ -208,20 +208,22 @@ function normalizeTranslations(translations) {
   }))
 }
 
-export async function createMod({ author_id, mod_key, translations, category }) {
+export async function createMod({ author_id, mod_key, translations, category, is_original }) {
   const { data } = await dbCall('db_create_mod', {
     author_id, mod_key,
     translations: normalizeTranslations(translations),
     category,
+    is_original: !!is_original,
   })
   return { success: true, data }
 }
 
-export async function updateMod({ author_id, mod_id, category, translations }) {
+export async function updateMod({ author_id, mod_id, category, translations, is_original }) {
   const { data } = await dbCall('db_update_mod', {
     author_id, mod_id: Number(mod_id),
     translations: normalizeTranslations(translations),
     category,
+    is_original: typeof is_original === 'boolean' ? is_original : null,
   })
   return { success: true, data }
 }

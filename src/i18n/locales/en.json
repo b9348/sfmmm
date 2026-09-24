@@ -282,6 +282,8 @@
     "noAccount": "No account? Register",
     "publishMod": "Publish Mod",
     "modId": "Mod ID *",
+    "isOriginalLabel": "Fully original (no third-party content)",
+    "isOriginalBadge": "Original",
     "modIdEmpty": "Mod ID cannot be empty",
     "modIdInvalid": "Mod ID can only contain letters, numbers, underscores, and hyphens",
     "modIdPlaceholder": "Unique English identifier, e.g. my_awesome_mod",
