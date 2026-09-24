@@ -110,6 +110,21 @@ const useStyles = makeStyles({
     maxHeight: '200px',
     overflow: 'auto',
     backgroundColor: tokens.colorNeutralBackground1,
+    '& table': {
+      borderCollapse: 'collapse',
+      marginTop: '8px',
+      marginBottom: '8px',
+      maxWidth: '100%',
+    },
+    '& th, & td': {
+      border: `1px solid ${tokens.colorNeutralStroke2}`,
+      padding: '4px 8px',
+      textAlign: 'left',
+    },
+    '& th': {
+      backgroundColor: tokens.colorNeutralBackground3,
+      fontWeight: tokens.fontWeightSemibold,
+    },
   },
 })
 
@@ -204,6 +219,21 @@ const useContentStyles = makeStyles({
     },
     '& img': {
       maxWidth: '100%',
+    },
+    '& table': {
+      borderCollapse: 'collapse',
+      marginTop: '8px',
+      marginBottom: '8px',
+      maxWidth: '100%',
+    },
+    '& th, & td': {
+      border: `1px solid ${tokens.colorNeutralStroke2}`,
+      padding: '4px 8px',
+      textAlign: 'left',
+    },
+    '& th': {
+      backgroundColor: tokens.colorNeutralBackground3,
+      fontWeight: tokens.fontWeightSemibold,
     },
     '& .rt-img-wrap': {
       position: 'relative',
