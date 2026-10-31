@@ -1,0 +1,1933 @@
+use std::{
+    fs,
+    io::{Read, Write},
+    path::PathBuf,
+    time::{SystemTime, UNIX_EPOCH},
+};
+
+use rusqlite::OptionalExtension;
+use serde::Serialize;
+use sha2::{Digest, Sha256, Sha384};
+use tauri::ipc::Channel;
+use tauri::Manager;
+use tauri_plugin_sql::{Builder, Migration, MigrationKind};
+use futures_util::StreamExt;
+
+pub mod db;
+mod webview_check;
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ModEntry {
+    id: String,
+    name: String,
+    path: String,
+    relative_path: String,
+    source_dir: String,
+    kind: String,
+    is_banned: bool,
+    is_directory_mod: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ScanModsResult {
+    mods: Vec<ModEntry>,
+    checked_dirs: Vec<String>,
+    active_dirs: Vec<String>,
+    warnings: Vec<String>,
+    missing_core_files: Vec<String>,
+    bepin_ex_installed: bool,
+    /// 游戏根目录 .doorstop_version 文件内容（BepInEx 6 的 Doorstop 引导器版本号）
+    doorstop_version: Option<String>,
+    /// 是否为 SFMMM 推荐版本（RECOMMENDED_DOORSTOP_VERSION），否则即使已安装也提示兼容性问题
+    doorstop_compatible: bool,
+    scanned_at: String,
+}
+
+/// SFMMM 实测推荐使用的 Doorstop 版本（BepInEx 6 内置引导器）。
+/// 不同版本实测效果更好（见需求：非 4.5.0 时提示用户更换推荐版本）。
+const RECOMMENDED_DOORSTOP_VERSION: &str = "4.5.0";
+
+fn path_to_string(path: PathBuf) -> String {
+    path.to_string_lossy().into_owned()
+}
+
+fn is_ignored_entry(name: &str) -> bool {
+    name.starts_with('.') || name.ends_with('~') || name.ends_with(".tmp")
+}
+
+fn is_dll_file(path: &PathBuf) -> bool {
+    path.extension()
+        .map(|extension| extension.to_string_lossy().eq_ignore_ascii_case("dll"))
+        .unwrap_or(false)
+        || path.file_name()
+            .map(|name| name.to_string_lossy().to_lowercase().ends_with("[ban]dll"))
+            .unwrap_or(false)
+}
+
+fn file_stem(path: &PathBuf) -> Option<String> {
+    path.file_stem().map(|name| name.to_string_lossy().into_owned())
+}
+
+fn is_banned_file(file_name: &str) -> bool {
+    let lower = file_name.to_lowercase();
+    lower.ends_with("[ban].dll")
+        || lower.ends_with("[ban].json")
+        || lower.ends_with("[ban]dll")
+        || lower.ends_with("[ban]json")
+}
+
+fn strip_banned_suffix(file_name: &str) -> String {
+    let lower = file_name.to_lowercase();
+    if lower.ends_with("[ban].dll") {
+        let stem_len = lower.trim_end_matches("[ban].dll").len();
+        file_name[..stem_len].to_string()
+    } else if lower.ends_with("[ban].json") {
+        let stem_len = lower.trim_end_matches("[ban].json").len();
+        file_name[..stem_len].to_string()
+    } else if lower.ends_with("[ban]dll") {
+        let stem_len = lower.trim_end_matches("[ban]dll").len();
+        file_name[..stem_len].to_string()
+    } else if lower.ends_with("[ban]json") {
+        let stem_len = lower.trim_end_matches("[ban]json").len();
+        file_name[..stem_len].to_string()
+    } else {
+        file_name.to_string()
+    }
+}
+
+fn current_timestamp() -> String {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs().to_string())
+        .unwrap_or_else(|_| "0".into())
+}
+
+fn required_bepinex_core_files() -> &'static [&'static str] {
+    &[
+        ".doorstop_version",
+        "BepInEx/core/0Harmony.dll",
+        "BepInEx/core/AsmResolver.dll",
+        "BepInEx/core/AsmResolver.DotNet.dll",
+        "BepInEx/core/AsmResolver.PE.dll",
+        "BepInEx/core/AsmResolver.PE.File.dll",
+        "BepInEx/core/AssetRipper.CIL.dll",
+        "BepInEx/core/AssetRipper.Primitives.dll",
+        "BepInEx/core/BepInEx.Core.dll",
+        "BepInEx/core/BepInEx.Core.xml",
+        "BepInEx/core/BepInEx.Preloader.Core.dll",
+        "BepInEx/core/BepInEx.Preloader.Core.xml",
+        "BepInEx/core/BepInEx.Unity.Common.dll",
+        "BepInEx/core/BepInEx.Unity.Common.xml",
+        "BepInEx/core/BepInEx.Unity.IL2CPP.dll",
+        "BepInEx/core/BepInEx.Unity.IL2CPP.dll.config",
+        "BepInEx/core/BepInEx.Unity.IL2CPP.xml",
+        "BepInEx/core/Cpp2IL.Core.dll",
+        "BepInEx/core/Disarm.dll",
+        "BepInEx/core/dobby.dll",
+        "BepInEx/core/Gee.External.Capstone.dll",
+        "BepInEx/core/Iced.dll",
+        "BepInEx/core/Il2CppInterop.Common.dll",
+        "BepInEx/core/Il2CppInterop.Generator.dll",
+        "BepInEx/core/Il2CppInterop.HarmonySupport.dll",
+        "BepInEx/core/Il2CppInterop.Runtime.dll",
+        "BepInEx/core/LibCpp2IL.dll",
+        "BepInEx/core/Mono.Cecil.dll",
+        "BepInEx/core/Mono.Cecil.Mdb.dll",
+        "BepInEx/core/Mono.Cecil.Pdb.dll",
+        "BepInEx/core/Mono.Cecil.Rocks.dll",
+        "BepInEx/core/MonoMod.RuntimeDetour.dll",
+        "BepInEx/core/MonoMod.Utils.dll",
+        "BepInEx/core/SemanticVersioning.dll",
+        "BepInEx/core/StableNameDotNet.dll",
+        "BepInEx/core/WasmDisassembler.dll",
+        "doorstop_config.ini",
+        "dotnet/.version",
+        "dotnet/clretwrc.dll",
+        "dotnet/clrjit.dll",
+        "dotnet/coreclr.dll",
+        "dotnet/dbgshim.dll",
+        "dotnet/hostpolicy.dll",
+        "dotnet/Microsoft.Bcl.AsyncInterfaces.dll",
+        "dotnet/Microsoft.CSharp.dll",
+        "dotnet/Microsoft.DiaSymReader.Native.amd64.dll",
+        "dotnet/Microsoft.Extensions.DependencyInjection.Abstractions.dll",
+        "dotnet/Microsoft.Extensions.DependencyInjection.dll",
+        "dotnet/Microsoft.Extensions.Logging.Abstractions.dll",
+        "dotnet/Microsoft.Extensions.Logging.dll",
+        "dotnet/Microsoft.Extensions.Options.dll",
+        "dotnet/Microsoft.Extensions.Primitives.dll",
+        "dotnet/Microsoft.NETCore.App.deps.json",
+        "dotnet/Microsoft.NETCore.App.runtimeconfig.json",
+        "dotnet/Microsoft.VisualBasic.Core.dll",
+        "dotnet/Microsoft.VisualBasic.dll",
+        "dotnet/Microsoft.Win32.Primitives.dll",
+        "dotnet/Microsoft.Win32.Registry.dll",
+        "dotnet/mscordaccore.dll",
+        "dotnet/mscordaccore_amd64_amd64_6.0.722.32202.dll",
+        "dotnet/mscordbi.dll",
+        "dotnet/mscorlib.dll",
+        "dotnet/mscorrc.dll",
+        "dotnet/msquic.dll",
+        "dotnet/netstandard.dll",
+        "dotnet/System.AppContext.dll",
+        "dotnet/System.Buffers.dll",
+        "dotnet/System.Collections.Concurrent.dll",
+        "dotnet/System.Collections.dll",
+        "dotnet/System.Collections.Immutable.dll",
+        "dotnet/System.Collections.NonGeneric.dll",
+        "dotnet/System.Collections.Specialized.dll",
+        "dotnet/System.ComponentModel.Annotations.dll",
+        "dotnet/System.ComponentModel.DataAnnotations.dll",
+        "dotnet/System.ComponentModel.dll",
+        "dotnet/System.ComponentModel.EventBasedAsync.dll",
+        "dotnet/System.ComponentModel.Primitives.dll",
+        "dotnet/System.ComponentModel.TypeConverter.dll",
+        "dotnet/System.Configuration.dll",
+        "dotnet/System.Console.dll",
+        "dotnet/System.Core.dll",
+        "dotnet/System.Data.Common.dll",
+        "dotnet/System.Data.DataSetExtensions.dll",
+        "dotnet/System.Data.dll",
+        "dotnet/System.Diagnostics.Contracts.dll",
+        "dotnet/System.Diagnostics.Debug.dll",
+        "dotnet/System.Diagnostics.DiagnosticSource.dll",
+        "dotnet/System.Diagnostics.FileVersionInfo.dll",
+        "dotnet/System.Diagnostics.Process.dll",
+        "dotnet/System.Diagnostics.StackTrace.dll",
+        "dotnet/System.Diagnostics.TextWriterTraceListener.dll",
+        "dotnet/System.Diagnostics.Tools.dll",
+        "dotnet/System.Diagnostics.TraceSource.dll",
+        "dotnet/System.Diagnostics.Tracing.dll",
+        "dotnet/System.dll",
+        "dotnet/System.Drawing.dll",
+        "dotnet/System.Drawing.Primitives.dll",
+        "dotnet/System.Dynamic.Runtime.dll",
+        "dotnet/System.Formats.Asn1.dll",
+        "dotnet/System.Globalization.Calendars.dll",
+        "dotnet/System.Globalization.dll",
+        "dotnet/System.Globalization.Extensions.dll",
+        "dotnet/System.IO.Compression.Brotli.dll",
+        "dotnet/System.IO.Compression.dll",
+        "dotnet/System.IO.Compression.FileSystem.dll",
+        "dotnet/System.IO.Compression.Native.dll",
+        "dotnet/System.IO.Compression.ZipFile.dll",
+        "dotnet/System.IO.dll",
+        "dotnet/System.IO.FileSystem.AccessControl.dll",
+        "dotnet/System.IO.FileSystem.dll",
+        "dotnet/System.IO.FileSystem.DriveInfo.dll",
+        "dotnet/System.IO.FileSystem.Primitives.dll",
+        "dotnet/System.IO.FileSystem.Watcher.dll",
+        "dotnet/System.IO.IsolatedStorage.dll",
+        "dotnet/System.IO.MemoryMappedFiles.dll",
+        "dotnet/System.IO.Pipes.AccessControl.dll",
+        "dotnet/System.IO.Pipes.dll",
+        "dotnet/System.IO.UnmanagedMemoryStream.dll",
+        "dotnet/System.Linq.dll",
+        "dotnet/System.Linq.Expressions.dll",
+        "dotnet/System.Linq.Parallel.dll",
+        "dotnet/System.Linq.Queryable.dll",
+        "dotnet/System.Memory.dll",
+        "dotnet/System.Net.dll",
+        "dotnet/System.Net.Http.dll",
+        "dotnet/System.Net.Http.Json.dll",
+        "dotnet/System.Net.HttpListener.dll",
+        "dotnet/System.Net.Mail.dll",
+        "dotnet/System.Net.NameResolution.dll",
+        "dotnet/System.Net.NetworkInformation.dll",
+        "dotnet/System.Net.Ping.dll",
+        "dotnet/System.Net.Primitives.dll",
+        "dotnet/System.Net.Quic.dll",
+        "dotnet/System.Net.Requests.dll",
+        "dotnet/System.Net.Security.dll",
+        "dotnet/System.Net.ServicePoint.dll",
+        "dotnet/System.Net.Sockets.dll",
+        "dotnet/System.Net.WebClient.dll",
+        "dotnet/System.Net.WebHeaderCollection.dll",
+        "dotnet/System.Net.WebProxy.dll",
+        "dotnet/System.Net.WebSockets.Client.dll",
+        "dotnet/System.Net.WebSockets.dll",
+        "dotnet/System.Numerics.dll",
+        "dotnet/System.Numerics.Vectors.dll",
+        "dotnet/System.ObjectModel.dll",
+        "dotnet/System.Private.CoreLib.dll",
+        "dotnet/System.Private.DataContractSerialization.dll",
+        "dotnet/System.Private.Uri.dll",
+        "dotnet/System.Private.Xml.dll",
+        "dotnet/System.Private.Xml.Linq.dll",
+        "dotnet/System.Reflection.DispatchProxy.dll",
+        "dotnet/System.Reflection.dll",
+        "dotnet/System.Reflection.Emit.dll",
+        "dotnet/System.Reflection.Emit.ILGeneration.dll",
+        "dotnet/System.Reflection.Emit.Lightweight.dll",
+        "dotnet/System.Reflection.Extensions.dll",
+        "dotnet/System.Reflection.Metadata.dll",
+        "dotnet/System.Reflection.Primitives.dll",
+        "dotnet/System.Reflection.TypeExtensions.dll",
+        "dotnet/System.Resources.Reader.dll",
+        "dotnet/System.Resources.ResourceManager.dll",
+        "dotnet/System.Resources.Writer.dll",
+        "dotnet/System.Runtime.CompilerServices.Unsafe.dll",
+        "dotnet/System.Runtime.CompilerServices.VisualC.dll",
+        "dotnet/System.Runtime.dll",
+        "dotnet/System.Runtime.Extensions.dll",
+        "dotnet/System.Runtime.Handles.dll",
+        "dotnet/System.Runtime.InteropServices.dll",
+        "dotnet/System.Runtime.InteropServices.RuntimeInformation.dll",
+        "dotnet/System.Runtime.Intrinsics.dll",
+        "dotnet/System.Runtime.Loader.dll",
+        "dotnet/System.Runtime.Numerics.dll",
+        "dotnet/System.Runtime.Serialization.dll",
+        "dotnet/System.Runtime.Serialization.Formatters.dll",
+        "dotnet/System.Runtime.Serialization.Json.dll",
+        "dotnet/System.Runtime.Serialization.Primitives.dll",
+        "dotnet/System.Runtime.Serialization.Xml.dll",
+        "dotnet/System.Security.AccessControl.dll",
+        "dotnet/System.Security.Claims.dll",
+        "dotnet/System.Security.Cryptography.Algorithms.dll",
+        "dotnet/System.Security.Cryptography.Cng.dll",
+        "dotnet/System.Security.Cryptography.Csp.dll",
+        "dotnet/System.Security.Cryptography.Encoding.dll",
+        "dotnet/System.Security.Cryptography.OpenSsl.dll",
+        "dotnet/System.Security.Cryptography.Primitives.dll",
+        "dotnet/System.Security.Cryptography.X509Certificates.dll",
+        "dotnet/System.Security.dll",
+        "dotnet/System.Security.Principal.dll",
+        "dotnet/System.Security.Principal.Windows.dll",
+        "dotnet/System.Security.SecureString.dll",
+        "dotnet/System.ServiceModel.Web.dll",
+        "dotnet/System.ServiceProcess.dll",
+        "dotnet/System.Text.Encoding.CodePages.dll",
+        "dotnet/System.Text.Encoding.dll",
+        "dotnet/System.Text.Encoding.Extensions.dll",
+        "dotnet/System.Text.Encodings.Web.dll",
+        "dotnet/System.Text.Json.dll",
+        "dotnet/System.Text.RegularExpressions.dll",
+        "dotnet/System.Threading.Channels.dll",
+        "dotnet/System.Threading.dll",
+        "dotnet/System.Threading.Overlapped.dll",
+        "dotnet/System.Threading.Tasks.Dataflow.dll",
+        "dotnet/System.Threading.Tasks.dll",
+        "dotnet/System.Threading.Tasks.Extensions.dll",
+        "dotnet/System.Threading.Tasks.Parallel.dll",
+        "dotnet/System.Threading.Thread.dll",
+        "dotnet/System.Threading.ThreadPool.dll",
+        "dotnet/System.Threading.Timer.dll",
+        "dotnet/System.Transactions.dll",
+        "dotnet/System.Transactions.Local.dll",
+        "dotnet/System.ValueTuple.dll",
+        "dotnet/System.Web.dll",
+        "dotnet/System.Web.HttpUtility.dll",
+        "dotnet/System.Windows.dll",
+        "dotnet/System.Xml.dll",
+        "dotnet/System.Xml.Linq.dll",
+        "dotnet/System.Xml.ReaderWriter.dll",
+        "dotnet/System.Xml.Serialization.dll",
+        "dotnet/System.Xml.XDocument.dll",
+        "dotnet/System.Xml.XmlDocument.dll",
+        "dotnet/System.Xml.XmlSerializer.dll",
+        "dotnet/System.Xml.XPath.dll",
+        "dotnet/System.Xml.XPath.XDocument.dll",
+        "dotnet/WindowsBase.dll",
+        "winhttp.dll",
+    ]
+}
+
+fn missing_bepinex_core_files(game_path: &PathBuf) -> Vec<String> {
+    required_bepinex_core_files()
+        .iter()
+        .filter(|relative_path| !game_path.join(relative_path).is_file())
+        .map(|relative_path| (*relative_path).to_string())
+        .collect()
+}
+
+#[tauri::command(rename_all = "snake_case")]
+fn open_folder(path: String, selected_items: Option<Vec<String>>) -> Result<(), String> {
+    let input_path = PathBuf::from(&path);
+    let mut items = selected_items.unwrap_or_default();
+
+    // selected_items 为空 => 前端要“打开该路径本身”：
+    //   - 路径是目录 → 直接打开该目录（钻入），不高亮子项；
+    //   - 路径是文件 → 在其父目录中高亮该文件（is_dir 误判时回退父目录，单文件场景安全）。
+    // selected_items 非空 => 前端已保证 input_path 就是要打开的目录（currentDir / 已安装 mod
+    //   目录），直接打开该目录并高亮 items 列出的全部条目，绝不回退到父目录——
+    //   否则 junction 目录（如 v1 的 CustomMissions）会被 std::fs::is_dir() 误判为假，导致
+    //   “打开游戏根目录 + 高亮该目录”的错位。SHParseDisplayName 会跟随符号链接/目录交接点解析。
+    // 前端无需自行判定目录/文件，“打开哪个目录”由 input_path + items 是否为空唯一决定。
+    let open_path = if items.is_empty() {
+        if input_path.is_dir() {
+            input_path.clone()
+        } else if input_path.is_file() {
+            // 单文件：在其父目录中高亮该文件
+            if let Some(name) = input_path.file_name().and_then(|n| n.to_str()) {
+                items.push(name.to_string());
+            }
+            input_path.parent().map(|p| p.to_path_buf()).unwrap_or_else(|| input_path.clone())
+        } else if input_path.exists() {
+            // 路径存在但既不是常规文件也不是常规目录（如 junction/符号链接/交接点）。
+            // is_dir() 对 junction 可能误判为假，直接打开该路径，由 SHParseDisplayName 可靠解析。
+            input_path.clone()
+        } else {
+            // 路径不存在：尝试打开父目录并高亮原路径名称
+            if let Some(name) = input_path.file_name().and_then(|n| n.to_str()) {
+                items.push(name.to_string());
+            }
+            input_path.parent().map(|p| p.to_path_buf()).unwrap_or_else(|| input_path.clone())
+        }
+    } else {
+        // items 非空：前端已保证 input_path 就是要打开的目录（如 currentDir / 已安装 mod 目录）。
+        // 直接打开该目录并高亮全部 items，绝不回退到父目录——否则 junction 目录（如 v1 的
+        // CustomMissions）会被 std::fs::is_dir() 误判为假，导致“打开游戏根目录 + 高亮该目录”的错位。
+        // 依赖 SHParseDisplayName 跟随符号链接/目录交接点解析（与单文件夹钻入走同一可靠路径）。
+        input_path.clone()
+    };
+
+    // 不再用 is_dir() 提前 return：符号链接 / 交接点下 is_dir() 可能误判为假，直接交给
+    // SHParseDisplayName 解析，解析成功即打开（见下方 Windows 分支的 HRESULT 判定）。
+
+    #[cfg(target_os = "windows")]
+    {
+        use std::ffi::{OsStr, c_void};
+        use std::iter::once;
+        use std::os::windows::ffi::OsStrExt;
+
+        type HRESULT = i32;
+        type LPITEMIDLIST = *mut c_void;
+        type LPBC = *mut c_void;
+
+        #[link(name = "ole32")]
+        extern "system" {
+            fn CoInitializeEx(pvReserved: *mut c_void, dwCoInit: u32) -> HRESULT;
+        }
+
+        #[link(name = "shell32")]
+        extern "system" {
+            fn SHParseDisplayName(
+                pszName: *const u16,
+                pbc: LPBC,
+                ppidl: *mut LPITEMIDLIST,
+                sfgaoIn: u32,
+                psfgaoOut: *mut u32,
+            ) -> HRESULT;
+            fn SHOpenFolderAndSelectItems(
+                pidlFolder: LPITEMIDLIST,
+                cidl: u32,
+                apidl: *const LPITEMIDLIST,
+                dwFlags: u32,
+            ) -> HRESULT;
+            fn ILFree(pidl: LPITEMIDLIST);
+        }
+
+        const COINIT_APARTMENTTHREADED: u32 = 0x2;
+
+        fn to_wide(s: &str) -> Vec<u16> {
+            OsStr::new(s).encode_wide().chain(once(0)).collect()
+        }
+
+        unsafe {
+            let _ = CoInitializeEx(std::ptr::null_mut(), COINIT_APARTMENTTHREADED);
+        }
+
+        let path_str = open_path.to_string_lossy().to_string();
+        let folder_wide = to_wide(&path_str);
+        let mut folder_pidl: LPITEMIDLIST = std::ptr::null_mut();
+        let hr = unsafe {
+            SHParseDisplayName(folder_wide.as_ptr(), std::ptr::null_mut(), &mut folder_pidl, 0, std::ptr::null_mut())
+        };
+        if hr < 0 {
+            return Err(format!("解析目录失败: 0x{:08X}", hr));
+        }
+
+        // apidl 传入每个条目的绝对 PIDL（SHParseDisplayName 解析其完整路径）。官方示例
+        // （ILCreateFromPath 生成绝对 PIDL 多选）与 Windows 资源管理器实际行为一致：会打开
+        // pidlFolder 并高亮这些条目；对符号链接/目录交接点(junction) 子项也稳定，故不转换为
+        // 相对 PIDL（ILFindChild 对 junction 子项会返回 null，反而导致高亮丢失）。
+        // 注意：item 可能来自前端 manifest（含 '/' 分隔符），必须归一化为 '\' 再 join，
+        // 否则 SHParseDisplayName 对混合分隔符路径返回 E_INVALIDARG(0x80070057) 解析失败，
+        // 导致 item_pidls 为空、cidl=0，SHOpenFolderAndSelectItems 转而打开父目录并选中
+        // pidlFolder 本身（表现为"打开游戏根目录 + 高亮 v1 文件夹"的错位）。
+        let mut item_pidls: Vec<LPITEMIDLIST> = Vec::new();
+        for item in &items {
+            let item_norm = item.replace('/', "\\");
+            let item_path = open_path.join(&item_norm);
+            let item_wide = to_wide(&item_path.to_string_lossy());
+            let mut item_pidl: LPITEMIDLIST = std::ptr::null_mut();
+            let hr = unsafe {
+                SHParseDisplayName(item_wide.as_ptr(), std::ptr::null_mut(), &mut item_pidl, 0, std::ptr::null_mut())
+            };
+            if hr >= 0 && !item_pidl.is_null() {
+                item_pidls.push(item_pidl);
+            }
+        }
+
+        let result = unsafe {
+            SHOpenFolderAndSelectItems(
+                folder_pidl,
+                item_pidls.len() as u32,
+                if item_pidls.is_empty() { std::ptr::null() } else { item_pidls.as_ptr() },
+                0,
+            )
+        };
+
+        unsafe {
+            for pidl in item_pidls {
+                ILFree(pidl);
+            }
+            ILFree(folder_pidl);
+        }
+
+        if result < 0 {
+            return Err(format!("打开目录失败: 0x{:08X}", result));
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    std::process::Command::new("open")
+        .arg(open_path)
+        .spawn()
+        .map_err(|e| e.to_string())?;
+
+    #[cfg(target_os = "linux")]
+    std::process::Command::new("xdg-open")
+        .arg(open_path)
+        .spawn()
+        .map_err(|e| e.to_string())?;
+
+    Ok(())
+}
+
+/// 启动游戏：运行游戏根目录下的 SecretFlasherManaka.exe，不打开任何页面。
+/// 工作目录设为游戏目录，保证游戏能按相对路径找到资源文件。
+#[tauri::command]
+fn launch_game(game_path: String) -> Result<(), String> {
+    let game_dir = PathBuf::from(&game_path);
+    let exe_path = game_dir.join("SecretFlasherManaka.exe");
+
+    if !exe_path.is_file() {
+        return Err(format!("未找到游戏可执行文件: {}", exe_path.display()));
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        // CREATE_NO_WINDOW：防止游戏（若为控制台子系统程序）弹出黑框窗口，
+        // GUI 程序不受该标志影响，窗口照常显示。
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+        // 中文路径兼容：下面经 CreateProcessW 启动本身支持任意 Unicode 路径，
+        // 但游戏本体是日文程序，内部多用 ANSI 接口（中文系统为 GBK）定位自身资源，
+        // 安装在含中文的目录下会因编码不符而闪退。转为纯 ASCII 的 8.3 短路径启动
+        // 即可绕开；纯 ASCII 路径不做转换（8.3 短名会截断 exe 文件名，Unity 按
+        // exe 名查找 <exe>_Data 文件夹会失败），卷禁用 8.3 名生成或转换失败时
+        // 原样回退，行为与旧版一致。
+        let exe_launch = short_ascii_path(&exe_path).unwrap_or_else(|| exe_path.clone());
+        let dir_launch = short_ascii_path(&game_dir).unwrap_or_else(|| game_dir.clone());
+
+        std::process::Command::new(&exe_launch)
+            .current_dir(&dir_launch)
+            .creation_flags(CREATE_NO_WINDOW)
+            .spawn()
+            .map_err(|e| format!("启动游戏失败: {}", e))?;
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        std::process::Command::new(&exe_path)
+            .current_dir(&game_dir)
+            .spawn()
+            .map_err(|e| format!("启动游戏失败: {}", e))?;
+    }
+
+    Ok(())
+}
+
+/// 取路径的 8.3 短路径（GetShortPathNameW），仅用于含非 ASCII 字符（如中文）
+/// 的路径：ASCII 在各代码页下字节一致，可供内部走 ANSI 接口的老程序安全使用。
+/// 路径本身已是纯 ASCII 时必须原样返回、不做转换——GetShortPathNameW 会把超过
+/// 8.3 格式的长文件名截断成短名（如 SecretFlasherManaka.exe → SECRET~1.EXE），
+/// Unity 按 exe 文件名推断 Data 文件夹（SECRET1_Data）将找不到实际的
+/// <长名>_Data 目录导致游戏无法启动。注意短名只保证 OEM 代码页可表示，中文
+/// 系统下可能仍含非 ASCII 双字节字符，故拿到结果后复查，含非 ASCII（如卷关闭
+/// 了 8.3 名生成时返回原长路径）则返回 None，由调用方回退到原始路径。文件必须已存在。
+#[cfg(target_os = "windows")]
+fn short_ascii_path(p: &std::path::Path) -> Option<std::path::PathBuf> {
+    use std::ffi::OsString;
+    use std::iter::once;
+    use std::os::windows::ffi::{OsStrExt, OsStringExt};
+
+    // 纯 ASCII 路径无需也无法安全转换：短名截断会破坏 Unity 的
+    // <exe 名>_Data 文件夹查找，直接原样返回。
+    if p.as_os_str().encode_wide().all(|c| c <= 0x7F) {
+        return Some(p.to_path_buf());
+    }
+
+    type DWORD = u32;
+    type LPCWSTR = *const u16;
+    type LPWSTR = *mut u16;
+
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn GetShortPathNameW(lpszLongPath: LPCWSTR, lpszShortPath: LPWSTR, cchBuffer: DWORD) -> DWORD;
+    }
+
+    let wide: Vec<u16> = p.as_os_str().encode_wide().chain(once(0)).collect();
+    unsafe {
+        // 先传 NULL 缓冲区取所需长度（含结尾 NUL），再实际取短路径
+        let len = GetShortPathNameW(wide.as_ptr(), std::ptr::null_mut(), 0);
+        if len == 0 {
+            return None;
+        }
+        let mut buf = vec![0u16; len as usize];
+        let n = GetShortPathNameW(wide.as_ptr(), buf.as_mut_ptr(), len);
+        if n == 0 {
+            return None;
+        }
+        buf.truncate(n as usize);
+        if buf.iter().any(|&c| c > 0x7F) {
+            return None;
+        }
+        Some(std::path::PathBuf::from(OsString::from_wide(&buf)))
+    }
+}
+
+#[derive(Clone, Serialize)]
+struct DownloadProgress {
+    percent: u32,
+    stage: String,
+}
+
+#[tauri::command]
+async fn download_and_extract_7z(
+    url: String,
+    target_dir: String,
+    on_progress: Channel<DownloadProgress>,
+) -> Result<(), String> {
+    let target_path = PathBuf::from(&target_dir);
+    if !target_path.is_dir() {
+        return Err("目标目录不存在".into());
+    }
+
+    let _ = on_progress.send(DownloadProgress {
+        percent: 0,
+        stage: "downloading".into(),
+    });
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(300))
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    let response = client.get(&url).send().await.map_err(|e| format!("下载失败: {}", e))?;
+    let status = response.status();
+    if !status.is_success() {
+        return Err(format!("下载失败，HTTP {}", status));
+    }
+
+    let total = response.content_length().unwrap_or(0);
+    let temp_path = std::env::temp_dir().join(format!("bepinex_download_{}.7z", current_timestamp()));
+    let mut file = fs::File::create(&temp_path).map_err(|e| format!("创建临时文件失败: {}", e))?;
+    let mut stream = response.bytes_stream();
+    let mut downloaded = 0u64;
+
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| format!("下载失败: {}", e))?;
+        file.write_all(&chunk).map_err(|e| format!("写入临时文件失败: {}", e))?;
+        downloaded += chunk.len() as u64;
+        if total > 0 {
+            let percent = (downloaded * 100 / total) as u32;
+            let _ = on_progress.send(DownloadProgress {
+                percent,
+                stage: "downloading".into(),
+            });
+        }
+    }
+
+    let _ = on_progress.send(DownloadProgress {
+        percent: 100,
+        stage: "extracting".into(),
+    });
+
+    sevenz_rust::decompress_file(&temp_path, &target_path).map_err(|e| format!("解压失败: {}", e))?;
+
+    let _ = fs::remove_file(&temp_path);
+    let _ = on_progress.send(DownloadProgress {
+        percent: 100,
+        stage: "done".into(),
+    });
+
+    Ok(())
+}
+
+// 通用禁用/启用改名规则：{stem}.{ext} ⇄ {stem}[ban]{ext}（[ban] 直接替代原扩展名的
+// 点号，游戏按扩展名扫描时即不再识别该文件）。不限 dll/json —— v2 任务脚本 (.code)
+// 等任意带扩展名的文件都需要可禁用。返回 (新文件名, 改名后是否为禁用名)。
+fn toggle_target_name(file_name: &str) -> Option<(String, bool)> {
+    let lower = file_name.to_lowercase();
+    // 已禁用：末尾为 [ban]<ext>（ext 非空、纯字母数字且不含点）
+    if let Some(pos) = lower.rfind("[ban]") {
+        let ext = &lower[pos + 5..];
+        if !ext.is_empty()
+            && !ext.contains('.')
+            && ext.bytes().all(|b| b.is_ascii_alphanumeric())
+        {
+            // to_lowercase 对个别非 ASCII 字符可能改变字节长度，get 保证下标落在字符边界
+            let stem = file_name.get(..pos)?;
+            return Some((format!("{}.{}", stem, ext), false));
+        }
+    }
+    // 未禁用：取最后一个点号后的扩展名挂上 [ban] 标记
+    // （rfind 用 lower 而非 file_name：to_lowercase 极少数情况下会改变字节长度，
+    //   统一在 lower 上取下标，stem 再用 get 安全切原串）
+    let dot = lower.rfind('.')?;
+    if dot == 0 {
+        return None; // 点开头的隐藏文件没有可挂标记的扩展名
+    }
+    let ext = &lower[dot + 1..];
+    if ext.is_empty() || !ext.bytes().all(|b| b.is_ascii_alphanumeric()) {
+        return None;
+    }
+    let stem = file_name.get(..dot)?;
+    Some((format!("{}[ban]{}", stem, ext), true))
+}
+
+#[cfg(test)]
+mod toggle_target_name_tests {
+    use super::toggle_target_name;
+
+    #[test]
+    fn ban_restore_roundtrip() {
+        // v2 任务脚本 .code（本次修复的目标场景）
+        assert_eq!(toggle_target_name("actions.code"), Some(("actions[ban]code".into(), true)));
+        assert_eq!(toggle_target_name("actions[ban]code"), Some(("actions.code".into(), false)));
+        // 原有 dll/json 行为不变
+        assert_eq!(toggle_target_name("Foo.dll"), Some(("Foo[ban]dll".into(), true)));
+        assert_eq!(toggle_target_name("Foo[ban]json"), Some(("Foo.json".into(), false)));
+        // 多段点号的 stem 保留完整
+        assert_eq!(toggle_target_name("my.mod.code"), Some(("my.mod[ban]code".into(), true)));
+        assert_eq!(toggle_target_name("my.mod[ban]code"), Some(("my.mod.code".into(), false)));
+        // 大写扩展名统一转小写
+        assert_eq!(toggle_target_name("README.CODE"), Some(("README[ban]code".into(), true)));
+        // 无扩展名 / 点开头的隐藏文件不可禁用
+        assert_eq!(toggle_target_name("LICENSE"), None);
+        assert_eq!(toggle_target_name(".gitkeep"), None);
+        assert_eq!(toggle_target_name("readme"), None);
+    }
+}
+
+#[tauri::command]
+fn toggle_mod_enabled(path: String) -> Result<(bool, String), String> {
+    let path = PathBuf::from(&path);
+
+    if !path.is_file() {
+        return Err("文件不存在".into());
+    }
+
+    let file_name = path.file_name()
+        .ok_or("无法获取文件名")?
+        .to_string_lossy()
+        .into_owned();
+
+    let parent = path.parent()
+        .ok_or("无法获取父目录")?
+        .to_path_buf();
+
+    let (new_name, is_banned) = toggle_target_name(&file_name)
+        .ok_or("无法识别的文件格式")?;
+
+    let new_path = parent.join(&new_name);
+    fs::rename(&path, &new_path).map_err(|e| format!("重命名失败: {}", e))?;
+
+    Ok((is_banned, path_to_string(new_path)))
+}
+
+#[tauri::command]
+fn batch_toggle_mod_enabled(dir: String, ban: bool) -> Result<(usize, usize), String> {
+    let dir = PathBuf::from(&dir);
+    if !dir.is_dir() {
+        return Err("目录不存在".into());
+    }
+
+    let mut success = 0usize;
+    let mut failed = 0usize;
+
+    let entries = fs::read_dir(&dir).map_err(|e| format!("读取目录失败: {}", e))?;
+    for entry in entries.filter_map(|e| e.ok()) {
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        let file_name = match path.file_name() {
+            Some(n) => n.to_string_lossy().into_owned(),
+            None => continue,
+        };
+        // 通用规则（同 toggle_mod_enabled / toggle_target_name）：
+        // 禁用只处理未禁用的文件，启用只处理已禁用的，
+        // 其余（已处于目标状态、无扩展名等无法识别的文件）原样跳过
+        if let Some((new_name, is_banned)) = toggle_target_name(&file_name) {
+            if is_banned == ban {
+                let new_path = dir.join(&new_name);
+                match fs::rename(&path, &new_path) {
+                    Ok(_) => success += 1,
+                    Err(_) => failed += 1,
+                }
+            }
+        }
+    }
+
+    Ok((success, failed))
+}
+
+#[tauri::command]
+async fn http_request(url: String, method: String, body: Option<String>) -> Result<String, String> {
+    println!("[Rust] HTTP Request: {} {}", method, url);
+    
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|e| format!("创建客户端失败: {}", e))?;
+    
+    let mut request = match method.as_str() {
+        "GET" => client.get(&url),
+        "POST" => client.post(&url),
+        "PUT" => client.put(&url),
+        "DELETE" => client.delete(&url),
+        _ => return Err(format!("不支持的 HTTP 方法: {}", method)),
+    };
+    
+    request = request.header("Content-Type", "application/json");
+    
+    if let Some(b) = body {
+        request = request.body(b);
+    }
+    
+    let response = request.send().await.map_err(|e| {
+        println!("[Rust] Request Error: {:?}", e);
+        format!("请求失败: {}", e)
+    })?;
+    let status = response.status().as_u16();
+    let body_text = response.text().await.map_err(|e| format!("读取响应失败: {}", e))?;
+    
+    println!("[Rust] Response: HTTP {} - {}", status, body_text.chars().take(100).collect::<String>());
+    
+    // 返回 JSON 字符串
+    let result = format!("{{\"status\":{},\"body\":{}}}", status, serde_json::to_string(&body_text).map_err(|e| e.to_string())?);
+    Ok(result)
+}
+
+/// 官方最新版（v1.1.3）游戏主程序的 SHA-256，本地游戏版本校验基准。
+const OFFICIAL_GAME_EXE_SHA256: &str = "01d0b5f4b7a727432b23fd556753ecf543bd612698dd7a1cdd5687875b4de300";
+/// 游戏主程序文件名（版本校验对象）。
+const GAME_EXE_NAME: &str = "SecretFlasherManaka.exe";
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GameVersionCheckResult {
+    /// 游戏目录下是否存在主程序
+    exe_exists: bool,
+    /// 主程序 hash 是否与官方最新版一致
+    hash_matches: bool,
+}
+
+/// 校验所选游戏目录的主程序 SHA-256 是否与官方最新版（v1.1.3）一致。
+/// 主程序缺失时返回 exe_exists=false（不视为错误，前端据此跳过版本提示）。
+#[tauri::command]
+fn check_game_version(game_path: String) -> Result<GameVersionCheckResult, String> {
+    let exe_path = PathBuf::from(game_path).join(GAME_EXE_NAME);
+    if !exe_path.is_file() {
+        return Ok(GameVersionCheckResult { exe_exists: false, hash_matches: false });
+    }
+    let hash = sha256_hex_file(&exe_path)?;
+    Ok(GameVersionCheckResult { exe_exists: true, hash_matches: hash == OFFICIAL_GAME_EXE_SHA256 })
+}
+
+#[tauri::command]
+fn scan_mods(game_path: String) -> Result<ScanModsResult, String> {
+    let game_path = PathBuf::from(game_path);
+
+    if !game_path.is_dir() {
+        return Err("游戏目录不存在或无法访问".into());
+    }
+
+    let mut checked_dirs = Vec::new();
+    let mut active_dirs = Vec::new();
+    let mut warnings = Vec::new();
+    let mut mods = Vec::new();
+    let missing_core_files = missing_bepinex_core_files(&game_path);
+    let bepin_ex_installed = missing_core_files.is_empty();
+    // 读取 .doorstop_version 文件内容（BepInEx 6 引导器版本），判断是否为 SFMMM 推荐版本
+    let doorstop_version = fs::read_to_string(game_path.join(".doorstop_version"))
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    let doorstop_compatible = doorstop_version.as_deref() == Some(RECOMMENDED_DOORSTOP_VERSION);
+
+    if !bepin_ex_installed {
+        warnings.push("mod 前置未安装或不完整".into());
+        return Ok(ScanModsResult {
+            mods,
+            checked_dirs,
+            active_dirs,
+            warnings,
+            missing_core_files,
+            bepin_ex_installed,
+            doorstop_version,
+            doorstop_compatible,
+            scanned_at: current_timestamp(),
+        });
+    }
+
+    let plugins_dir = game_path.join("BepInEx").join("plugins");
+    checked_dirs.push(path_to_string(plugins_dir.clone()));
+
+    if plugins_dir.is_dir() {
+        active_dirs.push(path_to_string(plugins_dir.clone()));
+
+        for entry in fs::read_dir(&plugins_dir).map_err(|e| e.to_string())? {
+            let entry = entry.map_err(|e| e.to_string())?;
+            let path = entry.path();
+            let file_name = entry.file_name().to_string_lossy().into_owned();
+
+            if is_ignored_entry(&file_name) {
+                continue;
+            }
+
+            let metadata = entry.metadata().map_err(|e| e.to_string())?;
+
+            if metadata.is_file() && is_dll_file(&path) {
+                let is_banned = is_banned_file(&file_name);
+                let display_name = if is_banned {
+                    strip_banned_suffix(&file_name)
+                } else {
+                    file_stem(&path).unwrap_or_else(|| file_name.clone())
+                };
+                mods.push(ModEntry {
+                    id: path_to_string(path.clone()),
+                    name: display_name,
+                    path: path_to_string(path),
+                    relative_path: format!("BepInEx/plugins/{}", file_name),
+                    source_dir: path_to_string(plugins_dir.clone()),
+                    kind: "dll".into(),
+                    is_banned,
+                    is_directory_mod: false,
+                });
+                continue;
+            }
+
+            if !metadata.is_dir() {
+                continue;
+            }
+
+            let folder_name = file_name;
+            for nested_entry in fs::read_dir(&path).map_err(|e| e.to_string())? {
+                let nested_entry = nested_entry.map_err(|e| e.to_string())?;
+                let nested_path = nested_entry.path();
+                let nested_file_name = nested_entry.file_name().to_string_lossy().into_owned();
+
+                if is_ignored_entry(&nested_file_name) || !is_dll_file(&nested_path) {
+                    continue;
+                }
+
+                let nested_metadata = nested_entry.metadata().map_err(|e| e.to_string())?;
+                if !nested_metadata.is_file() {
+                    continue;
+                }
+
+                let is_banned = is_banned_file(&nested_file_name);
+                let display_name = if is_banned {
+                    format!("{} - {}", folder_name, strip_banned_suffix(&nested_file_name))
+                } else {
+                    format!("{} - {}", folder_name, file_stem(&nested_path).unwrap_or_else(|| nested_file_name.clone()))
+                };
+                mods.push(ModEntry {
+                    id: path_to_string(nested_path.clone()),
+                    name: display_name,
+                    path: path_to_string(nested_path),
+                    relative_path: format!("BepInEx/plugins/{}/{}", folder_name, nested_file_name),
+                    source_dir: path_to_string(path.clone()),
+                    kind: "dll".into(),
+                    is_banned,
+                    is_directory_mod: true,
+                });
+            }
+        }
+    }
+
+    mods.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+
+    if active_dirs.is_empty() {
+        warnings.push("未找到 BepInEx/plugins 模组目录".into());
+    }
+
+    if !game_path.join("SecretFlasherManaka.exe").is_file() {
+        warnings.push("未在游戏目录中找到 SecretFlasherManaka.exe".into());
+    }
+
+    Ok(ScanModsResult {
+        mods,
+        checked_dirs,
+        active_dirs,
+        warnings,
+        missing_core_files,
+        bepin_ex_installed,
+        doorstop_version,
+        doorstop_compatible,
+        scanned_at: current_timestamp(),
+    })
+}
+
+// ─────────────────────────── 存档管理 ───────────────────────────
+// 存档目录固定位于系统用户目录下：
+//   C:\Users\<用户名>\AppData\LocalLow\SheableSoft\SecretFlasherManaka\SaveData
+// 目录内文件约定：
+//   - 0-x.sd（x 为数字）: 游戏存档文件
+//   - s.sd              : 游戏设置文件
+//   - <任意>.sd.bak     : 存档备份文件（由本应用备份生成）
+
+fn save_data_dir() -> Result<PathBuf, String> {
+    let profile = std::env::var("USERPROFILE")
+        .or_else(|_| std::env::var("HOME"))
+        .map_err(|_| "无法获取用户目录（USERPROFILE/HOME）".to_string())?;
+    Ok(PathBuf::from(profile)
+        .join("AppData")
+        .join("LocalLow")
+        .join("SheableSoft")
+        .join("SecretFlasherManaka")
+        .join("SaveData"))
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SaveFileInfo {
+    name: String,
+    path: String,
+    size: u64,
+    /// 最后修改时间，格式 yyyy-MM-dd HH:mm:ss（本地时区）
+    modified: String,
+    /// save=存档文件(0-x.sd) / settings=设置文件(s.sd) / backup=备份文件(*.sd.bak)
+    kind: String,
+}
+
+fn format_local_time(time: SystemTime) -> String {
+    let dt: chrono::DateTime<chrono::Local> = time.into();
+    dt.format("%Y-%m-%d %H:%M:%S").to_string()
+}
+
+/// 流式计算文件的 SHA-256（十六进制小写）。
+fn sha256_hex_file(path: &PathBuf) -> Result<String, String> {
+    let mut file = fs::File::open(path).map_err(|e| format!("打开文件失败: {}", e))?;
+    let mut hasher = Sha256::new();
+    let mut buf = [0u8; 64 * 1024];
+    loop {
+        let n = file.read(&mut buf).map_err(|e| format!("读取文件失败: {}", e))?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
+    }
+    let hex: String = hasher
+        .finalize()
+        .iter()
+        .map(|b| format!("{:02x}", b))
+        .collect();
+    Ok(hex)
+}
+
+/// 读取文件的大小 / 修改时间 / SHA-256，构成备份校验指纹。
+fn file_fingerprint(path: &PathBuf) -> Result<(u64, String, String), String> {
+    let metadata = fs::metadata(path).map_err(|e| format!("读取文件信息失败: {}", e))?;
+    let size = metadata.len();
+    let modified = metadata
+        .modified()
+        .map(format_local_time)
+        .unwrap_or_default();
+    let hash = sha256_hex_file(path)?;
+    Ok((size, modified, hash))
+}
+
+/// 返回存档目录绝对路径（供前端"打开文件夹"使用）。
+#[tauri::command]
+fn get_save_dir() -> Result<String, String> {
+    save_data_dir().map(|p| path_to_string(p))
+}
+
+/// 列出存档目录下的存档文件与备份文件。
+/// 目录不存在时视为“没有存档”，返回空列表（不报错，方便首次运行展示空态）。
+#[tauri::command]
+fn list_save_files() -> Result<Vec<SaveFileInfo>, String> {
+    let dir = save_data_dir()?;
+    if !dir.is_dir() {
+        return Ok(Vec::new());
+    }
+
+    let mut files = Vec::new();
+    for entry in fs::read_dir(&dir).map_err(|e| format!("读取存档目录失败: {}", e))? {
+        let entry = entry.map_err(|e| format!("读取存档条目失败: {}", e))?;
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        let name = entry.file_name().to_string_lossy().into_owned();
+        // 只关心 .sd 存档/设置文件 与 .sd.bak 备份文件
+        let lower = name.to_lowercase();
+        let kind = if lower.ends_with(".sd.bak") {
+            "backup"
+        } else if lower.ends_with(".sd") {
+            if lower == "s.sd" {
+                "settings"
+            } else {
+                "save"
+            }
+        } else {
+            continue;
+        };
+
+        let metadata = entry.metadata().map_err(|e| format!("读取文件信息失败: {}", e))?;
+        files.push(SaveFileInfo {
+            name,
+            path: path_to_string(path),
+            size: metadata.len(),
+            modified: metadata
+                .modified()
+                .map(format_local_time)
+                .unwrap_or_else(|_| String::new()),
+            kind: kind.into(),
+        });
+    }
+
+    files.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    Ok(files)
+}
+
+/// 备份存档：将 {name}.sd 复制为 {name}.sd.bak。
+/// 若备份文件已存在则报错（前端 toast 提示），避免静默覆盖已有备份。
+/// 备份成功后把备份文件的大小/修改时间/SHA-256 写入 save_backups 表，
+/// 还原时逐项比对一致才允许还原（防止备份被篡改/损坏后误还原）。
+#[tauri::command]
+fn backup_save_file(app: tauri::AppHandle, name: String) -> Result<(), String> {
+    let dir = save_data_dir()?;
+    let src = dir.join(&name);
+    if !src.is_file() {
+        return Err(format!("存档文件不存在: {}", name));
+    }
+    let backup_name = format!("{}.bak", name);
+    let dst = dir.join(&backup_name);
+    if dst.exists() {
+        return Err(format!("备份文件已存在: {}", backup_name));
+    }
+    fs::copy(&src, &dst).map_err(|e| format!("备份失败: {}", e))?;
+
+    // 录入备份文件指纹（注意：以复制出的 .bak 文件本身为准，还原时比对的是它）
+    // 指纹读取或记录写入失败时，删除刚复制的 .bak，避免留下无校验记录的残留备份
+    // （残留备份既无法还原，又会因“备份文件已存在”阻塞重新备份）。
+    let result = (|| -> Result<(), String> {
+        let (size, modified, hash) = file_fingerprint(&dst)?;
+        let conn = crate::db::subscribe::open_sqlite(&app)?;
+        conn.execute(
+            "INSERT INTO save_backups (backup_name, src_name, size, modified, hash)
+             VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT(backup_name) DO UPDATE SET src_name = ?2, size = ?3, modified = ?4, hash = ?5",
+            rusqlite::params![backup_name, name, size as i64, modified, hash],
+        )
+        .map_err(|e| format!("写入备份校验记录失败: {}", e))?;
+        Ok(())
+    })();
+
+    if let Err(e) = result {
+        let _ = fs::remove_file(&dst);
+        return Err(e);
+    }
+
+    Ok(())
+}
+
+/// 还原备份：将 {name}.sd.bak 复制回 {name}.sd。
+/// 校验规则：
+///   - 备份文件的大小/修改时间/SHA-256 与备份时录入 save_backups 的记录
+///     逐一比对，任何一项不一致（备份被篡改/损坏/无记录）都拒绝还原；
+///   - 指纹校验通过后，若目标存档已存在：
+///       overwrite=false → 返回带 `CONFLICT:` 前缀的错误码（前端弹窗询问用户）；
+///       overwrite=true  → 直接覆盖还原。
+#[tauri::command]
+fn restore_save_file(app: tauri::AppHandle, name: String, overwrite: bool) -> Result<(), String> {
+    if !name.to_lowercase().ends_with(".sd.bak") {
+        return Err(format!("不是备份文件: {}", name));
+    }
+    let dir = save_data_dir()?;
+    let src = dir.join(&name);
+    if !src.is_file() {
+        return Err(format!("备份文件不存在: {}", name));
+    }
+
+    // 指纹校验：与备份时录入的记录逐项比对（size / modified / hash）
+    let (cur_size, cur_modified, cur_hash) = file_fingerprint(&src)?;
+    let conn = crate::db::subscribe::open_sqlite(&app)?;
+    let record = conn
+        .query_row(
+            "SELECT size, modified, hash FROM save_backups WHERE backup_name = ?",
+            rusqlite::params![name],
+            |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?)),
+        )
+        .optional()
+        .map_err(|e| format!("读取备份校验记录失败: {}", e))?;
+
+    let Some((rec_size, rec_modified, rec_hash)) = record else {
+        return Err(format!("备份文件缺少校验记录，无法还原: {}", name));
+    };
+
+    if cur_size != rec_size as u64 || cur_modified != rec_modified || cur_hash != rec_hash {
+        return Err(format!(
+            "备份文件与备份时记录不一致（大小/时间/哈希校验未通过），可能已被修改或损坏，禁止还原: {}",
+            name
+        ));
+    }
+
+    // 去掉 .bak 后缀得到目标存档名（0-x.sd / s.sd）
+    let target_name = name[..name.len() - 4].to_string();
+    let dst = dir.join(&target_name);
+    if dst.exists() && !overwrite {
+        // 冲突错误码：前端据此弹窗询问是否覆盖，而不是直接 toast
+        return Err(format!("CONFLICT:同名存档已存在，还原会产生命名冲突: {}", target_name));
+    }
+
+    // overwrite=true 或目标不存在时，直接复制（fs::copy 会覆盖已存在文件）
+    fs::copy(&src, &dst).map_err(|e| format!("还原失败: {}", e))?;
+    Ok(())
+}
+
+/// 重命名存档目录内的文件（存档 / 设置 / 备份均可）。
+/// 校验：新文件名必须合法（非空、无路径分隔符）、且不与现有条目冲突。
+/// 改名成功后同步更新 save_backups 表中的对应记录（backup_name / src_name），
+/// 保证指纹校验记录始终指向当前文件名。
+#[tauri::command]
+fn rename_save_file(app: tauri::AppHandle, name: String, new_name: String) -> Result<(), String> {
+    let dir = save_data_dir()?;
+    let src = dir.join(&name);
+    if !src.is_file() {
+        return Err(format!("文件不存在: {}", name));
+    }
+    let new_name = new_name.trim().to_string();
+    if new_name.is_empty() {
+        return Err("文件名不能为空".into());
+    }
+    if new_name.contains('/') || new_name.contains('\\') || new_name.contains(':') {
+        return Err("文件名包含非法字符".into());
+    }
+    if new_name.eq_ignore_ascii_case(&name) {
+        return Ok(());
+    }
+
+    // 扩展名类别校验：备份（.sd.bak）与存档/设置（.sd）不能互相改名，
+    // 否则会破坏文件名分类与 save_backups 记录的一致性。
+    let name_lower = name.to_lowercase();
+    let new_lower = new_name.to_lowercase();
+    let is_backup = name_lower.ends_with(".sd.bak");
+    if is_backup && !new_lower.ends_with(".sd.bak") {
+        return Err("备份文件改名后必须以 .sd.bak 结尾".into());
+    }
+    if !is_backup && name_lower.ends_with(".sd") && !new_lower.ends_with(".sd") {
+        return Err("存档/设置文件改名后必须以 .sd 结尾".into());
+    }
+
+    let dst = dir.join(&new_name);
+    if dst.exists() {
+        return Err(format!("同名文件已存在: {}", new_name));
+    }
+
+    // 改名存档/设置时，若有同名备份文件需一并重命名；目标备份名已存在时
+    // 拒绝改名（避免静默覆盖其他存档的备份），并在主文件改名后同步移动备份。
+    let src_backup = dir.join(format!("{}.bak", name));
+    let dst_backup = dir.join(format!("{}.bak", new_name));
+    let has_backup = !is_backup && src_backup.exists();
+    if has_backup && dst_backup.exists() {
+        return Err(format!("同名备份文件已存在: {}", new_name));
+    }
+
+    fs::rename(&src, &dst).map_err(|e| format!("重命名失败: {}", e))?;
+    if has_backup {
+        fs::rename(&src_backup, &dst_backup).map_err(|e| format!("重命名备份文件失败: {}", e))?;
+    }
+
+    // 同步更新 save_backups 记录：
+    //   - 改的是备份文件（xx.sd.bak → yy.sd.bak）：backup_name 与 src_name 都平移后缀；
+    //   - 改的是存档/设置（xx.sd → yy.sd）：src_name 平移，backup_name（xx.sd.bak）跟随。
+    let conn = crate::db::subscribe::open_sqlite(&app)?;
+    if is_backup {
+        let new_src = &new_name[..new_name.len() - 4]; // 去掉 .bak 后缀（类别校验已保证存在）
+        conn.execute(
+            "UPDATE save_backups
+             SET backup_name = ?2, src_name = ?3
+             WHERE backup_name = ?1",
+            rusqlite::params![name, new_name, new_src],
+        )
+        .map_err(|e| format!("更新备份校验记录失败: {}", e))?;
+    } else {
+        conn.execute(
+            "UPDATE save_backups
+             SET src_name = ?2, backup_name = ?3
+             WHERE src_name = ?1",
+            rusqlite::params![name, new_name, format!("{}.bak", new_name)],
+        )
+        .map_err(|e| format!("更新备份校验记录失败: {}", e))?;
+    }
+
+    Ok(())
+}
+
+/// 从 config.db 同步读取上次窗口几何并应用（尺寸/位置）。
+/// 仅恢复，不负责 show/maximize——窗口在 tauri.conf.json 中 visible:false，
+/// 由前端 WebView 首帧渲染后调用 show()，消除「默认尺寸白屏 → 跳变上次尺寸」的闪变。
+/// maximize 不能在此调用：Windows 上 SW_MAXIMIZE 会显示隐藏窗口，提前调用会破坏防闪变设计，
+/// 正常路径由前端在 show() 之后执行，兜底路径由调用处的兜底线程处理。
+/// 返回 (是否成功读到配置, 上次是否处于最大化)。
+fn restore_window_geometry(window: &tauri::WebviewWindow, db_path: Option<&std::path::Path>) -> (bool, bool) {
+    let Some(db_path) = db_path else { return (false, false) };
+    if !db_path.exists() {
+        return (false, false);
+    }
+    let Ok(conn) = rusqlite::Connection::open(db_path) else { return (false, false) };
+    let read = |key: &str| -> Option<String> {
+        conn.query_row(
+            "SELECT value FROM config WHERE `key` = ?1",
+            [key],
+            |r| r.get::<_, String>(0),
+        )
+        .ok()
+    };
+    let maximized = read("window_maximized").as_deref() == Some("true");
+    let w: i32 = read("window_width").and_then(|v| v.parse().ok()).unwrap_or(0);
+    let h: i32 = read("window_height").and_then(|v| v.parse().ok()).unwrap_or(0);
+    let x: i32 = read("window_x").and_then(|v| v.parse().ok()).unwrap_or(-32000);
+    let y: i32 = read("window_y").and_then(|v| v.parse().ok()).unwrap_or(-32000);
+
+    if w > 100 && h > 100 {
+        let _ = window.set_size(tauri::PhysicalSize::new(w as u32, h as u32));
+    }
+    // 位置合法性：排除最小化残留值（Windows 约 -32000），且窗口矩形须与任一显示器相交（防离屏）
+    if x > -30000 && y > -30000 {
+        // 尺寸无效（如解析失败默认 0）时用 tauri.conf.json 默认尺寸参与校验，避免退化值导致校验失真
+        let (vw, vh) = if w > 100 && h > 100 { (w, h) } else { (800, 600) };
+        let on_screen = window
+            .available_monitors()
+            .map(|monitors| {
+                monitors.iter().any(|m| {
+                    let mp = m.position();
+                    let ms = m.size();
+                    let (mx, my) = (mp.x, mp.y);
+                    let (mw, mh) = (ms.width as i32, ms.height as i32);
+                    x < mx + mw && x + vw > mx && y < my + mh && y + vh > my
+                })
+            })
+            .unwrap_or(false);
+        if on_screen {
+            let _ = window.set_position(tauri::PhysicalPosition::new(x, y));
+        }
+    }
+    (true, maximized)
+}
+
+/// 清理开发期遗留的 SQLite 迁移记录（必须在 tauri-plugin-sql 初始化之前执行）。
+///
+/// migration 23 开发过程中曾以草稿形式落到本地库：`ALTER TABLE rated_workshop_mods
+/// ADD COLUMN user_id INTEGER NOT NULL DEFAULT 0;`（description 为
+/// add_user_id_to_rated_workshop_mods）。正式提交时该迁移被改成了「重建表」，而 sqlx
+/// 会记录每条迁移 SQL 的校验和，一旦发现「已应用但内容被改过」就直接报错：
+/// `migration 23 was previously applied but has been modified`。
+///
+/// 由于 tauri.conf.json 用 `plugins.sql.preload` 在 sql 插件 setup 阶段执行迁移，
+/// 这个错误会让整个 App 构建失败：表现为启动后没有窗口、进程退出码 101。
+///
+/// 草稿只存在于开发机（从未随发布版下发），所以这里删掉那条记录，让正式版
+/// migration 23 重新执行——它本身是 DROP + CREATE rated_workshop_mods，该表是
+/// 纯缓存，无数据损失。仅当记录的 checksum 与草稿 SQL 完全一致时才删除，
+/// 避免误伤已经应用了正式版 migration 23 的库。
+fn repair_legacy_sqlite_migrations(app: &tauri::AppHandle) {
+    const LEGACY_M23_SQL: &str =
+        "ALTER TABLE rated_workshop_mods ADD COLUMN user_id INTEGER NOT NULL DEFAULT 0;";
+
+    let Ok(dir) = app.path().app_config_dir() else {
+        return;
+    };
+    let path = dir.join("config.db");
+    if !path.is_file() {
+        return;
+    }
+    let Ok(conn) = rusqlite::Connection::open(&path) else {
+        return;
+    };
+    let _ = conn.busy_timeout(std::time::Duration::from_secs(5));
+
+    // 还没执行过任何迁移（没有 _sqlx_migrations 表）时无需处理
+    let has_migrations_table = conn
+        .query_row(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = '_sqlx_migrations'",
+            [],
+            |r| r.get::<_, i64>(0),
+        )
+        .optional()
+        .ok()
+        .flatten()
+        .is_some();
+    if !has_migrations_table {
+        return;
+    }
+
+    let applied: Option<Vec<u8>> = conn
+        .query_row(
+            "SELECT checksum FROM _sqlx_migrations WHERE version = 23",
+            [],
+            |r| r.get(0),
+        )
+        .optional()
+        .unwrap_or(None);
+    let expected = Sha384::digest(LEGACY_M23_SQL.as_bytes());
+    if applied.as_deref() != Some(expected.as_slice()) {
+        return;
+    }
+
+    match conn.execute("DELETE FROM _sqlx_migrations WHERE version = 23", []) {
+        Ok(_) => {
+            eprintln!("[sqlite] 已删除草稿 migration 23 记录，正式版将重建 rated_workshop_mods")
+        }
+        Err(e) => eprintln!("[sqlite] 删除草稿 migration 23 记录失败: {e}"),
+    }
+}
+
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
+pub fn run() {
+    // 离线开发模式（pnpm tauri dev:of 注入 SFMMM_OFFLINE=1）：只读本地缓存，不连云数据库
+    if db::offline_dev() {
+        println!("[offline] 离线开发模式：SFMMM_OFFLINE=1，不连接云数据库，仅使用本地缓存");
+    }
+
+    // 启动前检测 WebView2 运行时；缺失则弹 Windows 原生 MessageBox
+    // （按系统语言选择中/英/日文案），并用系统默认浏览器打开下载链接。
+    if !webview_check::ensure_webview2() {
+        std::process::exit(1);
+    }
+
+    let migrations = vec![
+        Migration {
+            version: 1,
+            description: "create_config_table",
+            sql: "CREATE TABLE IF NOT EXISTS config (
+                id INTEGER PRIMARY KEY,
+                `key` TEXT NOT NULL UNIQUE,
+                value TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS mods (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                path TEXT NOT NULL,
+                enabled INTEGER NOT NULL DEFAULT 0,
+                installed_at TEXT DEFAULT CURRENT_TIMESTAMP
+            );",
+            kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 2,
+            description: "ensure_tables_exist",
+            sql: "CREATE TABLE IF NOT EXISTS config (
+                id INTEGER PRIMARY KEY,
+                `key` TEXT NOT NULL UNIQUE,
+                value TEXT NOT NULL
+            );",
+            kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 3,
+            description: "create_installed_workshop_mods",
+            sql: "CREATE TABLE IF NOT EXISTS installed_workshop_mods (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                mod_key TEXT NOT NULL UNIQUE,
+                mod_id INTEGER DEFAULT 0,
+                category TEXT NOT NULL,
+                installed_version TEXT NOT NULL,
+                file_hash TEXT DEFAULT '',
+                installed_at TEXT DEFAULT CURRENT_TIMESTAMP
+            );",
+            kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 4,
+            description: "add_lang_code_to_installed_workshop_mods",
+            sql: "ALTER TABLE installed_workshop_mods ADD COLUMN lang_code TEXT DEFAULT '';",
+            kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 5,
+            description: "add_manifest_to_installed_workshop_mods",
+            sql: "ALTER TABLE installed_workshop_mods ADD COLUMN manifest TEXT DEFAULT '';",
+            kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 6,
+            description: "create_installed_workshop_mod_files",
+            sql: "CREATE TABLE IF NOT EXISTS installed_workshop_mod_files (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                mod_key TEXT NOT NULL,
+                lang_code TEXT NOT NULL,
+                installed_version TEXT NOT NULL,
+                file_hash TEXT DEFAULT '',
+                manifest TEXT DEFAULT '',
+                installed_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(mod_key, lang_code)
+            );",
+            kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 7,
+            description: "add_file_hashes_to_installed_workshop_mods",
+            sql: "ALTER TABLE installed_workshop_mods ADD COLUMN file_hashes TEXT DEFAULT '';",
+            kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 8,
+            description: "create_liked_workshop_mods_cache",
+            sql: "CREATE TABLE IF NOT EXISTS liked_workshop_mods (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                mod_id INTEGER NOT NULL UNIQUE,
+                mod_key TEXT DEFAULT '',
+                display_name TEXT DEFAULT '',
+                description TEXT DEFAULT '',
+                category TEXT DEFAULT '',
+                author_id INTEGER DEFAULT 0,
+                author_name TEXT DEFAULT '',
+                author_avatar TEXT DEFAULT '',
+                download_count INTEGER DEFAULT 0,
+                like_count INTEGER DEFAULT 0,
+                is_liked INTEGER DEFAULT 1,
+                comment_count INTEGER DEFAULT 0,
+                files TEXT DEFAULT '',
+                translations TEXT DEFAULT '',
+                created_at TEXT DEFAULT '',
+                updated_at TEXT DEFAULT '',
+                cached_at TEXT DEFAULT CURRENT_TIMESTAMP
+            );",
+            kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 9,
+            description: "create_rated_workshop_mods_cache",
+            sql: "CREATE TABLE IF NOT EXISTS rated_workshop_mods (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                mod_id INTEGER NOT NULL UNIQUE,
+                mod_key TEXT DEFAULT '',
+                my_rating REAL DEFAULT 0,
+                rating_avg REAL DEFAULT 0,
+                rating_count INTEGER DEFAULT 0,
+                cached_at TEXT DEFAULT CURRENT_TIMESTAMP
+            );",
+            kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 10,
+            description: "add_full_snapshot_to_rated_workshop_mods",
+            sql: "ALTER TABLE rated_workshop_mods ADD COLUMN display_name TEXT DEFAULT '';
+            ALTER TABLE rated_workshop_mods ADD COLUMN description TEXT DEFAULT '';
+            ALTER TABLE rated_workshop_mods ADD COLUMN category TEXT DEFAULT '';
+            ALTER TABLE rated_workshop_mods ADD COLUMN author_id INTEGER DEFAULT 0;
+            ALTER TABLE rated_workshop_mods ADD COLUMN author_name TEXT DEFAULT '';
+            ALTER TABLE rated_workshop_mods ADD COLUMN author_avatar TEXT DEFAULT '';
+            ALTER TABLE rated_workshop_mods ADD COLUMN download_count INTEGER DEFAULT 0;
+            ALTER TABLE rated_workshop_mods ADD COLUMN like_count INTEGER DEFAULT 0;
+            ALTER TABLE rated_workshop_mods ADD COLUMN is_liked INTEGER DEFAULT 0;
+            ALTER TABLE rated_workshop_mods ADD COLUMN comment_count INTEGER DEFAULT 0;
+            ALTER TABLE rated_workshop_mods ADD COLUMN files TEXT DEFAULT '';
+            ALTER TABLE rated_workshop_mods ADD COLUMN translations TEXT DEFAULT '';
+            ALTER TABLE rated_workshop_mods ADD COLUMN created_at TEXT DEFAULT '';
+            ALTER TABLE rated_workshop_mods ADD COLUMN updated_at TEXT DEFAULT '';",
+            kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 11,
+            description: "create_subscription_tasks",
+            sql: "CREATE TABLE IF NOT EXISTS subscription_tasks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                mod_key TEXT NOT NULL,
+                mod_id INTEGER DEFAULT 0,
+                category TEXT DEFAULT '',
+                lang_code TEXT DEFAULT '',
+                version TEXT DEFAULT '',
+                file_url TEXT NOT NULL,
+                file_hash TEXT DEFAULT '',
+                status TEXT NOT NULL DEFAULT 'pending',
+                percent INTEGER DEFAULT 0,
+                stage TEXT DEFAULT '',
+                error TEXT DEFAULT '',
+                target_dir TEXT DEFAULT '',
+                manifest TEXT DEFAULT '',
+                retry_of INTEGER DEFAULT NULL,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                finished_at TEXT DEFAULT ''
+            );",
+            kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 12,
+            description: "add_subscription_tasks_meta_cols",
+            // 订阅时冗余存一份工坊卡片的展示信息，让订阅记录页离线也能显示文件名+简介，
+            // 与工坊/任务文件夹卡片语义一致；避免每条任务进页都回查 MySQL。
+            sql: "ALTER TABLE subscription_tasks ADD COLUMN display_name TEXT DEFAULT '';
+                ALTER TABLE subscription_tasks ADD COLUMN description TEXT DEFAULT '';
+                ALTER TABLE subscription_tasks ADD COLUMN translations TEXT DEFAULT '';",
+            kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 13,
+            description: "create_bepinex_tasks",
+            // BepInEx 前置一键安装的后台任务表：与 subscription_tasks 同款持久化，
+            // 让 Rust 后台下载不依赖前端生命周期，重启可恢复进度/错误。
+            sql: "CREATE TABLE IF NOT EXISTS bepinex_tasks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                url TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'pending',
+                percent INTEGER DEFAULT 0,
+                stage TEXT DEFAULT '',
+                error TEXT DEFAULT '',
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                finished_at TEXT DEFAULT ''
+            );",
+            kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 14,
+            description: "create_update_tasks",
+            // 应用自更新安装包下载的后台任务表：与 subscription_tasks / bepinex_tasks
+            // 同款持久化，让 Rust 后台下载不依赖前端生命周期，离开设置页/重启后
+            // 通过 db_get_update_status 查询恢复进度/错误/已就绪。
+            sql: "CREATE TABLE IF NOT EXISTS update_tasks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                url TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'pending',
+                percent INTEGER DEFAULT 0,
+                stage TEXT DEFAULT '',
+                error TEXT DEFAULT '',
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                finished_at TEXT DEFAULT ''
+            );",
+            kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 15,
+            description: "create_save_backups",
+            // 存档备份校验表：备份存档时录入源存档的大小/修改时间/hash，
+            // 还原时三项逐一比对一致才允许还原（防止备份文件被篡改/损坏后误还原）。
+            sql: "CREATE TABLE IF NOT EXISTS save_backups (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                backup_name TEXT NOT NULL UNIQUE,
+                src_name TEXT NOT NULL,
+                size INTEGER DEFAULT 0,
+                modified TEXT DEFAULT '',
+                hash TEXT DEFAULT '',
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            );",
+            kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 16,
+            description: "add_version_to_update_tasks",
+            // 记录下载任务对应的目标版本：静默自动更新时，前端据此判断 ready 安装包
+            // 是否仍对应当前最新版（避免把过期/残留的旧版安装包自动提升为待应用，
+            // 也避免对其他渠道下载的旧版安装包重复覆盖）。旧行默认空串，视为未知。
+            sql: "ALTER TABLE update_tasks ADD COLUMN version TEXT DEFAULT ''",
+            kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 17,
+            description: "add_size_cols_to_bepinex_tasks",
+            // BepInEx 前置下载任务记录已下载/总大小（字节），配合 db/download.rs 共享引擎
+            // 的进度上报（downloaded/total/speed），前端可显示"已下载 X / Y · 速度"。
+            sql: "ALTER TABLE bepinex_tasks ADD COLUMN downloaded INTEGER DEFAULT 0;
+                  ALTER TABLE bepinex_tasks ADD COLUMN total INTEGER DEFAULT 0;",
+            kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 18,
+            description: "add_size_cols_to_update_tasks",
+            // 程序更新下载任务记录已下载/总大小（字节），与 bepinex_tasks(migration 17) 同款：
+            // 配合 db/download.rs 共享引擎的进度上报（downloaded/total/speed），前端设置页
+            // 可像 BepInEx 前置一样显示"已下载 X / Y · 速度"，离开页面再回来也能恢复。
+            sql: "ALTER TABLE update_tasks ADD COLUMN downloaded INTEGER DEFAULT 0;
+                  ALTER TABLE update_tasks ADD COLUMN total INTEGER DEFAULT 0;",
+            kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 19,
+            description: "create_request_cache",
+            // 工坊云/讨论区只读查询的 SQLite 本地缓存：断连时仍可浏览看过的历史内容。
+            // payload 是后端返回的完整 JSON（DTO 原样），cache_key = 命令名 + 排序后参数。
+            // 由前端负责写入/清理（按 UTF-8 字节预算淘汰），Rust 侧只管建表。
+            sql: "CREATE TABLE IF NOT EXISTS request_cache (
+                cache_key TEXT PRIMARY KEY,
+                payload TEXT NOT NULL,
+                cached_at INTEGER NOT NULL
+            );",
+            kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 20,
+            description: "create_user_notifications_cache",
+            // 评论/回复/点赞通知的 SQLite 本地缓存：远程库连接数打满时仍能查看历史通知。
+            // 按 (user_id, entity, notif_id) 唯一，前端拉取成功后按页 upsert 合并，
+            // 标记已读时同步回写缓存，失败时回退展示。
+            sql: "CREATE TABLE IF NOT EXISTS user_notifications_cache (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                entity TEXT NOT NULL DEFAULT 'mod',
+                notif_id INTEGER NOT NULL,
+                type TEXT DEFAULT '',
+                target_id INTEGER DEFAULT 0,
+                comment_id INTEGER DEFAULT 0,
+                is_read INTEGER DEFAULT 0,
+                created_at TEXT DEFAULT '',
+                content TEXT DEFAULT '',
+                display_key TEXT DEFAULT '',
+                author_id INTEGER DEFAULT 0,
+                author_name TEXT DEFAULT '',
+                author_avatar TEXT DEFAULT '',
+                cached_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(user_id, entity, notif_id)
+            );",
+            kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 21,
+            description: "add_recipient_role_to_notifications_cache",
+            // 收件人相对该条内容的身份（作者/协作者/层主），与远程库 db_get_my_notifications
+            // 返回的 is_author/is_collab/is_parent_author 一并缓存，回退展示时文案仍能按角色区分
+            sql: "ALTER TABLE user_notifications_cache ADD COLUMN is_author INTEGER DEFAULT 0;
+            ALTER TABLE user_notifications_cache ADD COLUMN is_collab INTEGER DEFAULT 0;
+            ALTER TABLE user_notifications_cache ADD COLUMN is_parent_author INTEGER DEFAULT 0;",
+            kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 22,
+            description: "create_request_cache_entities",
+            // 列表/详情快照里出现过的 mod/讨论实体索引：通知跳转时按实体定位 cache_key，
+            // 避免为了补详情而 JSON.parse 所有列表快照。行随 request_cache 清理一起删除。
+            sql: "CREATE TABLE IF NOT EXISTS request_cache_entities (
+                cache_key TEXT NOT NULL,
+                command TEXT NOT NULL,
+                entity_type TEXT NOT NULL,
+                entity_id INTEGER NOT NULL DEFAULT 0,
+                entity_key TEXT NOT NULL DEFAULT '',
+                cached_at INTEGER NOT NULL,
+                PRIMARY KEY (cache_key, entity_type, entity_id, entity_key)
+            );
+            CREATE INDEX IF NOT EXISTS idx_request_cache_entities_lookup
+            ON request_cache_entities (entity_type, entity_id, entity_key);",
+            kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 23,
+            description: "rebuild_rated_workshop_mods_with_user_id",
+            // 评分记录缓存按账号归属：换账号后不能把上一个账号的评分当作本人评分
+            // （离线详情回退的 my_rating 也读这张表）。原表 mod_id 上是 UNIQUE，
+            // 两个账号评同一个 mod 会互相覆盖，故重建为 UNIQUE(mod_id, user_id)。
+            // 纯缓存数据，直接重建；前端也会按版本号清空一次。
+            // 注意：本迁移开发期曾以草稿形式（description = add_user_id_to_rated_workshop_mods，
+            // SQL 仅 ALTER TABLE ADD COLUMN user_id）落到过本地开发库；sqlx 会因校验和不匹配
+            // 拒绝启动，因此启动时先由 repair_legacy_sqlite_migrations 清掉那条草稿记录，
+            // 让本迁移重新执行。已应用的迁移不可再改 SQL，否则同样会启动失败。
+            sql: "DROP TABLE IF EXISTS rated_workshop_mods;
+            CREATE TABLE rated_workshop_mods (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                mod_id INTEGER NOT NULL,
+                mod_key TEXT DEFAULT '',
+                my_rating REAL DEFAULT 0,
+                rating_avg REAL DEFAULT 0,
+                rating_count INTEGER DEFAULT 0,
+                cached_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                display_name TEXT DEFAULT '',
+                description TEXT DEFAULT '',
+                category TEXT DEFAULT '',
+                author_id INTEGER DEFAULT 0,
+                author_name TEXT DEFAULT '',
+                author_avatar TEXT DEFAULT '',
+                download_count INTEGER DEFAULT 0,
+                like_count INTEGER DEFAULT 0,
+                is_liked INTEGER DEFAULT 0,
+                comment_count INTEGER DEFAULT 0,
+                files TEXT DEFAULT '',
+                translations TEXT DEFAULT '',
+                created_at TEXT DEFAULT '',
+                updated_at TEXT DEFAULT '',
+                user_id INTEGER NOT NULL DEFAULT 0,
+                UNIQUE (mod_id, user_id)
+            );",
+            kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 24,
+            description: "add_entity_key_index",
+            // 按 mod_key 定位时（复合索引里 entity_key 是第三列）用不上原索引，
+            // 补一个 (entity_type, entity_key) 前缀索引；前端 ensureEntityTable 也会兜底创建。
+            sql: "CREATE INDEX IF NOT EXISTS idx_request_cache_entities_key
+            ON request_cache_entities (entity_type, entity_key);",
+            kind: MigrationKind::Up,
+        },
+    ];
+
+    tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_http::init())
+        .invoke_handler(tauri::generate_handler![
+            open_folder, launch_game, scan_mods, check_game_version, toggle_mod_enabled, batch_toggle_mod_enabled, http_request, download_and_extract_7z,
+            list_save_files, backup_save_file, restore_save_file, rename_save_file, get_save_dir,
+            db::db_login, db::db_register, db::db_update_profile,
+            db::db_list_mods, db::db_list_my_mods, db::db_list_liked_mods, db::db_list_rated_mods,
+            db::db_get_mod_detail, db::db_get_mod_for_edit,
+            db::db_create_mod, db::db_update_mod, db::db_delete_mod,
+            db::db_force_delete_mod,
+            db::db_save_mod_file,
+            db::db_check_mod_key,
+            db::db_delete_mod_file,
+            db::db_imgbed_upload_file,
+            db::db_cancel_imgbed_upload,
+            db::db_delete_imgbed_file,
+            db::db_cleanup_imgbed_images,
+            db::db_get_version,
+            db::db_add_comment, db::db_get_comments, db::db_get_replies, db::db_edit_comment, db::db_delete_comment,
+            db::db_locate_mod_comment,
+            db::db_like_mod, db::db_unlike_mod,
+            db::db_rate_mod, db::db_unrate_mod,
+            db::db_check_updates,
+            db::db_fetch_latest,
+            db::gh::db_gh_latest_release,
+            db::hash::db_preflight_mod,
+            db::hash::db_hash_file,
+            db::hash::db_set_mod_file_hashes,
+            db::installer::db_prepare_update,
+            db::installer::db_get_update_status,
+            db::installer::db_apply_update,
+            db::installer::db_clear_update,
+            db::installer::db_cancel_update,
+            db::bepinex::db_cancel_bepinex,
+            db::subscribe::db_subscribe_mod,
+            db::subscribe::db_list_subscription_tasks,
+            db::subscribe::db_cancel_subscription,
+            db::subscribe::db_install_files_present,
+            db::archive::db_download_mod_archive,
+            db::bepinex::db_install_bepinex,
+            db::bepinex::db_get_bepinex_task,
+            // 权限系统
+            db::db_set_mod_permissions,
+            db::db_submit_application,
+            db::db_list_applications,
+            db::db_handle_application,
+            db::db_get_unread_count,
+            db::db_get_my_notifications,
+            db::db_mark_read,
+            db::db_get_user_public_profile,
+            // 讨论区
+            db::db_list_discussions, db::db_get_discussion_detail,
+            db::db_create_discussion, db::db_update_discussion, db::db_delete_discussion,
+            db::db_like_discussion, db::db_unlike_discussion,
+            db::db_boost_discussion, db::db_unboost_discussion,
+            db::db_vote_poll, db::db_get_poll_results,
+            db::db_add_discussion_comment, db::db_get_discussion_comments,
+            db::db_get_discussion_replies, db::db_edit_discussion_comment, db::db_delete_discussion_comment,
+            db::db_locate_discussion_comment,
+            db::db_list_my_discussions, db::db_list_my_discussion_comments,
+            db::db_list_liked_discussions,
+            db::db_pool_status,
+            db::db_get_line, db::db_set_line,
+        ])
+        // 必须注册在 sql 插件之前：sql 插件在 setup 阶段执行 preload 迁移，
+        // 历史草稿迁移记录会让校验和校验失败并直接中断整个 App 构建（无窗口）
+        .plugin(
+            tauri::plugin::Builder::<tauri::Wry>::new("sqlite-migration-compat")
+                .setup(|app, _api| {
+                    repair_legacy_sqlite_migrations(app);
+                    Ok(())
+                })
+                .build(),
+        )
+        .plugin(
+            Builder::default()
+                .add_migrations("sqlite:config.db", migrations)
+                .build(),
+        )
+        .manage(db::DbState::new().expect("failed to init MySQL pool"))
+        .setup(|app| {
+            // 清理旧版本残留的 .env 文件（以前被错误地打包进安装目录）
+            if let Ok(exe) = std::env::current_exe() {
+                if let Some(dir) = exe.parent() {
+                    let old_env = dir.join(".env");
+                    if old_env.exists() {
+                        let _ = std::fs::remove_file(&old_env);
+                        log::info!("已清理旧版残留的 .env 文件: {:?}", old_env);
+                    }
+                }
+            }
+
+            // 启动 MySQL 连接池空闲检查器：超过 60 秒无请求则释放连接
+            app.state::<db::DbState>().pool.start_idle_checker();
+
+            // 恢复用户上次选择的数据库线路（1=sqlpub 默认，2=TiDB Cloud），
+            // 必须在任何 db_* 请求前应用：连接池懒建，首个请求才会真正连接
+            if let Ok(conn) = db::subscribe::open_sqlite(&app.handle().clone()) {
+                match conn.query_row(
+                    "SELECT value FROM config WHERE `key` = 'db_line'",
+                    [],
+                    |r| r.get::<_, String>(0),
+                ) {
+                    Ok(v) => match v.trim().parse::<u8>() {
+                        Ok(n) if n == 2 => {
+                            db::set_db_line(2);
+                            log::info!("已恢复数据库线路: 线路2（TiDB Cloud）");
+                        }
+                        _ => log::info!("数据库线路: 线路1（sqlpub，默认）"),
+                    },
+                    Err(rusqlite::Error::QueryReturnedNoRows) => {}
+                    Err(e) => log::warn!("读取数据库线路配置失败: {e}"),
+                }
+            }
+
+            // 窗口几何恢复（窗口在 tauri.conf.json 中 visible:false）：
+            // 此处先同步应用上次尺寸/位置，WebView 首帧渲染完成后由前端调用 show()，
+            // 用户看到的第一个画面就是最终几何；4 秒兜底强制显示，防前端异常导致窗口不出现
+            if let Some(window) = app.get_webview_window("main") {
+                let db_path = app.path().app_config_dir().ok().map(|d| d.join("config.db"));
+                let (restored, maximized) = restore_window_geometry(&window, db_path.as_deref());
+                if !restored {
+                    log::info!("无可用窗口几何记录，按默认尺寸显示");
+                }
+                let win = window.clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_secs(4));
+                    if !win.is_visible().unwrap_or(true) {
+                        let _ = win.show();
+                        // maximize 必须在 show 之后：SW_MAXIMIZE 会显示隐藏窗口，不能提前调用
+                        if maximized {
+                            let _ = win.maximize();
+                        }
+                        log::warn!("前端未按时显示窗口，已兜底强制显示");
+                    }
+                });
+            }
+
+            // 日志必须 release 也落盘：后端会在上抛错误前把原始详情（含数据库地址、
+            // 表名等基础设施信息）写进 log::error!，返回给前端的只是脱敏摘要。
+            // 若只在 debug 构建注册，线上出问题时将没有任何排查依据。
+            // 落盘位置：%APPDATA%\com.sfmmm.app\logs\（由 tauri-plugin-log 按 identifier 决定）。
+            // Info 级别只收业务日志；依赖库的 Detail 级噪声（tauri/wry 逐帧输出）不采。
+            // 单文件限 2MB 且只保留最近 1 个滚动文件，避免长期运行堆积占满磁盘。
+            app.handle().plugin(
+                tauri_plugin_log::Builder::default()
+                    .level(log::LevelFilter::Info)
+                    .max_file_size(2 * 1024 * 1024)
+                    .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepOne)
+                    .build(),
+            )?;
+            Ok(())
+        })
+        .run(tauri::generate_context!())
+        .expect("error while running tauri application");
+}

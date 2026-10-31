@@ -1,0 +1,6 @@
+# 本项目固定用 nightly：nightly 的 cargo 默认给每个 lib crate 传 -Zembed-metadata=no，
+# rlib 里不再内嵌完整 metadata，本地 target 目录实测可省约 3 GB。
+# 需要锁死版本（避免 rustup update 后漂移）时改成 channel = "nightly-2026-10-27"，
+# 并先执行 rustup toolchain install nightly-2026-10-27。
+[toolchain]
+channel = "nightly"

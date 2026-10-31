@@ -1,0 +1,849 @@
+import { useState, useEffect, useLayoutEffect, useCallback, useRef, useMemo } from 'react'
+import { useTranslation } from 'react-i18next'
+import { useEditor, EditorContent } from '@tiptap/react'
+import { nodeInputRule, nodePasteRule } from '@tiptap/core'
+import StarterKit from '@tiptap/starter-kit'
+import Placeholder from '@tiptap/extension-placeholder'
+import Image from '@tiptap/extension-image'
+import CharacterCount from '@tiptap/extension-character-count'
+import { makeStyles, tokens, Button, Tooltip, Text } from '@fluentui/react-components'
+import { marked } from 'marked'
+import {
+  Image24Regular,
+} from '@fluentui/react-icons'
+import {
+  selectImageFiles,
+  createPendingImage,
+  registerPendingImages,
+  unregisterPendingImages,
+  resolvePendingUrlForPreview,
+  isPendingUrl,
+} from '../../services/imageApi'
+import './RichTextEditor.css'
+
+const useStyles = makeStyles({
+  editor: {
+    flex: 1,
+    minHeight: '160px',
+    border: `1px solid ${tokens.colorNeutralStroke1}`,
+    borderRadius: '4px',
+    padding: '8px',
+    fontSize: tokens.fontSizeSmall,
+    cursor: 'text',
+    resize: 'vertical',
+    overflow: 'hidden',
+    display: 'flex',
+    flexDirection: 'column',
+    '& .ProseMirror': {
+      outline: 'none',
+      minHeight: '80px',
+      height: '100%',
+      '& p.is-editor-empty:first-child::before': {
+        content: 'attr(data-placeholder)',
+        color: tokens.colorNeutralForeground4,
+        float: 'left',
+        height: 0,
+        pointerEvents: 'none',
+      },
+    },
+    '& ul, & ol': {
+      paddingLeft: '20px',
+    },
+    '& h1, & h2, & h3': {
+      marginTop: '8px',
+      marginBottom: '4px',
+    },
+    '& blockquote': {
+      borderLeft: `3px solid ${tokens.colorNeutralStroke2}`,
+      paddingLeft: '8px',
+      marginLeft: '0',
+      color: tokens.colorNeutralForeground2,
+    },
+    '& code': {
+      backgroundColor: tokens.colorNeutralBackground3,
+      borderRadius: '2px',
+      padding: '1px 4px',
+      fontSize: tokens.fontSizeSmall,
+    },
+    '& pre': {
+      backgroundColor: tokens.colorNeutralBackground3,
+      borderRadius: '4px',
+      padding: '8px',
+      overflow: 'auto',
+      '& code': {
+        backgroundColor: 'transparent',
+        padding: 0,
+      },
+    },
+  },
+  toolbar: {
+    display: 'flex',
+    gap: '4px',
+    marginBottom: '4px',
+    flexWrap: 'wrap',
+  },
+  mdContainer: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '4px',
+    flex: 1,
+    minHeight: 0,
+  },
+  mdTextarea: {
+    resize: 'vertical',
+  },
+  mdSplit: {
+    display: 'grid',
+    gridTemplateColumns: '1fr 1fr',
+    gap: '8px',
+    alignItems: 'stretch',
+    minHeight: 0,
+  },
+  splitHint: {
+    alignSelf: 'center',
+    fontSize: tokens.fontSizeSmall,
+    color: tokens.colorNeutralForeground3,
+  },
+  editorContent: {
+    flex: 1,
+    overflow: 'auto',
+  },
+  charCount: {
+    textAlign: 'right',
+    fontSize: tokens.fontSizeSmall,
+    color: tokens.colorNeutralForeground3,
+    paddingTop: '4px',
+  },
+  mdPreview: {
+    border: `1px solid ${tokens.colorNeutralStroke1}`,
+    borderRadius: '4px',
+    padding: '8px',
+    fontSize: tokens.fontSizeSmall,
+    maxHeight: '200px',
+    overflow: 'auto',
+    backgroundColor: tokens.colorNeutralBackground1,
+    '& table': {
+      borderCollapse: 'collapse',
+      marginTop: '8px',
+      marginBottom: '8px',
+      maxWidth: '100%',
+    },
+    '& th, & td': {
+      border: `1px solid ${tokens.colorNeutralStroke2}`,
+      padding: '4px 8px',
+      textAlign: 'left',
+    },
+    '& th': {
+      backgroundColor: tokens.colorNeutralBackground3,
+      fontWeight: tokens.fontWeightSemibold,
+    },
+  },
+})
+
+// 自定义 Tiptap Image 扩展，支持 data-imgbed-pending 属性，并兼容 Markdown 图片语法
+const MD_IMAGE_REGEX = /!\[(.*?)\]\(([^)]+)\)/
+const MD_IMAGE_REGEX_GLOBAL = /!\[(.*?)\]\(([^)]+)\)/g
+
+const CustomImage = Image.extend({
+  addAttributes() {
+    return {
+      ...this.parent?.(),
+      dataImgbedPending: {
+        default: null,
+        parseHTML: element => element.getAttribute('data-imgbed-pending'),
+        renderHTML: attributes => {
+          if (!attributes.dataImgbedPending) {
+            return {}
+          }
+          return {
+            'data-imgbed-pending': attributes.dataImgbedPending,
+          }
+        },
+      },
+    }
+  },
+  addInputRules() {
+    return [
+      nodeInputRule({
+        find: MD_IMAGE_REGEX,
+        type: this.type,
+        getAttributes: (match) => {
+          const src = match[2]
+          return {
+            src,
+            alt: match[1],
+            dataImgbedPending: src.startsWith('imgbed://pending/') ? src : null,
+          }
+        },
+      }),
+    ]
+  },
+  addPasteRules() {
+    return [
+      nodePasteRule({
+        find: MD_IMAGE_REGEX_GLOBAL,
+        type: this.type,
+        getAttributes: (match) => {
+          const src = match[2]
+          return {
+            src,
+            alt: match[1],
+            dataImgbedPending: src.startsWith('imgbed://pending/') ? src : null,
+          }
+        },
+      }),
+    ]
+  },
+})
+
+// 图片骨架屏样式：紧凑内容与文章内容共用
+const imgSkeletonStyles = {
+  '& .rt-img-wrap': {
+    position: 'relative',
+    display: 'inline-block',
+    maxWidth: '100%',
+    verticalAlign: 'top',
+  },
+  '& .rt-img-placeholder': {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    right: 0,
+    bottom: 0,
+    display: 'block',
+    borderRadius: '4px',
+    backgroundColor: tokens.colorNeutralBackground3,
+    backgroundImage: 'linear-gradient(90deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.35) 50%, rgba(255,255,255,0) 100%)',
+    backgroundSize: '200% 100%',
+    animationName: 'rtImgShimmer',
+    animationDuration: '1.4s',
+    animationTimingFunction: 'ease-in-out',
+    animationIterationCount: 'infinite',
+    pointerEvents: 'none',
+  },
+  '& .rt-img-wrap img': {
+    display: 'block',
+    maxWidth: '100%',
+    borderRadius: '4px',
+    cursor: 'zoom-in',
+    opacity: 0,
+    transitionProperty: 'opacity',
+    transitionDuration: '0.3s',
+    transitionTimingFunction: 'ease',
+    position: 'relative',
+    zIndex: 1,
+  },
+  '& .rt-img-wrap.rt-img-loading': {
+    width: '100%',
+    minHeight: '160px',
+  },
+  '& .rt-img-wrap.rt-img-loaded img': {
+    opacity: 1,
+  },
+  '& .rt-img-wrap.rt-img-loaded': {
+    minHeight: 0,
+  },
+  '& .rt-img-wrap.rt-img-loaded .rt-img-placeholder': {
+    display: 'none',
+  },
+  '& .rt-img-wrap.rt-img-error .rt-img-placeholder': {
+    backgroundImage: 'none',
+    animationName: 'none',
+    backgroundColor: tokens.colorNeutralBackground3,
+  },
+  '& .rt-img-wrap.rt-img-error': {
+    minHeight: '60px',
+  },
+}
+
+const useContentStyles = makeStyles({
+  content: {
+    fontSize: tokens.fontSizeSmall,
+    lineHeight: '1.5',
+    '& ul, & ol': {
+      paddingLeft: '20px',
+    },
+    '& h1, & h2, & h3': {
+      marginTop: '8px',
+      marginBottom: '4px',
+    },
+    '& blockquote': {
+      borderLeft: `3px solid ${tokens.colorNeutralStroke2}`,
+      paddingLeft: '8px',
+      marginLeft: '0',
+      color: tokens.colorNeutralForeground2,
+    },
+    '& code': {
+      backgroundColor: tokens.colorNeutralBackground3,
+      borderRadius: '2px',
+      padding: '1px 4px',
+      fontSize: tokens.fontSizeSmall,
+    },
+    '& pre': {
+      backgroundColor: tokens.colorNeutralBackground3,
+      borderRadius: '4px',
+      padding: '8px',
+      overflow: 'auto',
+      '& code': {
+        backgroundColor: 'transparent',
+        padding: 0,
+      },
+    },
+    '& img': {
+      maxWidth: '100%',
+      cursor: 'zoom-in',
+    },
+    '& table': {
+      borderCollapse: 'collapse',
+      marginTop: '8px',
+      marginBottom: '8px',
+      maxWidth: '100%',
+    },
+    '& th, & td': {
+      border: `1px solid ${tokens.colorNeutralStroke2}`,
+      padding: '4px 8px',
+      textAlign: 'left',
+    },
+    '& th': {
+      backgroundColor: tokens.colorNeutralBackground3,
+      fontWeight: tokens.fontWeightSemibold,
+    },
+    ...imgSkeletonStyles,
+  },
+})
+
+// 文章型内容（mod 详情页等长文）：参照 Discourse 的段落节奏，字号与行高更舒展
+const useArticleContentStyles = makeStyles({
+  content: {
+    fontSize: '15px',
+    lineHeight: '1.7',
+    color: tokens.colorNeutralForeground1,
+    wordBreak: 'break-word',
+    '& > :first-child': {
+      marginTop: 0,
+    },
+    '& > :last-child': {
+      marginBottom: 0,
+    },
+    '& p': {
+      margin: '0 0 1em',
+    },
+    '& h1, & h2, & h3, & h4, & h5, & h6': {
+      margin: '1.6em 0 0.6em',
+      lineHeight: 1.3,
+      fontWeight: tokens.fontWeightSemibold,
+    },
+    '& h1': {
+      fontSize: '1.6em',
+    },
+    '& h2': {
+      fontSize: '1.4em',
+    },
+    '& h3': {
+      fontSize: '1.2em',
+    },
+    '& h4': {
+      fontSize: '1.05em',
+    },
+    '& h5, & h6': {
+      fontSize: '1em',
+    },
+    '& ul, & ol': {
+      margin: '0 0 1em',
+      paddingLeft: '1.7em',
+    },
+    '& li': {
+      margin: '0.3em 0',
+    },
+    '& li > ul, & li > ol': {
+      margin: '0.3em 0',
+    },
+    '& blockquote': {
+      margin: '0 0 1em',
+      padding: '0.6em 1em',
+      borderLeft: `4px solid ${tokens.colorBrandStroke1}`,
+      borderRadius: '4px',
+      backgroundColor: tokens.colorNeutralBackground3,
+      color: tokens.colorNeutralForeground2,
+    },
+    '& blockquote > :last-child': {
+      marginBottom: 0,
+    },
+    '& a': {
+      color: tokens.colorBrandForegroundLink,
+      textDecorationLine: 'underline',
+      textUnderlineOffset: '2px',
+    },
+    '& a:hover': {
+      color: tokens.colorBrandForegroundLinkHover,
+    },
+    '& hr': {
+      border: 'none',
+      borderTop: `1px solid ${tokens.colorNeutralStroke2}`,
+      margin: '1.8em 0',
+    },
+    '& code': {
+      backgroundColor: tokens.colorNeutralBackground3,
+      borderRadius: '4px',
+      padding: '0.15em 0.4em',
+      fontSize: '0.9em',
+      fontFamily: 'Consolas, "Courier New", monospace',
+    },
+    '& pre': {
+      margin: '0 0 1em',
+      backgroundColor: tokens.colorNeutralBackground3,
+      borderRadius: '8px',
+      padding: '12px 16px',
+      overflow: 'auto',
+      lineHeight: '1.5',
+      '& code': {
+        backgroundColor: 'transparent',
+        padding: 0,
+        fontSize: tokens.fontSizeBase300,
+      },
+    },
+    '& img': {
+      maxWidth: '100%',
+      height: 'auto',
+      cursor: 'zoom-in',
+    },
+    '& table': {
+      borderCollapse: 'collapse',
+      margin: '0 0 1em',
+      maxWidth: '100%',
+      fontSize: tokens.fontSizeBase300,
+    },
+    '& th, & td': {
+      border: `1px solid ${tokens.colorNeutralStroke2}`,
+      padding: '8px 12px',
+      textAlign: 'left',
+    },
+    '& th': {
+      backgroundColor: tokens.colorNeutralBackground3,
+      fontWeight: tokens.fontWeightSemibold,
+    },
+    ...imgSkeletonStyles,
+  },
+})
+
+export function RichTextEditor({ value, onChange, placeholder, maxLength, disabled = false }) {
+  const { t } = useTranslation()
+  const styles = useStyles()
+  const placeholderText = placeholder ?? t('editor.inputPlaceholder')
+  const blobUrlsRef = useRef([])
+
+  const extensions = useMemo(() => {
+    const list = [
+      StarterKit,
+      Placeholder.configure({ placeholder: placeholderText }),
+      CustomImage.configure({
+        HTMLAttributes: { class: 'rich-image' },
+        allowBase64: true,
+      }),
+    ]
+    if (maxLength && maxLength > 0) {
+      list.push(CharacterCount.configure({ limit: maxLength }))
+    }
+    return list
+  }, [placeholderText, maxLength])
+
+  const editor = useEditor({
+    extensions,
+    content: value || '',
+    onUpdate: ({ editor: ed }) => {
+      onChange?.(ed.getHTML())
+    },
+  })
+
+  // 组件卸载时释放所有本组件创建的 blob URL
+  useEffect(() => {
+    return () => {
+      blobUrlsRef.current.forEach(url => URL.revokeObjectURL(url))
+      blobUrlsRef.current = []
+    }
+  }, [])
+
+  // 受控模式：外部 value 变化时同步编辑器内容
+  useEffect(() => {
+    if (!editor) return
+    const current = editor.getHTML()
+    if (value !== current) {
+      editor.commands.setContent(value || '', false)
+    }
+  }, [editor, value])
+
+  // 禁用/启用编辑
+  useEffect(() => {
+    if (!editor) return
+    editor.setEditable(!disabled)
+  }, [editor, disabled])
+
+  const insertBlobImage = (file, img) => {
+    if (!editor) return false
+    const blobUrl = URL.createObjectURL(file)
+    const command = editor.chain().focus().setImage({
+      src: blobUrl,
+      alt: file.name,
+      title: file.name,
+      dataImgbedPending: img.pendingUrl,
+    })
+    const success = command.run()
+    if (success) {
+      blobUrlsRef.current.push(blobUrl)
+    } else {
+      URL.revokeObjectURL(blobUrl)
+      unregisterPendingImages([img.id])
+    }
+    return success
+  }
+
+  const insertImage = async () => {
+    if (!editor) return
+    try {
+      const images = await selectImageFiles({ multiple: false })
+      if (images.length === 0) return
+      const img = images[0]
+      registerPendingImages([img])
+      const success = insertBlobImage(img.file, img)
+      if (!success) {
+        alert(t('editor.imageInsertLimitReached') || t('editor.imageInsertFailed'))
+      }
+    } catch (e) {
+      alert(t('editor.imageInsertFailed') + e.message)
+    }
+  }
+
+  const handlePaste = (e) => {
+    if (!editor) return
+    const files = Array.from(e.clipboardData.files).filter(f => f.type.startsWith('image/'))
+    if (files.length === 0) return
+    e.preventDefault()
+    for (const file of files) {
+      try {
+        const img = createPendingImage(file)
+        registerPendingImages([img])
+        const success = insertBlobImage(file, img)
+        if (!success) {
+          alert(t('editor.imageInsertLimitReached') || t('editor.imageInsertFailed'))
+          break
+        }
+      } catch (err) {
+        alert(t('editor.imageInsertFailed') + err.message)
+      }
+    }
+  }
+
+  if (!editor) return null
+
+  return (
+    <div className={styles.editor} onPaste={disabled ? undefined : handlePaste}>
+      <div className={styles.toolbar}>
+        <Tooltip content={t('editor.bold')} relationship="label"><Button size="small" disabled={disabled} appearance={editor.isActive('bold') ? 'filled' : 'subtle'} onClick={() => editor.chain().focus().toggleBold().run()}><b>B</b></Button></Tooltip>
+        <Tooltip content={t('editor.italic')} relationship="label"><Button size="small" disabled={disabled} appearance={editor.isActive('italic') ? 'filled' : 'subtle'} onClick={() => editor.chain().focus().toggleItalic().run()}><i>I</i></Button></Tooltip>
+        <Tooltip content={t('editor.strikethrough')} relationship="label"><Button size="small" disabled={disabled} appearance={editor.isActive('strike') ? 'filled' : 'subtle'} onClick={() => editor.chain().focus().toggleStrike().run()}><s>S</s></Button></Tooltip>
+        <Tooltip content={t('editor.inlineCode')} relationship="label"><Button size="small" disabled={disabled} appearance={editor.isActive('code') ? 'filled' : 'subtle'} onClick={() => editor.chain().focus().toggleCode().run()}>{'</>'}</Button></Tooltip>
+        <Tooltip content={t('editor.divider')} relationship="label"><Button size="small" disabled={disabled} appearance="subtle" onClick={() => editor.chain().focus().setHorizontalRule().run()}>―</Button></Tooltip>
+        <Tooltip content={t('editor.heading2')} relationship="label"><Button size="small" disabled={disabled} appearance={editor.isActive('heading', { level: 2 }) ? 'filled' : 'subtle'} onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}>H2</Button></Tooltip>
+        <Tooltip content={t('editor.heading3')} relationship="label"><Button size="small" disabled={disabled} appearance={editor.isActive('heading', { level: 3 }) ? 'filled' : 'subtle'} onClick={() => editor.chain().focus().toggleHeading({ level: 3 }).run()}>H3</Button></Tooltip>
+        <Tooltip content={t('editor.bulletList')} relationship="label"><Button size="small" disabled={disabled} appearance={editor.isActive('bulletList') ? 'filled' : 'subtle'} onClick={() => editor.chain().focus().toggleBulletList().run()}>•</Button></Tooltip>
+        <Tooltip content={t('editor.orderedList')} relationship="label"><Button size="small" disabled={disabled} appearance={editor.isActive('orderedList') ? 'filled' : 'subtle'} onClick={() => editor.chain().focus().toggleOrderedList().run()}>1.</Button></Tooltip>
+        <Tooltip content={t('editor.quote')} relationship="label"><Button size="small" disabled={disabled} appearance={editor.isActive('blockquote') ? 'filled' : 'subtle'} onClick={() => editor.chain().focus().toggleBlockquote().run()}>"</Button></Tooltip>
+        <Tooltip content={t('editor.insertImage')} relationship="label"><Button size="small" disabled={disabled} icon={<Image24Regular />} onClick={insertImage}>{t('editor.image')}</Button></Tooltip>
+        <Tooltip content={t('editor.undo')} relationship="label"><Button size="small" disabled={disabled} appearance="subtle" onClick={() => editor.chain().focus().undo().run()}>↶</Button></Tooltip>
+        <Tooltip content={t('editor.redo')} relationship="label"><Button size="small" disabled={disabled} appearance="subtle" onClick={() => editor.chain().focus().redo().run()}>↷</Button></Tooltip>
+      </div>
+      <EditorContent editor={editor} className={styles.editorContent} />
+      {maxLength && maxLength > 0 && (
+        <Text className={styles.charCount}>
+          {editor.storage.characterCount?.characters() ?? 0} / {maxLength}
+        </Text>
+      )}
+    </div>
+  )
+}
+
+export function MarkdownEditor({ value, onChange, placeholder, maxLength, disabled = false, split = false, onSubmit }) {
+  const { t } = useTranslation()
+  const styles = useStyles()
+  const textareaRef = useRef(null)
+  const [showPreview, setShowPreview] = useState(false)
+  const [previewHtml, setPreviewHtml] = useState('')
+  const [previewLoading, setPreviewLoading] = useState(false)
+  const placeholderText = placeholder ?? t('editor.markdownPlaceholder')
+  // 本地图片的 data URL 缓存：分栏模式下每次按键都会重新解析，避免重复读文件
+  const dataUrlCache = useRef({})
+
+  // 预览时把 pending URL 替换为本地 data URL
+  useEffect(() => {
+    if (!split && !showPreview) return
+    let cancelled = false
+    const resolve = async () => {
+      if (!split) setPreviewLoading(true)
+      const rawHtml = await marked(value || '')
+      const parser = new DOMParser()
+      const doc = parser.parseFromString(rawHtml, 'text/html')
+      const images = doc.querySelectorAll('img')
+      for (const img of images) {
+        const src = img.getAttribute('src')
+        if (isPendingUrl(src)) {
+          if (!dataUrlCache.current[src]) dataUrlCache.current[src] = await resolvePendingUrlForPreview(src)
+          img.setAttribute('src', dataUrlCache.current[src])
+        }
+      }
+      if (!cancelled) {
+        setPreviewHtml(doc.body.innerHTML)
+        setPreviewLoading(false)
+      }
+    }
+    resolve()
+    return () => { cancelled = true }
+  }, [split, showPreview, value])
+
+  const insertAtCursor = useCallback((text) => {
+    const textarea = textareaRef.current
+    if (textarea) {
+      const start = textarea.selectionStart ?? (value || '').length
+      const end = textarea.selectionEnd ?? (value || '').length
+      const current = value || ''
+      const newValue = current.slice(0, start) + text + current.slice(end)
+      onChange?.(newValue)
+      setTimeout(() => {
+        textarea.selectionStart = textarea.selectionEnd = start + text.length
+        textarea.focus()
+      }, 0)
+    } else {
+      onChange?.((value || '') + text)
+    }
+  }, [value, onChange])
+
+  const handleInsertImage = async () => {
+    try {
+      const images = await selectImageFiles({ multiple: false })
+      if (images.length === 0) return
+      const img = images[0]
+      const text = `![${img.file.name}](${img.pendingUrl})`
+      if (maxLength && (value || '').length + text.length > maxLength) {
+        alert(t('editor.imageInsertLimitReached') || t('editor.imageInsertFailed'))
+        return
+      }
+      registerPendingImages([img])
+      insertAtCursor(text)
+    } catch (e) {
+      alert(t('editor.imageInsertFailed') + e.message)
+    }
+  }
+
+  const handlePaste = async (e) => {
+    const files = Array.from(e.clipboardData.files).filter(f => f.type.startsWith('image/'))
+    if (files.length === 0) return
+    e.preventDefault()
+    for (const file of files) {
+      try {
+        const img = createPendingImage(file)
+        const text = `![${file.name}](${img.pendingUrl})`
+        if (maxLength && (value || '').length + text.length > maxLength) {
+          alert(t('editor.imageInsertLimitReached') || t('editor.imageInsertFailed'))
+          break
+        }
+        registerPendingImages([img])
+        insertAtCursor(text)
+      } catch (err) {
+        alert(t('editor.imageInsertFailed') + err.message)
+      }
+    }
+  }
+
+  const handleKeyDown = (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+      e.preventDefault()
+      if (!disabled) onSubmit?.()
+    }
+  }
+
+  const textareaEl = (
+    <textarea
+      ref={textareaRef}
+      className={styles.mdTextarea}
+      style={{
+        minHeight: '192px',
+        fontFamily: 'monospace',
+        fontSize: tokens.fontSizeSmall,
+        flex: 1,
+        padding: '6px 8px',
+        border: `1px solid ${tokens.colorNeutralStroke1}`,
+        borderRadius: '4px',
+        outline: 'none',
+        resize: split ? 'none' : 'vertical',
+        boxSizing: 'border-box',
+        width: '100%',
+      }}
+      placeholder={placeholderText}
+      value={value || ''}
+      maxLength={maxLength}
+      disabled={disabled}
+      onChange={(e) => onChange?.(e.target.value)}
+      onPaste={disabled ? undefined : handlePaste}
+      onKeyDown={onSubmit ? handleKeyDown : undefined}
+    />
+  )
+
+  const previewEl = previewLoading ? (
+    <div className={styles.mdPreview}>{t('editor.previewLoading')}</div>
+  ) : (
+    <div
+      className={styles.mdPreview}
+      style={split ? { maxHeight: '384px', width: '100%', boxSizing: 'border-box' } : undefined}
+      dangerouslySetInnerHTML={{ __html: previewHtml }}
+    />
+  )
+
+  return (
+    <div className={styles.mdContainer}>
+      <div className={styles.toolbar}>
+        <Tooltip content={t('editor.insertImage')} relationship="label">
+          <Button size="small" disabled={disabled} icon={<Image24Regular />} onClick={handleInsertImage}>{t('editor.image')}</Button>
+        </Tooltip>
+        {!split && (
+          <>
+            <Button size="small" disabled={disabled} appearance={!showPreview ? 'filled' : 'subtle'} onClick={() => setShowPreview(false)}>{t('editor.edit')}</Button>
+            <Button size="small" appearance={showPreview ? 'filled' : 'subtle'} onClick={() => setShowPreview(true)}>{t('editor.preview')}</Button>
+          </>
+        )}
+        {split && <Text className={styles.splitHint}>{t('editor.splitPreviewHint')}</Text>}
+      </div>
+      {split ? (
+        <div className={styles.mdSplit}>
+          {textareaEl}
+          {previewEl}
+        </div>
+      ) : showPreview ? (
+        previewEl
+      ) : (
+        textareaEl
+      )}
+      {maxLength && maxLength > 0 && (
+        <Text className={styles.charCount}>
+          {(value || '').length} / {maxLength}
+        </Text>
+      )}
+    </div>
+  )
+}
+
+// 为容器内的 <img> 包裹占位骨架：加载前显示 shimmer 占位，加载完成后淡入替换占位图。
+// ref 指向渲染容器；deps 为内容依赖，内容变化时重新扫描包装新图片。
+function useProgressiveImages(ref, deps) {
+  // 用 useLayoutEffect：在浏览器 paint 前同步包裹图片并设置 loading 占位，
+  // 避免裸 img 先闪现一帧再变为占位图
+  useLayoutEffect(() => {
+    const root = ref.current
+    if (!root) return
+    const imgs = Array.from(root.querySelectorAll('img'))
+    const cleanups = []
+    for (const img of imgs) {
+      const parent = img.parentElement
+      let wrap
+      if (parent && parent.classList && parent.classList.contains('rt-img-wrap')) {
+        wrap = parent
+      } else {
+        wrap = document.createElement('span')
+        wrap.className = 'rt-img-wrap rt-img-loading'
+        const placeholder = document.createElement('span')
+        placeholder.className = 'rt-img-placeholder'
+        img.parentNode.insertBefore(wrap, img)
+        wrap.appendChild(placeholder)
+        wrap.appendChild(img)
+      }
+      wrap.classList.remove('rt-img-loaded', 'rt-img-error')
+      wrap.classList.add('rt-img-loading')
+      const markLoaded = () => {
+        wrap.classList.remove('rt-img-loading', 'rt-img-error')
+        wrap.classList.add('rt-img-loaded')
+      }
+      const markError = () => {
+        wrap.classList.remove('rt-img-loading', 'rt-img-loaded')
+        wrap.classList.add('rt-img-error')
+      }
+      if (img.complete) {
+        // 浏览器可能已加载完成（缓存图），直接定状态，避免再挂 load 监听永不触发
+        if (img.naturalWidth > 0) markLoaded()
+        else markError()
+      } else {
+        img.addEventListener('load', markLoaded, { once: true })
+        img.addEventListener('error', markError, { once: true })
+        cleanups.push(() => {
+          img.removeEventListener('load', markLoaded)
+          img.removeEventListener('error', markError)
+        })
+      }
+    }
+    return () => {
+      for (const fn of cleanups) fn()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, deps)
+}
+
+export function MarkdownContent({ markdown, onImageClick, variant = 'compact' }) {
+  const compactStyles = useContentStyles()
+  const articleStyles = useArticleContentStyles()
+  const styles = variant === 'article' ? articleStyles : compactStyles
+  const ref = useRef(null)
+
+  useProgressiveImages(ref, [markdown])
+
+  if (!markdown) return null
+
+  // 事件委托：捕获内容区域内的图片点击，回调图片地址与全部图片列表（用于灯箱预览等）
+  const handleClick = (e) => {
+    if (!onImageClick) return
+    const target = e.target
+    if (target && target.tagName === 'IMG') {
+      const all = ref.current
+        ? Array.from(ref.current.querySelectorAll('img')).map(i => i.getAttribute('src') || '')
+        : []
+      onImageClick(target.getAttribute('src') || '', all)
+    }
+  }
+
+  return (
+    <div
+      ref={ref}
+      className={styles.content}
+      onClick={handleClick}
+      dangerouslySetInnerHTML={{ __html: marked(markdown) }}
+    />
+  )
+}
+
+export function RichTextContent({ html, onImageClick, variant = 'compact' }) {
+  const compactStyles = useContentStyles()
+  const articleStyles = useArticleContentStyles()
+  const styles = variant === 'article' ? articleStyles : compactStyles
+  const ref = useRef(null)
+
+  useProgressiveImages(ref, [html])
+
+  if (!html) return null
+
+  // 事件委托：捕获内容区域内的图片点击，回调图片地址与全部图片列表（与 MarkdownContent 同模式）
+  const handleClick = (e) => {
+    if (!onImageClick) return
+    const target = e.target
+    if (target && target.tagName === 'IMG') {
+      const all = ref.current
+        ? Array.from(ref.current.querySelectorAll('img')).map(i => i.getAttribute('src') || '')
+        : []
+      onImageClick(target.getAttribute('src') || '', all)
+    }
+  }
+
+  return (
+    <div
+      ref={ref}
+      className={styles.content}
+      onClick={handleClick}
+      dangerouslySetInnerHTML={{ __html: html }}
+    />
+  )
+}

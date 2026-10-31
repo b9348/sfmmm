@@ -1,0 +1,197 @@
+name: Build & Release
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build NSIS installer
+    runs-on: windows-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+
+    outputs:
+      version: ${{ steps.get_version.outputs.version }}
+      tag_name: ${{ steps.get_version.outputs.tag_name }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Get version
+        id: get_version
+        shell: bash
+        run: |
+          VERSION=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag_name=v$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Detected version: v$VERSION"
+
+      - name: Create tag if not exists
+        shell: bash
+        run: |
+          TAG="${{ steps.get_version.outputs.tag_name }}"
+          # 直接检查远端标签，避免浅克隆下本地 git rev-parse 查不到已存在的 tag
+          if ! git ls-remote --exit-code origin "refs/tags/$TAG" >/dev/null 2>&1; then
+            git config user.name "github-actions"
+            git config user.email "github-actions@github.com"
+            git tag "$TAG"
+            git push origin "$TAG"
+            echo "Created tag: $TAG"
+          else
+            echo "Tag $TAG already exists"
+          fi
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          # 需与 pnpm-lock.yaml 的 lockfileVersion 9.0 匹配（pnpm 8 不识别会忽略锁文件导致依赖漂移）
+          version: 11
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install dependencies
+        run: pnpm install
+        shell: bash
+
+      - name: Create .env
+        run: |
+          echo "DB_URL=${{ secrets.DB_URL }}" > src-tauri/.env
+          echo "DB_URL2=${{ secrets.DB_URL2 }}" >> src-tauri/.env
+          echo "IMGBED_URL=${{ secrets.IMGBED_URL }}" >> src-tauri/.env
+          echo "IMGBED_TOKEN=${{ secrets.IMGBED_TOKEN }}" >> src-tauri/.env
+          echo "DB_ENC_KEY=${{ secrets.DB_ENC_KEY }}" >> src-tauri/.env
+          echo "DB_TLS1=${{ vars.DB_TLS1 || '0' }}" >> src-tauri/.env
+          echo "DB_TLS2=${{ vars.DB_TLS2 || '1' }}" >> src-tauri/.env
+          echo "VITE_LATEST_URL=${{ secrets.IMGBED_URL }}/file/sfm/installer/latest.json" > .env
+        shell: bash
+
+      - name: Remove local Cargo config for CI
+        run: rm -f src-tauri/.cargo/config.toml
+        shell: bash
+
+      - name: Build Tauri (NSIS)
+        run: pnpm tauri build
+        env:
+          HTTPS_PROXY: ''
+          HTTP_PROXY: ''
+
+      - name: Upload installer as artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: nsis-installer
+          path: src-tauri/target/release/bundle/nsis/*.exe
+          if-no-files-found: error
+
+  release:
+    name: Create Release & Update Cloud
+    needs: [build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download installer
+        uses: actions/download-artifact@v8
+        with:
+          name: nsis-installer
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ needs.build.outputs.tag_name }}
+          name: ${{ needs.build.outputs.tag_name }}
+          body: |
+            ## ${{ needs.build.outputs.tag_name }}
+
+            自动构建安装包，下载后运行即可更新。
+          files: |
+            *.exe
+          generate_release_notes: true
+
+      - name: Upload to ImgBed & Update Cloud Version
+        shell: bash
+        run: |
+          EXE_FILE=$(ls *.exe | head -1)
+          if [ -z "$EXE_FILE" ]; then
+            echo "::error::No .exe installer found in workspace"
+            exit 1
+          fi
+          echo "Found installer: $EXE_FILE"
+
+          NEW_VERSION="${{ needs.build.outputs.version }}"
+          IMGBED_URL="${{ secrets.IMGBED_URL }}"
+
+          # 1. 上传安装包到 ImgBed（图床 CDN）
+          echo "::group::Upload to ImgBed"
+          UPLOAD_RESP=$(curl -s -X POST \
+            "${IMGBED_URL}/upload?uploadChannel=telegram&uploadFolder=sfm/installer/v${NEW_VERSION}&returnFormat=full" \
+            -H "Authorization: Bearer ${{ secrets.IMGBED_TOKEN }}" \
+            -F "file=@${EXE_FILE}")
+          echo "ImgBed response: $UPLOAD_RESP"
+          echo "::endgroup::"
+
+          DOWNLOAD_URL=$(echo "$UPLOAD_RESP" | jq -r '.[0].src // empty')
+          if [ -z "$DOWNLOAD_URL" ]; then
+            echo "::error::Failed to upload to ImgBed"
+            echo "$UPLOAD_RESP"
+            exit 1
+          fi
+          echo "Download URL: $DOWNLOAD_URL"
+
+          # 2. 更新固定路径的版本清单 latest.json（先删旧再传新，uploadNameType=origin 保证 URL 固定）
+          echo "::group::Update latest.json manifest"
+          LATEST_URL="${IMGBED_URL}/file/sfm/installer/latest.json"
+
+          echo "Deleting old manifest (if any)..."
+          curl -s -X GET \
+            "${IMGBED_URL}/api/manage/delete/sfm/installer/latest.json" \
+            -H "Authorization: Bearer ${{ secrets.IMGBED_TOKEN }}" || true
+
+          echo "{\"version\":\"${NEW_VERSION}\",\"update_url\":\"${DOWNLOAD_URL}\"}" > latest.json
+          MANIFEST_RESP=$(curl -s -X POST \
+            "${IMGBED_URL}/upload?uploadChannel=telegram&uploadFolder=sfm/installer&returnFormat=full&uploadNameType=origin" \
+            -H "Authorization: Bearer ${{ secrets.IMGBED_TOKEN }}" \
+            -F "file=@latest.json")
+          echo "Manifest upload response: $MANIFEST_RESP"
+          MANIFEST_SRC=$(echo "$MANIFEST_RESP" | jq -r '.[0].src // empty')
+          if [ -z "$MANIFEST_SRC" ]; then
+            echo "::error::Failed to upload latest.json to ImgBed"
+            echo "$MANIFEST_RESP"
+            exit 1
+          fi
+          echo "✅ Manifest available at: $LATEST_URL"
+          echo "::endgroup::"
+
+          # 3. 通过 DB_URL 直连 MySQL 更新 version_config
+          #（Cloud API sfm.b9349.dpdns.org 在 CI 中不可达，故用直连方式）
+          echo "::group::Update version_config via MySQL"
+          apt-get update -qq && apt-get install -y -qq default-mysql-client 2>&1 | tail -2
+
+          RAW="${{ secrets.DB_URL }}"
+          RAW="${RAW#mysql://}"
+          DB_USER="${RAW%%:*}"
+          REST="${RAW#*:}"
+          DB_PASS="${REST%%@*}"
+          REST="${REST#*@}"
+          DB_HOST="${REST%%:*}"
+          REST="${REST#*:}"
+          DB_PORT="${REST%%/*}"
+          DB_NAME="${REST#*/}"
+
+          mysql -h "$DB_HOST" -P "$DB_PORT" -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" \
+            -e "UPDATE version_config SET version='${NEW_VERSION}', update_url='${DOWNLOAD_URL}' WHERE id=1"
+          echo "✅ Cloud version config updated to v${NEW_VERSION} — ${DOWNLOAD_URL}"
+          echo "::endgroup::"
