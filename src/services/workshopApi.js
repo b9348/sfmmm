@@ -761,7 +761,7 @@ async function sha256Bytes(bytes) {
 
 // ── 讨论区（独立于 mod 体系；帖子/投票/Boost/评论/我的历史） ──
 
-// 帖子列表：sort_by = created_at（最近更新）| likes；boosts 仅旧客户端兼容。d_type = regular | poll | 空（全部）
+// 帖子列表：sort_by = created_at（最近更新）| likes（最多赞）| hot（热门推荐）；boosts 仅旧客户端兼容。d_type = regular | poll | 空（全部）
 // opts：透传 dbCall（{ force: true } 跳过缓存，写操作后刷新列表用）
 export async function listDiscussions({ page = 1, limit = 20, search, sort_by = 'created_at', sort_order, d_type = '', user_id } = {}, opts = {}) {
   const map = (r) => ({

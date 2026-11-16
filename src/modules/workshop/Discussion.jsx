@@ -17,6 +17,7 @@ import { getConfig, setConfig } from '../../services/dbHelper'
 import { DiscussionCard } from './DiscussionCard'
 import { DiscussionDetailPage } from './DiscussionDetailPage'
 import { CreateDiscussionPage } from './CreateDiscussionPage'
+import { getDiscussionSortOptions } from './discussionSort'
 import { useAuth } from '../../contexts/useAuth'
 import { usePagePrefetch } from '../../hooks/usePagePrefetch'
 import { useGridColumns } from '../../hooks/useGridColumns'
@@ -600,10 +601,7 @@ export function Discussion({ active = true, onNewContent }) {
         onSearchSubmit={handleSearchSubmit}
         onRefresh={() => fetchList(1, search, sortBy, sortOrder, { force: true })}
         disabled={loading}
-        sortOptions={[
-          { value: 'created_at', label: t('workshop.sortRecent') },
-          { value: 'likes', label: t('workshop.sortLikes') },
-        ]}
+        sortOptions={getDiscussionSortOptions(t)}
         sortBy={sortBy}
         onSortByChange={(v) => { setSortBy(v); setPage(1); fetchList(1, search, v, sortOrder, { force: true }) }}
         sortOrder={sortOrder}
