@@ -1,0 +1,65 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+.env
+.env.local
+
+# SQLite user data
+src-tauri/config.db
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+.ace-tool/
+
+# Agent 临时工作树与本地缓存
+.claude/worktrees/
+.atomcode/
+
+# 图床迁移产物含渠道凭据
+.imgbed-migration*/
+imgbed-migration-*/
+
+# 本地数据库备份（不入库，pnpm backup 的产物）
+.sqlbak/
+.trae/
+
+# 发版工具留下的临时目录
+.deploy-tmp/
+
+# 桌面端构建产物与机器生成清单
+src-tauri/target-hk/
+src-tauri/pkgs.json
+
+# 会话工具的临时锁文件
+agent-ssh-cli-*.lock
+
+# 夸克 CLI 的登录态与缓存（config.json 含 access_token，绝不入库）
+scripts/vendor/*/config.json
+scripts/vendor/*/config/
+# bdpan CLI 二进制按机器安装（pnpm baidu install），不随仓库携带
+scripts/vendor/baidu/bin/
+scripts/vendor/*/storage/
+scripts/vendor/*/search/
+scripts/vendor/*/upload/
+scripts/vendor/*/browse/
+scripts/vendor/*/downloads/
+scripts/vendor/*/download/
+scripts/vendor/*/logs/

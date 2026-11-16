@@ -1,0 +1,161 @@
+import { useState, useEffect, useCallback, useRef } from 'react'
+import { getCurrentWindow, PhysicalSize, PhysicalPosition } from '@tauri-apps/api/window'
+import { getDb as getSharedDb } from '../services/dbHelper'
+
+function debounce(fn, delay) {
+  let timer
+  return (...args) => {
+    clearTimeout(timer)
+    timer = setTimeout(() => fn(...args), delay)
+  }
+}
+
+async function getDb() {
+  try {
+    return await getSharedDb()
+  } catch (e) {
+    console.warn('[usePersistUI] DB not available:', e)
+    return null
+  }
+}
+
+async function readConfig(keys) {
+  const db = await getDb()
+  if (!db) return {}
+  try {
+    const placeholders = keys.map((_, i) => `$${i + 1}`).join(', ')
+    const rows = await db.select(
+      `SELECT ` + "`key`" + `, value FROM config WHERE ` + "`key`" + ` IN (${placeholders})`,
+      keys
+    )
+    const map = {}
+    rows.forEach(r => { map[r.key] = r.value })
+    return map
+  } catch (e) {
+    console.warn('[usePersistUI] readConfig error:', e)
+    return {}
+  }
+}
+
+async function writeConfig(key, value) {
+  try {
+    const db = await getDb()
+    if (!db) return
+    await db.execute(
+      `INSERT OR REPLACE INTO config (id, ` + "`key`" + `, value) VALUES ((SELECT id FROM config WHERE ` + "`key`" + ` = $1), $1, $2)`,
+      [key, value]
+    )
+  } catch (e) {
+    console.warn('[usePersistUI] writeConfig error:', key, e)
+  }
+}
+
+export function usePersistUI() {
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  const [windowReady, setWindowReady] = useState(false)
+  const appWindow = useRef(null)
+
+  // Load sidebar state from DB on mount
+  useEffect(() => {
+    (async () => {
+      const cfg = await readConfig(['sidebar_collapsed'])
+      if (cfg.sidebar_collapsed === 'true') {
+        setSidebarCollapsed(true)
+      }
+    })()
+  }, [])
+
+  // Toggle sidebar and persist
+  const toggleSidebar = useCallback(() => {
+    setSidebarCollapsed(prev => {
+      const next = !prev
+      writeConfig('sidebar_collapsed', next ? 'true' : 'false')
+      return next
+    })
+  }, [])
+
+  // Restore window size/position on mount, then listen for changes
+  useEffect(() => {
+    let unlistenResize, unlistenMove
+
+    ;(async () => {
+      // 记录上次是否最大化：maximize 需延迟到 show() 之后执行（见下方说明）
+      let wasMaximized = false
+      try {
+        appWindow.current = getCurrentWindow()
+
+        const cfg = await readConfig(['window_x', 'window_y', 'window_width', 'window_height', 'window_maximized'])
+        wasMaximized = cfg.window_maximized === 'true'
+        const w = parseInt(cfg.window_width)
+        const h = parseInt(cfg.window_height)
+        if (w > 100 && h > 100) {
+          await appWindow.current.setSize(new PhysicalSize(w, h))
+        }
+        const x = parseInt(cfg.window_x)
+        const y = parseInt(cfg.window_y)
+        // Ignore minimized/off-screen coordinates (Windows may report -32000 when minimized)
+        if (!isNaN(x) && !isNaN(y) && x > -30000 && y > -30000) {
+          await appWindow.current.setPosition(new PhysicalPosition(x, y))
+        }
+
+        // Debounced save: only write when user stops resizing/moving for 600ms
+        const saveWindowState = debounce(async () => {
+          const win = appWindow.current
+          if (!win) return
+          try {
+            const maximized = await win.isMaximized()
+            const minimized = await win.isMinimized()
+            writeConfig('window_maximized', maximized ? 'true' : 'false')
+            // Do not save size/position while minimized to avoid invalid values
+            if (!maximized && !minimized) {
+              // 必须存 innerSize：setSize 设置的是内容区尺寸，而无边框窗口的 outerSize
+              // 还包含 Win11 的隐形边框/阴影，存 outer 再按 inner 恢复会让窗口每次启动变大
+              const size = await win.innerSize()
+              if (size.width > 100 && size.height > 100) {
+                writeConfig('window_width', String(size.width))
+                writeConfig('window_height', String(size.height))
+              }
+              const pos = await win.outerPosition()
+              if (pos.x > -30000 && pos.y > -30000) {
+                writeConfig('window_x', String(pos.x))
+                writeConfig('window_y', String(pos.y))
+              }
+            }
+          } catch (e) {
+            console.warn('[usePersistUI] saveWindowState error:', e)
+          }
+        }, 600)
+
+        unlistenResize = await appWindow.current.onResized(() => { saveWindowState() })
+        unlistenMove = await appWindow.current.onMoved(() => { saveWindowState() })
+      } catch (e) {
+        console.warn('[usePersistUI] window init error:', e)
+      }
+      // 几何恢复完成、React 已挂载渲染，此时才显示窗口（启动时 visible:false），
+      // 消除「默认尺寸白屏 → 跳变上次尺寸」的闪变；Rust 侧另有 4 秒兜底强制显示
+      try {
+        await appWindow.current?.show()
+        // maximize 必须在 show() 之后：Windows 上 SW_MAXIMIZE 会显示隐藏窗口，
+        // 提前调用会在首帧渲染前露出白屏，破坏防闪变设计
+        if (wasMaximized) {
+          try { await appWindow.current.maximize() } catch (e) { console.warn('[usePersistUI] maximize error:', e) }
+        }
+      } catch (e) {
+        console.warn('[usePersistUI] show error:', e)
+      }
+      setWindowReady(true)
+    })()
+
+    return () => {
+      unlistenResize?.then?.(fn => fn())
+      unlistenMove?.then?.(fn => fn())
+    }
+  }, [])
+
+  return {
+    sidebarCollapsed,
+    toggleSidebar,
+    setSidebarCollapsed,
+    windowReady,
+  }
+}

@@ -1,0 +1,85 @@
+[package]
+name = "app"
+version = "1.0.12"
+description = "A Tauri App"
+authors = ["you"]
+license = ""
+repository = ""
+edition = "2021"
+rust-version = "1.90"
+
+# 运行时与构建脚本共用的依赖版本在这里统一声明，避免两处各写一份版本后漂移
+[workspace.dependencies]
+sha2 = "0.10"
+hex = "0.4"
+aes-gcm = "0.10"
+base64 = "0.22"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+name = "app_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.7.4", features = [] }
+
+[dependencies]
+serde_json = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+log = "0.4"
+# 用 ~ 收紧到 2.12.x：12 位小版本已验证，避免 cargo update 顺带升到未验证的 2.13+
+tauri = { version = "~2.12.5", features = [] }
+# 单实例守卫：避免多开进程各自持有连接池
+# 用 ~2.5 收紧：2.6.x 会要求 tauri ^2.12 之上的未验证小版本，避免 cargo update 连带升级 tauri
+tauri-plugin-single-instance = "~2.5"
+tauri-plugin-log = "2"
+tauri-plugin-sql = { version = "2", features = ["sqlite"] }
+tauri-plugin-dialog = "2"
+tauri-plugin-fs = "2"
+tauri-plugin-shell = "2"
+tauri-plugin-http = { version = "2", features = ["native-tls"] }
+# 云 API 客户端 / 下载 / 上传
+reqwest = { version = "0.12", features = ["json", "stream", "gzip", "multipart", "blocking"] }
+encoding_rs = "0.8"
+sha2 = { workspace = true }
+hex = { workspace = true }
+# 传输信封加解密（/api/user/rpc 双向）：桌面端仍不直连数据库，只对传输层
+# 信封做 AES-256-GCM 解封/封装；密钥为独立的 DESKTOP_XPORT_KEY，与 DB 无关。
+aes-gcm = { workspace = true }
+base64 = { workspace = true }
+tokio = { version = "1", features = ["full"] }
+# sevenz-rust 0.6 已停止维护，decompress_file 不校验条目路径（RUSTSEC-2026-0245）；
+# 解压必须走 db::sevenz::extract_safely，不要直接调用 sevenz_rust::decompress_file。
+sevenz-rust = "0.6"
+futures-util = "0.3"
+# zip 2.4.2 受 CVE-2026-115905（ZipStreamReader 解析差异 RCE）及 symlink/SUID 系列公告影响。
+# 当前只用 ZipArchive::by_index + db::subscribe::safe_zip_path 手动解压；
+# 禁止使用 ZipStreamReader::extract、ZipArchive::extract、shallow_copy_file。
+# 升级到 9.x 需单独适配（by_index_raw 等 API 可能变化）。
+zip = "2"
+rusqlite = { version = "0.31", features = ["bundled"] }
+once_cell = "1"
+zeroize = "1"
+chrono = "0.4"
+regex = "1"
+lz4_flex = "0.11"
+lzma-rs = "0.3"
+# 通知长连接：默认特性不含 TLS，wss:// 必须显式开启；native-tls 与 reqwest 一致
+# 走系统信任库（Windows 为 SChannel），便于复用系统代理/证书设置。
+tokio-tungstenite = { version = "0.30", features = ["native-tls"] }
+
+# db/installer.rs 读/写 NSIS 安装器记录的安装目录（HKCU\Software\sfmmm\sfmmm）。
+# 走 winreg 而不是 `reg.exe`：reg.exe 的输出受控制台代码页影响，中文/日文路径会乱码。
+[target.'cfg(windows)'.dependencies]
+winreg = "0.52"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full"] }
+
+# dev 构建的 incremental 缓存是 target 体积的最大头：实测本项目一度累积 152 个会话、
+# 21.2 GB（每次改动都会新开一个会话目录，旧会话不会自动回收），因此默认关闭。
+# 代价是改动后重编译慢一些，需要时可用 CARGO_INCREMENTAL=1 临时开启。
+# 历史遗留的 incremental 目录用 `pnpm clean:target --apply` 回收。
+[profile.dev]
+incremental = false

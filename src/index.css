@@ -1,0 +1,24 @@
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: var(--font-family-base);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* 浏览器 UA 样式给 <button> 设了 color: buttontext（系统亮色下为纯黑），
+   会压过主题继承：深色模式下按钮内文字可能透出黑色。
+   让按钮默认继承主题色（Fluent 组件自带类优先级更高，不受影响）。 */
+button {
+  color: inherit;
+}
+
+#root {
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+}
