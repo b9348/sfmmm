@@ -59,7 +59,9 @@ const useStyles = makeStyles({
   // 顶部 tabs / 汉堡会点不到。至少留出一个状态栏高度；有刘海/挖孔时用系统安全区。
   mobileRoot: {
     paddingTop: 'max(env(safe-area-inset-top, 0px), 24px)',
-    backgroundColor: tokens.colorNeutralBackground2,
+    // 必须在运行时读 FluentProvider 注入的主题变量：makeStyles 里的 tokens
+    // 是构建期亮色常量，深色模式下会把状态栏安全区刷成浅灰。
+    backgroundColor: 'var(--colorNeutralBackground2)',
   },
   appShell: {
     display: 'flex',
@@ -184,6 +186,15 @@ function App() {
   )
   // 实际生效的主题：跟随系统模式下由系统偏好决定
   const resolvedTheme = themeMode === 'system' ? (systemDark ? 'dark' : 'light') : themeMode
+
+  // 把主题类挂到 <html>：WinNavigationView 的自定义 CSS 变量依赖祖先上的
+  // app-theme-dark。只挂在 FluentProvider 上时，手机抽屉这类被绝对定位/重排的
+  // 子树在部分 WebView 里拿不到主题变量，会出现深色模式导航图标和文字仍是深色。
+  useEffect(() => {
+    const root = document.documentElement
+    root.classList.toggle('app-theme-dark', resolvedTheme === 'dark')
+    root.style.colorScheme = resolvedTheme
+  }, [resolvedTheme])
 
   // 监听系统主题变化，供"跟随系统"模式使用
   useEffect(() => {

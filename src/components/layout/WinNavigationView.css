@@ -670,6 +670,23 @@
   background: #202020;
 }
 
+/* 手机抽屉会脱离普通文档流（绝对定位 + 位移），个别 WebView 里自定义变量
+   在重排后没有随祖先 class 生效；这里直接给导航文字和图标兜底亮色。 */
+.app-theme-dark .winnv-item,
+.app-theme-dark .winnv-hamburger,
+.app-theme-dark .winnv-back-button,
+.app-theme-dark .winnv-page-header,
+.app-theme-dark .winnv-pane-title {
+  color: #FFFFFF;
+}
+
+.app-theme-dark .winnv-item .winnv-icon svg,
+.app-theme-dark .winnv-hamburger .winnv-icon svg,
+.app-theme-dark .winnv-back-button .winnv-icon svg {
+  color: inherit;
+  fill: currentColor;
+}
+
 .app-theme-dark .winnv-item .winnv-infobadge {
   color: #000000;
 }

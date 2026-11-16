@@ -7,6 +7,7 @@ import {
   ToastTitle,
   useToastController,
 } from '@fluentui/react-components'
+import { CACHE_REVALIDATED_EVENT } from '../../services/dbCall'
 
 const TOAST_ID = 'offline-cache-notice'
 
@@ -32,6 +33,13 @@ export function OfflineCacheNotice({ cachedAt, partial = false }) {
   // partial 但没有缓存时间戳：列表是实时数据、详情补全失败，当前展示的仍是列表快照。
   // 这时也要提示（正文里的 {{time}} 为空），否则用户会以为看到的是完整详情。
   const active = cachedAt != null || partial
+
+  useEffect(() => {
+    if (!active) return undefined
+    const onRevalidated = () => dismissToast(TOAST_ID)
+    window.addEventListener(CACHE_REVALIDATED_EVENT, onRevalidated)
+    return () => window.removeEventListener(CACHE_REVALIDATED_EVENT, onRevalidated)
+  }, [active, dismissToast])
 
   useEffect(() => {
     if (!active) return undefined

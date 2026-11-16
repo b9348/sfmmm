@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { canGoBack, canGoForward, goBack, goForward, restoreView } from '../utils/navHistory'
+import { detectPlatform } from './usePlatform'
 
 /**
  * 鼠标侧键导航：XButton1（button === 3）后退，XButton2（button === 4）前进。
@@ -78,7 +79,39 @@ export function useNavBrowsing() {
       if (view) restoreView(view)
     }
     window.addEventListener('mouseup', onMouseUp)
-    return () => window.removeEventListener('mouseup', onMouseUp)
+
+    // Android 手势/按键返回：注册后 Tauri 不再执行默认返回（否则会直接退出页面）。
+    // 先交给最上层详情页，其次退回 WebView 历史，最后才用内部视图栈/退出兜底。
+    let disposed = false
+    let unlisten = null
+    if (detectPlatform().isAndroid) {
+      import('@tauri-apps/api/app')
+        .then(async ({ onBackButtonPress, exit }) => {
+          const listener = await onBackButtonPress(({ canGoBack: hasWebHistory }) => {
+            if (dispatchToDetail(true)) return
+            if (hasWebHistory) {
+              window.history.back()
+              return
+            }
+            if (canGoBack()) {
+              restoreView(goBack())
+              return
+            }
+            exit(0)
+          })
+          if (disposed) listener.unregister()
+          else unlisten = listener
+        })
+        .catch(() => {
+          // 非 Android 或 API 不可用时保持原有鼠标侧键行为
+        })
+    }
+
+    return () => {
+      window.removeEventListener('mouseup', onMouseUp)
+      disposed = true
+      unlisten?.unregister()
+    }
   }, [])
 }
 
