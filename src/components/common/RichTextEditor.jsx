@@ -318,6 +318,13 @@ const useContentStyles = makeStyles({
   content: {
     fontSize: tokens.fontSizeSmall,
     lineHeight: '1.5',
+    // 评论区 / 讨论区卡片这类紧凑容器的宽度是固定的（楼中楼还要按层级缩进），
+    // 用户粘贴长 URL、整串英文、base64 之类「没有断行点」的文本时，
+    // 默认的 overflow-wrap: normal 会整段压出卡片右侧而不换行。
+    // anywhere 同时会把 min-content 宽度压到一个字符，嵌套在 flex/grid 里也不会再横向撑开。
+    overflowWrap: 'anywhere',
+    wordBreak: 'break-word',
+    minWidth: 0,
     '& ul, & ol': {
       paddingLeft: '20px',
     },
@@ -1471,6 +1478,10 @@ export function MarkdownContent({ markdown, onImageClick, variant = 'compact', p
   const containerClass = className !== undefined ? className : (plain ? undefined : styles.content)
   const hasSpecial = segments.some((seg) => seg.type === 'cards' || seg.type === 'mention')
 
+  // 纯文本模式没有 styles.content 兜底（containerClass 为 undefined），
+  // 换行规则只能写在 inline style 上；缺了 overflowWrap 时长链接会顶出容器
+  const plainTextStyle = { whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }
+
   let body
   if (!hasSpecial) {
     body = plain ? (
@@ -1478,7 +1489,7 @@ export function MarkdownContent({ markdown, onImageClick, variant = 'compact', p
         ref={ref}
         className={containerClass}
         onClick={handleClick}
-        style={{ whiteSpace: 'pre-wrap' }}
+        style={plainTextStyle}
       >
         {renderPlainText(markdown)}
       </div>
@@ -1505,7 +1516,7 @@ export function MarkdownContent({ markdown, onImageClick, variant = 'compact', p
               <MentionCard kind={seg.kind} refKey={seg.ref} label={seg.label} />
             </div>
           ) : plain ? (
-            <div key={`md-${i}`} style={{ whiteSpace: 'pre-wrap' }}>{renderPlainText(seg.text)}</div>
+            <div key={`md-${i}`} style={plainTextStyle}>{renderPlainText(seg.text)}</div>
           ) : (
             <div key={`md-${i}`}>{htmlToReact(markdown ? renderMarkdown(seg.text) : seg.text, imgClasses)}</div>
           )

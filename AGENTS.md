@@ -15,7 +15,7 @@ Axum 服务端（另一个仓库）
 ```
 
 - `src-tauri/src/api.rs` 是云 API 客户端：base URL、令牌持久化、错误映射、流式上传。
-- `src-tauri/src/db.rs` 里的代理命令用宏 `rpc_command!` 定义，命令名与参数签名必须与服务端 `server/src/rpc.rs` 的 `dispatch` 一致。**改契约要两边各提交一次**：本仓改 `rpc_command!` + `src-tauri/src/lib.rs` 尾部的 `generate_handler![...]`，AxumVue 仓改 `dispatch` 与 `PUBLIC_COMMANDS`。
+- `src-tauri/src/db.rs` 里的代理命令用宏 `rpc_command!` 定义，命令名与参数签名必须与 AxumVue 仓 `src/rpc.rs` 的 `dispatch` 一致。**改契约要两边各提交一次**：本仓改 `rpc_command!` + `src-tauri/src/lib.rs` 尾部的 `generate_handler![...]`，AxumVue 仓改 `dispatch` 与 `PUBLIC_COMMANDS`。
 - 纯本地命令（保存文件、扫描游戏目录、下载、安装、订阅任务、编辑工作区）只在 Tauri 侧，不走服务端。
 - 前端统一经 `src/services/dbCall.js` 调用；只读命令有本地 SQLite 缓存回退。
 
@@ -43,6 +43,7 @@ Axum 服务端（另一个仓库）
 - 本地 `pnpm release` 默认写服务端 `version_config`（`admin_set_version`）。服务端配置拆库后由 `SFMMM_CLOUD_ENV` 指向 AxumVue 仓的 `server/.env`，或直接用 `SFMMM_PUBLIC_BASE_URL` / `SFMMM_ADMIN_TOKEN` / `R2_*` 环境变量；`--no-db` 可跳过。
 - 构建产物指纹见 `scripts/build-meta.mjs`：`pnpm release --skip-build` 复用本地包前会比对 HEAD 与 `.env` 哈希，不匹配直接拒绝，不要绕过。
 - 版本号需手动保持一致（`package.json` 恒为 0.0.0 不参与）：`src-tauri/Cargo.toml`、`src-tauri/tauri.conf.json`、`src/version.js`。
+- 装过 `pnpm hooks:install` 的克隆上，pre-commit 每次提交会把补丁号 +1 并自动 `git add` 上述文件与 `src-tauri/Cargo.lock`（合并提交、只改版本文件、`SFMMM_SKIP_VERSION_BUMP=1` 时跳过）；没装钩子的克隆仍需手工保持一致。
 
 ## 其他约定
 
