@@ -21,6 +21,10 @@ const useStyles = makeStyles({
     display: 'flex',
     alignItems: 'center',
     gap: '6px',
+    // 允许换行：窄屏下操作按钮组（flexBasis 100%）能落到第二行，
+    // 而不是把整行挤成横向滚动；宽屏内容放得下时不会触发换行
+    flexWrap: 'wrap',
+    rowGap: '4px',
     minWidth: 0,
   },
   meta: {

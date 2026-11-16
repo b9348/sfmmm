@@ -5,7 +5,7 @@ import {
   makeStyles, tokens,
   Dialog, DialogSurface, DialogBody, DialogTitle,
   DialogContent, DialogTrigger, DialogActions, Textarea, Select, Checkbox,
-  Menu, MenuTrigger, MenuList, MenuItem, MenuPopover,
+  Menu, MenuTrigger, MenuList, MenuItem, MenuPopover, mergeClasses,
   Toast, ToastBody, ToastTitle, useToastController,
 } from '@fluentui/react-components'
 import {
@@ -34,6 +34,8 @@ import { RatingStarsInteractiveDisplay } from '../../components/common/RatingSta
 import { LANGUAGES, LANG_LABELS } from '../../i18n/languages'
 import { localizeError } from '../../utils/localizeError'
 import { useMouseBackButton } from '../../hooks/useMouseBackButton'
+import { useMediaQuery } from '../../hooks/useMediaQuery'
+import { useScrollCollapse } from '../../hooks/useScrollCollapse'
 import { ModFileRow } from './modDetail/ModFileRow'
 import { useUserNav } from '../../contexts/useUserNav'
 import { useV2PrereqNotice } from '../../contexts/useV2PrereqNotice'
@@ -45,21 +47,103 @@ const useStyles = makeStyles({
   root: {
     display: 'flex',
     flexDirection: 'column',
-    gap: '20px',
     height: '100%',
-    overflow: 'auto',
-    padding: '8px 20px 32px',
-    boxSizing: 'border-box',
+    minHeight: 0,
   },
-  toolbarRow: {
+  // 详情导航栏（返回 + 模组键 + 显示语言）：放在滚动区之外固定，和讨论详情页同一套结构。
+  // 原先靠 sticky + 根容器 padding-top 吸顶，滚动时既吸不到底边（顶部留出 padding），
+  // 又会让内容从 tabs 与导航栏之间那条缝里透出来；拆成「固定头 + 独立滚动区」后
+  // 导航栏始终贴在内容区顶部，滚动的只有正文。
+  // 窄窗口（≈移动端宽度）自动换行：语言选择整体落到第二行，标题占满剩余宽度并横向滚动。
+  // 顶部栏收起容器：用 grid 行高 1fr ↔ 0fr 做高度动画（不用量高度，内容多高都能塌到底），
+  // overflow:hidden 既负责裁剪，也让 grid item 的最小尺寸归零，0fr 才真能收到 0
+  headerWrap: {
+    display: 'grid',
+    gridTemplateRows: '1fr',
+    flexShrink: 0,
+    overflow: 'hidden',
+    transitionProperty: 'grid-template-rows',
+    transitionDuration: tokens.durationSlow,
+    transitionTimingFunction: tokens.curveEasyEase,
+  },
+  headerWrapCollapsed: {
+    gridTemplateRows: '0fr',
+  },
+  header: {
     display: 'flex',
     alignItems: 'center',
     gap: '10px',
-    position: 'sticky',
-    top: 0,
-    zIndex: 10,
+    flexWrap: 'wrap',
+    rowGap: '8px',
+    minHeight: 0,
+    overflow: 'hidden',
+    padding: '8px 20px 10px',
     backgroundColor: tokens.colorNeutralBackground2,
-    padding: '10px 0',
+    borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
+    transitionProperty: 'transform',
+    transitionDuration: tokens.durationSlow,
+    transitionTimingFunction: tokens.curveEasyEase,
+    '@media (max-width: 768px)': {
+      gap: '8px',
+      padding: '8px 12px 10px',
+    },
+  },
+  headerCollapsed: {
+    transform: 'translateY(-100%)',
+  },
+  // 标题（mod_key）：单行横向滚动，不换行也不截断成省略号——
+  // mod_key 常常带版本号/后缀，省略号会把最有辨识度的尾部吃掉；滚动时整串都还能看全。
+  // flex-basis 必须是 0：header 是 flex-wrap 容器，basis=auto 的假定主轴尺寸就是整串文字宽度，
+  // 一行放不下时 flexbox 会先把它换到下一行（独占整行），根本轮不到收缩+滚动。
+  // 配 maxWidth:max-content，标题短时仍按文字宽度收窄，不会把「原创」徽章推到行尾。
+  title: {
+    display: 'block',
+    flex: '1 1 0%',
+    maxWidth: 'max-content',
+    minWidth: 0,
+    whiteSpace: 'nowrap',
+    overflowX: 'auto',
+    overflowY: 'hidden',
+    scrollbarWidth: 'thin',
+    '&::-webkit-scrollbar': {
+      height: '3px',
+    },
+    '&::-webkit-scrollbar-thumb': {
+      backgroundColor: tokens.colorNeutralStroke1,
+      borderRadius: '2px',
+    },
+    '&::-webkit-scrollbar-track': {
+      backgroundColor: 'transparent',
+    },
+  },
+  // 语言组靠 margin-left:auto 顶到行尾（原来靠一个 flex:1 的空占位，但那会和标题抢
+  // 弹性增长份额，标题只能拿到剩余空间的一半，长 mod_key 更早被迫滚动）
+  langGroup: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    flexWrap: 'wrap',
+    minWidth: 0,
+    marginLeft: 'auto',
+    '@media (max-width: 768px)': {
+      // 窄屏独占一行：不跟标题抢剩余宽度（否则长 mod_key 只剩半行被迫滚动），
+      // 语言项自身还能继续换行
+      flexBasis: '100%',
+    },
+  },
+  scrollArea: {
+    flex: 1,
+    minHeight: 0,
+    overflow: 'auto',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '20px',
+    padding: '16px 20px 32px',
+    boxSizing: 'border-box',
+    '@media (max-width: 768px)': {
+      gap: '16px',
+      padding: '12px 12px 24px',
+    },
   },
   detailSection: {
     display: 'flex',
@@ -122,6 +206,10 @@ export default function ModDetailPage({ mod, onBack, onEdit, onDeleted, scrollTo
   // 开发模式（pnpm tauri dev）专属：详情页显示强制删除/强制编辑入口，跳过权限校验
   const isDev = import.meta.env.DEV
   const deviceIdRef = useRef(getDeviceId())
+  // 移动端阅读模式：正文下滚时顶部栏向上收起、右下悬浮按钮向右收起，上滚再呼出。
+  // 宽屏不启用（enabled=false 时不挂 scroll 监听，也不会有任何位移）
+  const isNarrow = useMediaQuery('(max-width: 768px)')
+  const { scrollRef, collapsed: chromeCollapsed } = useScrollCollapse({ enabled: isNarrow })
   const perms = mod.user_permissions || {}
   const canEdit = perms.is_author || perms.can_edit_mod_info || perms.can_edit_all_langs || (perms.editable_langs && perms.editable_langs.length > 0)
   const canApply = perms.can_apply_mod_info || perms.can_apply_lang
@@ -724,59 +812,61 @@ export default function ModDetailPage({ mod, onBack, onEdit, onDeleted, scrollTo
   })
 
   return (
-    <div className={styles.root} data-scroll-key={'mod-detail:' + mod.id}>
+    <div className={styles.root}>
+      <div className={mergeClasses(styles.headerWrap, chromeCollapsed && styles.headerWrapCollapsed)}>
+        <div className={mergeClasses(styles.header, chromeCollapsed && styles.headerCollapsed)}>
+          <BackButton onClick={onBack} />
+          <Text weight="semibold" size={400} className={styles.title}>{mod.mod_key}</Text>
+          {mod.is_original && (
+            <Badge color="brand" appearance="filled" size="small">
+              {t('workshop.isOriginalBadge')}
+            </Badge>
+          )}
+          <div className={styles.langGroup}>
+            <Text size={300}>{t('workshop.displayLang')}</Text>
+            {LANGUAGES.map(lang => {
+              const hasTrans = !!mod.translations?.[lang.value]?.instructions
+              if (!hasTrans) {
+                return (
+                  <div key={lang.value} style={{ display: 'flex', alignItems: 'center', gap: '6px', opacity: 0.5 }}>
+                    <div
+                      style={{
+                        width: '16px',
+                        height: '16px',
+                        border: `1px solid ${tokens.colorNeutralStroke1}`,
+                        borderRadius: '4px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        fontSize: '12px',
+                        lineHeight: 1,
+                      }}
+                    >
+                      ×
+                    </div>
+                    <Text size={300}>{lang.label}</Text>
+                  </div>
+                )
+              }
+              return (
+                <Checkbox
+                  key={lang.value}
+                  size="small"
+                  label={lang.label}
+                  checked={selectedLangs.includes(lang.value)}
+                  onChange={() => handleLangToggle(lang.value)}
+                />
+              )
+            })}
+          </div>
+        </div>
+      </div>
+      <div className={styles.scrollArea} ref={scrollRef} data-scroll-key={'mod-detail:' + mod.id}>
         {(offlineCachedAt || offlinePartial) && <OfflineCacheNotice cachedAt={offlineCachedAt} partial={offlinePartial} />}
         {gate.status === 'blocked' && (
           <GameVersionBanner version={gate.version} required={gate.required} onGoSettings={openSettings} />
         )}
-        <div className={styles.toolbarRow}>
-        <BackButton onClick={onBack} />
-        <Text weight="semibold" size={400}>{mod.mod_key}</Text>
-        {mod.is_original && (
-          <Badge color="brand" appearance="filled" size="small">
-            {t('workshop.isOriginalBadge')}
-          </Badge>
-        )}
-        <div style={{ flex: 1 }} />
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-          <Text size={300}>{t('workshop.displayLang')}</Text>
-          {LANGUAGES.map(lang => {
-            const hasTrans = !!mod.translations?.[lang.value]?.instructions
-            if (!hasTrans) {
-              return (
-                <div key={lang.value} style={{ display: 'flex', alignItems: 'center', gap: '6px', opacity: 0.5 }}>
-                  <div
-                    style={{
-                      width: '16px',
-                      height: '16px',
-                      border: `1px solid ${tokens.colorNeutralStroke1}`,
-                      borderRadius: '4px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      fontSize: '12px',
-                      lineHeight: 1,
-                    }}
-                  >
-                    ×
-                  </div>
-                  <Text size={300}>{lang.label}</Text>
-                </div>
-              )
-            }
-            return (
-              <Checkbox
-                key={lang.value}
-                size="small"
-                label={lang.label}
-                checked={selectedLangs.includes(lang.value)}
-                onChange={() => handleLangToggle(lang.value)}
-              />
-            )
-          })}
-        </div>
-      </div>
-      <div className={styles.detailSection}>
+        <div className={styles.detailSection}>
         <div className={styles.authorRow}>
           <UserLink
             userId={mod.author_id}
@@ -959,6 +1049,7 @@ export default function ModDetailPage({ mod, onBack, onEdit, onDeleted, scrollTo
           scrollToCommentId={scrollToCommentId}
         />
       </div>
+      </div>
 
       {/* 图片灯箱预览（与讨论区/评论区同模式） */}
       <Lightbox src={lightbox.src} images={lightbox.images} onClose={lightbox.close} />
@@ -1074,7 +1165,7 @@ export default function ModDetailPage({ mod, onBack, onEdit, onDeleted, scrollTo
         </DialogSurface>
       </Dialog>
 
-      <FloatingActions items={[
+      <FloatingActions collapsed={chromeCollapsed} items={[
         { key: 'back', icon: <ArrowLeft24Regular />, onClick: onBack },
         { key: 'like', icon: isLiked ? <Heart24Filled /> : <Heart24Regular />, appearance: isLiked ? 'primary' : 'outline', onClick: handleLikeToggle, disabled: likeBusy, label: String(likeCount), style: isLiked ? { color: tokens.colorPaletteRedForeground1 } : undefined },
         ...(user && canEdit ? [{ key: 'edit', icon: <Edit24Regular />, appearance: 'primary', onClick: () => onEdit?.(mod) }] : []),

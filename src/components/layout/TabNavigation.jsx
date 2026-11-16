@@ -62,7 +62,7 @@ const LAUNCH_VALUE = '__launch'
  * 侧边导航（TabNavigation）——基于 WinUI NavigationView 风格组件实现。
  * 保留原有全部功能：登录/注册、用户菜单、标签切换、启动游戏、版本与更新徽章。
  */
-export function TabNavigation({ value, onChange, isCollapsed, onToggleCollapse, updateInfo, onNavigateToSettings, themeMode, onSelectTheme, children }) {
+export function TabNavigation({ value, onChange, isCollapsed, onToggleCollapse, isNarrow, drawerOpen, onOpenDrawer, onCloseDrawer, updateInfo, onNavigateToSettings, themeMode, onSelectTheme, children }) {
   const { t } = useTranslation()
   const { user, isLoggedIn, logout } = useAuth()
   const { detectLegacyAccounts } = useLegacyAccount()
@@ -203,6 +203,8 @@ export function TabNavigation({ value, onChange, isCollapsed, onToggleCollapse, 
   // 菜单选择：启动游戏只执行动作；workshop:* / localmods:* / notify:* 子项切换对应页面内部 tab；
   // 其余切换标签页
   const handleSelect = (selected) => {
+    // 窄屏抽屉：选中任意一项后收起，把画面交还给内容区
+    if (isNarrow) onCloseDrawer?.()
     if (selected === LAUNCH_VALUE) {
       handleLaunchGame()
       return
@@ -379,15 +381,18 @@ export function TabNavigation({ value, onChange, isCollapsed, onToggleCollapse, 
       footerMenuItems={footerMenuItems}
       selectedValue={['workshop', 'localmods', 'notify'].includes(value) && subValue ? subValue : value}
       onSelect={handleSelect}
-      paneTitle={!isCollapsed ? 'SFMMM' : ''}
-      displayMode="Left"
-      isPaneOpen={!isCollapsed}
-      onTogglePane={onToggleCollapse}
+      paneTitle={isNarrow || !isCollapsed ? 'SFMMM' : ''}
+      displayMode={isNarrow ? 'LeftMinimal' : 'Left'}
+      isPaneOpen={isNarrow ? drawerOpen : !isCollapsed}
+      onTogglePane={isNarrow ? (nextOpen) => (nextOpen ? onOpenDrawer?.() : onCloseDrawer?.()) : onToggleCollapse}
       openPaneLength={220}
       compactPaneLength={48}
       isSettingsVisible
       settingsLabel={t('nav.settings')}
-      onSettings={() => onChange('settings')}
+      onSettings={() => {
+        if (isNarrow) onCloseDrawer?.()
+        onChange('settings')
+      }}
       isBackButtonVisible={false}
       paneHeader={paneHeader}
       paneFooter={paneFooter}

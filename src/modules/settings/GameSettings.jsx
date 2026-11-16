@@ -46,6 +46,13 @@ const useStyles = makeStyles({
     alignItems: 'flex-start',
     gap: '24px',
     padding: '14px 4px',
+    // 窄窗口（≈移动端宽度）适配：240px 固定标签列与控件列并排时，控件会被挤到
+    // 溢出页面（出现整页横向滚动），改为标签在上、控件在下的堆叠布局
+    '@media (max-width: 768px)': {
+      flexDirection: 'column',
+      gap: '8px',
+      padding: '12px 4px',
+    },
   },
   itemLabel: {
     display: 'flex',
@@ -53,6 +60,10 @@ const useStyles = makeStyles({
     gap: '2px',
     width: '240px',
     flexShrink: 0,
+    '@media (max-width: 768px)': {
+      // 堆叠后标签列不再需要固定宽度占位，交给整行
+      width: 'auto',
+    },
   },
   itemTitle: {
     fontSize: tokens.fontSizeBase300,
@@ -82,11 +93,14 @@ const useStyles = makeStyles({
     alignItems: 'center',
     gap: '12px',
     padding: '4px 0',
+    // 版本标签 + 下载源按钮一行放不下时换行（窄窗口下尤其明显）
+    flexWrap: 'wrap',
   },
   updateInfo: {
     display: 'flex',
     alignItems: 'center',
     gap: '8px',
+    flexWrap: 'wrap',
   },
   currentTag: {
     fontSize: '12px',

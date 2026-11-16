@@ -343,6 +343,21 @@ export function WinNavigationView({
   const showPaneContent = !isLeftMinimal || paneOpen
   // 标题：展开态显示，紧凑态隐藏
   const showTitle = paneOpen && !isCompact
+  // 窄屏抽屉打开时铺一层遮罩：点击空白处收起，避免面板之外仍能误触下层内容
+  const showScrim = isLeftMinimal && paneOpen
+  const closePane = () => {
+    if (onTogglePane) onTogglePane(false)
+  }
+
+  // 抽屉打开期间 Esc 收起（窄屏专用，宽屏侧栏不响应 Esc，避免和别处的关闭快捷键打架）
+  useEffect(() => {
+    if (!showScrim) return undefined
+    const onKey = (e) => { if (e.key === 'Escape') closePane() }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+    // closePane 每次渲染都是新引用，依赖它只会让监听反复重挂；实际只依赖开关与模式
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showScrim])
 
   const renderIcon = (icon, className) => {
     if (!icon) return null
@@ -432,6 +447,13 @@ export function WinNavigationView({
         '--winnv-compact-pane-length': `${compactPaneLength}px`,
       }}
     >
+      {showScrim && (
+        <div
+          className="winnv-scrim"
+          role="presentation"
+          onClick={closePane}
+        />
+      )}
       {isTopNav ? (
         <nav className="winnv-top-bar">
           {isBackButtonVisible && (
@@ -453,12 +475,16 @@ export function WinNavigationView({
               <span className="winnv-icon">{builtinIcons.back}</span>
             </button>
           )}
-          <div className="winnv-pane-command-row">
-            <button className={`winnv-hamburger ${paneTitle && showTitle ? 'has-pane-title' : ''}`} onClick={togglePane} aria-label={paneOpen ? '收起导航' : '展开导航'} title={paneOpen ? '收起导航' : '展开导航'}>
-              <span className="winnv-icon">{builtinIcons.hamburger}</span>
-              {paneTitle && showTitle && <span className="winnv-pane-title">{paneTitle}</span>}
-            </button>
-          </div>
+          {/* 窄屏收起态不再渲染浮空汉堡：触发按钮由页面自己的 <NarrowMenuButton />
+              放进顶部那一行（和页签并排），这里保留的是抽屉展开后自带的收起按钮 */}
+          {!(isLeftMinimal && isCompact) && (
+            <div className="winnv-pane-command-row">
+              <button className={`winnv-hamburger ${paneTitle && showTitle ? 'has-pane-title' : ''}`} onClick={togglePane} aria-label={paneOpen ? '收起导航' : '展开导航'} title={paneOpen ? '收起导航' : '展开导航'}>
+                <span className="winnv-icon">{builtinIcons.hamburger}</span>
+                {paneTitle && showTitle && <span className="winnv-pane-title">{paneTitle}</span>}
+              </button>
+            </div>
+          )}
           {showPaneContent && (
             <div className="winnv-pane-surface" aria-hidden={isLeftMinimal && isCompact ? 'true' : undefined}>
               <div className="winnv-indicator-track">

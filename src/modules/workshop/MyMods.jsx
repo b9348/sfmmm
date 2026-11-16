@@ -44,7 +44,7 @@ const useStyles = makeStyles({
   },
 })
 
-export function MyMods({ active = true }) {
+export function MyMods({ active = true, onDetailOpenChange }) {
   const styles = useStyles()
   const { t } = useTranslation()
   const { user, isLoggedIn } = useAuth()
@@ -62,6 +62,10 @@ export function MyMods({ active = true }) {
   const [showCreatePage, setShowCreatePage] = useState(false)
   const [editingMod, setEditingMod] = useState(null)
   const [detailMod, setDetailMod] = useState(null)
+  // 窄屏：详情页打开时页面要收起顶部 tabs 行（整屏让给详情）
+  useEffect(() => {
+    onDetailOpenChange?.(!!detailMod)
+  }, [detailMod, onDetailOpenChange])
   const [confirmDeleteModId, setConfirmDeleteModId] = useState(null)
   const [deleting, setDeleting] = useState(false)
   const [deletePercent, setDeletePercent] = useState(0)

@@ -29,7 +29,10 @@ import { NotificationProvider } from './contexts/NotificationContext'
 import { AnnouncementProvider } from './contexts/AnnouncementContext.jsx'
 import { DownloadCenterProvider } from './contexts/DownloadCenterProvider.jsx'
 import { DownloadStatusBar } from './components/common/DownloadStatusBar'
+import { NarrowMenuButton } from './components/common/NarrowMenuButton'
+import { NarrowNavProvider } from './contexts/NarrowNavContext.jsx'
 import { usePersistUI } from './hooks/usePersistUI'
+import { useMediaQuery } from './hooks/useMediaQuery'
 import { getConfigs, setConfig } from './services/dbHelper'
 import { checkVersion, applyUpdate, prepareUpdate, getUpdateStatus, armPendingUpdate } from './services/updateApi'
 import { isInBackoff, canAutoApply } from './services/updatePolicy'
@@ -64,6 +67,24 @@ const useStyles = makeStyles({
     overflow: 'auto',
     padding: '8px',
   },
+  // 窄屏下「本页没有自定义页签、汉堡无处可并」的页面（存档/导入导出/设置）用的顶栏：
+  // 汉堡与页面标题同行，只有这些页面会多出这一行，有页签的页面把汉堡并进页签行里
+  narrowAppBar: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '4px',
+    flexShrink: 0,
+    padding: '4px 8px 0',
+  },
+  narrowAppBarTitle: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: tokens.fontSizeBase300,
+    fontWeight: tokens.fontWeightSemibold,
+    color: tokens.colorNeutralForeground1,
+  },
   loadingContainer: {
     display: 'flex',
     alignItems: 'center',
@@ -90,6 +111,11 @@ const initialState = { isFirstRun: null, config: null, sawWelcome: false }
 // 顶层标签集合：导航历史恢复时只接受这些值，避免把脏数据写回 selectedTab
 const NAV_TABS = new Set(['mods', 'saves', 'import-export', 'workshop', 'localmods', 'notify', 'settings'])
 
+// 窄屏顶栏标题：只有「本页没有页签行、汉堡无处可并」的页面才由 App 统一出一行，
+// 有页签的页面（localmods / workshop / notify）自己把汉堡放进页签行，不再额外占一行
+const NARROW_APP_BAR_TITLE = { saves: 'nav.saves', 'import-export': 'nav.importExport', settings: 'nav.settings' }
+const NARROW_OWN_TABS = new Set(['localmods', 'workshop', 'notify'])
+
 function appReducer(state, action) {
   switch (action.type) {
     case 'INIT_COMPLETE':
@@ -112,6 +138,19 @@ function App() {
   const [selectedTab, setSelectedTab] = useState('mods')
   const [navTarget, setNavTarget] = useState(null)
   const { sidebarCollapsed, toggleSidebar } = usePersistUI()
+  // 窄屏（≤768px）：侧栏改成 LeftMinimal 抽屉，开抽屉的按钮由页面自己渲染
+  // （<NarrowMenuButton /> 并进页签行，或由 App 出一行「☰ + 页面标题」），
+  // 不依赖自绘标题栏——将来 APK 形态去掉标题栏后这条路径照样成立
+  const isNarrow = useMediaQuery('(max-width: 768px)')
+  const [drawerOpen, setDrawerOpen] = useState(false)
+  // 抽屉开合状态只活在小屏这一段，不写回 sidebar_collapsed（不影响宽屏的折叠偏好）；
+  // 回到宽屏时复位，避免下次变窄时抽屉一进来就是展开态
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (!isNarrow && drawerOpen) setDrawerOpen(false)
+  }, [isNarrow, drawerOpen])
+  const openDrawer = useCallback(() => setDrawerOpen(true), [])
+  const closeDrawer = useCallback(() => setDrawerOpen(false), [])
   const [state, dispatch] = useReducer(appReducer, initialState)
   const [updateInfo, setUpdateInfo] = useState(null)
   // 启动自动应用进行中的内存标志：串行化启动编排（检测/自动下载）与自动应用流程，
@@ -567,11 +606,24 @@ function App() {
                       onChange={handleTabChange}
                       isCollapsed={sidebarCollapsed}
                       onToggleCollapse={toggleSidebar}
+                      isNarrow={isNarrow}
+                      drawerOpen={drawerOpen}
+                      onOpenDrawer={openDrawer}
+                      onCloseDrawer={closeDrawer}
                       updateInfo={updateInfo}
                       themeMode={themeMode}
                       onSelectTheme={handleSelectTheme}
                       onNavigateToSettings={() => handleTabChange('settings')}
                     >
+                      {/* 窄屏抽屉：开抽屉的入口交给页面自己渲染的 <NarrowMenuButton />，
+                          有页签的页面并进页签行，其余页面在这里统一出一行顶栏 */}
+                      <NarrowNavProvider isNarrow={isNarrow} drawerOpen={drawerOpen} openDrawer={openDrawer}>
+                      {isNarrow && !NARROW_OWN_TABS.has(activeTab) && (
+                        <div className={styles.narrowAppBar}>
+                          <NarrowMenuButton />
+                          <span className={styles.narrowAppBarTitle}>{t(NARROW_APP_BAR_TITLE[activeTab] || 'app.title')}</span>
+                        </div>
+                      )}
                       <main className={styles.tabContent}>
                         {/* 懒加载页面的统一加载态：只在首次切到该 tab、其代码块仍在下载时短暂出现 */}
                         <Suspense fallback={<div className={styles.pageLoading}><Spinner size="medium" label={t('app.loading')} /></div>}>
@@ -595,6 +647,7 @@ function App() {
                         {activeTab === 'settings' && <GameSettings config={state.config} onConfigChange={handleConfigChange} appUpdateInfo={updateInfo} />}
                         </Suspense>
                       </main>
+                      </NarrowNavProvider>
                     </TabNavigation>
                   </div>
                   {/* 悬浮下载条：挂在 App 根下而非某个页面里，切换标签/进出详情页

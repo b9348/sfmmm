@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
-import { TabList, Tab, makeStyles } from '@fluentui/react-components'
+import { TabList, Tab, makeStyles, tokens } from '@fluentui/react-components'
 import {
   BoxMultiple24Regular,
   Folder24Regular,
@@ -9,6 +9,8 @@ import {
 } from '@fluentui/react-icons'
 import { MissionFolder } from '../missions'
 import { SaveManagement } from '../saves'
+import { useMediaQuery } from '../../hooks/useMediaQuery'
+import { NarrowMenuButton } from '../../components/common/NarrowMenuButton'
 
 const useStyles = makeStyles({
   root: {
@@ -18,8 +20,32 @@ const useStyles = makeStyles({
     minHeight: 0,
     gap: '8px',
   },
-  tabs: {
+  // 窄屏的汉堡按钮和四个页签并排放在这一行里
+  tabsRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '4px',
     flexShrink: 0,
+    minWidth: 0,
+  },
+  tabs: {
+    flex: '1 1 auto',
+    minWidth: 0,
+    // 窄窗口（≈移动端宽度）适配：页签不换行也不收缩，放不下会把整页撑出横向滚动，
+    // 改成页签条自己横向滑动 + 细滚动条兜底
+    overflowX: 'auto',
+    overflowY: 'hidden',
+    scrollbarWidth: 'thin',
+    '&::-webkit-scrollbar': {
+      height: '4px',
+    },
+    '&::-webkit-scrollbar-thumb': {
+      backgroundColor: tokens.colorNeutralStroke1,
+      borderRadius: '2px',
+    },
+    '&::-webkit-scrollbar-track': {
+      backgroundColor: 'transparent',
+    },
   },
   content: {
     flex: 1,
@@ -44,6 +70,8 @@ const SUBFOLDER_BY_TAB = {
 export function LocalMods({ config, onUninstall, refreshKey }) {
   const { t } = useTranslation()
   const styles = useStyles()
+  // 窄屏（≈移动端宽度）：页签去掉图标并用 small 尺寸，四个页签在 375px 下能排满一行
+  const isNarrow = useMediaQuery('(max-width: 768px)')
 
   // 从 URL hash 恢复 tab（Ctrl+R 刷新后保持）
   const getInitialTab = () => {
@@ -83,18 +111,32 @@ export function LocalMods({ config, onUninstall, refreshKey }) {
     return () => window.removeEventListener('hashchange', onHashChange)
   }, [])
 
+  // 页签条窄窗口下靠横向滑动展示全部页签：切页后把当前页签滚回可视区
+  // （与创意工坊/提醒页同一套兜底，避免激活项停在屏幕外）
+  const tabsRef = useRef(null)
+  useEffect(() => {
+    tabsRef.current
+      ?.querySelector('[aria-selected="true"]')
+      ?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+  }, [subTab])
+
   return (
     <div className={styles.root}>
-      <TabList
-        className={styles.tabs}
-        selectedValue={subTab}
-        onTabSelect={handleTabSelect}
-      >
-        <Tab value="mods" icon={<BoxMultiple24Regular />}>{t('nav.mods')}</Tab>
-        <Tab value="v1" icon={<Folder24Regular />}>{t('nav.v1')}</Tab>
-        <Tab value="v2" icon={<DocumentFolder24Regular />}>{t('nav.v2')}</Tab>
-        <Tab value="saves" icon={<Save24Regular />}>{t('nav.saves')}</Tab>
-      </TabList>
+      <div className={styles.tabsRow}>
+        <NarrowMenuButton />
+        <TabList
+          ref={tabsRef}
+          className={styles.tabs}
+          size={isNarrow ? 'small' : 'medium'}
+          selectedValue={subTab}
+          onTabSelect={handleTabSelect}
+        >
+          <Tab value="mods" icon={isNarrow ? undefined : <BoxMultiple24Regular />}>{t('nav.mods')}</Tab>
+          <Tab value="v1" icon={isNarrow ? undefined : <Folder24Regular />}>{t('nav.v1')}</Tab>
+          <Tab value="v2" icon={isNarrow ? undefined : <DocumentFolder24Regular />}>{t('nav.v2')}</Tab>
+          <Tab value="saves" icon={isNarrow ? undefined : <Save24Regular />}>{t('nav.saves')}</Tab>
+        </TabList>
+      </div>
 
       <div className={styles.content}>
         {subTab === 'saves' ? (

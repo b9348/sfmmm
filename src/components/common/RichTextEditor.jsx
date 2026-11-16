@@ -185,6 +185,37 @@ const useStyles = makeStyles({
     gap: '8px',
     alignItems: 'stretch',
     minHeight: 0,
+    // 窄屏改上下两栏：375 宽的窗口并排两栏每栏只剩 ~160px，
+    // 一行放不下几个字，中文几乎一格一字，读和写都没法用
+    '@media (max-width: 768px)': {
+      gridTemplateColumns: '1fr',
+    },
+  },
+  // 全屏输入态：编辑区与预览上下分配剩余高度（编辑区多给一些）
+  mdSplitFill: {
+    flex: 1,
+    minHeight: 0,
+    '@media (max-width: 768px)': {
+      gridTemplateRows: 'minmax(0, 1.6fr) minmax(0, 1fr)',
+    },
+  },
+  // 分栏里的预览面板：桌面端与编辑区等高、最多 384px；
+  // 窄屏改成上下两栏后它整块压在编辑区下面，高度收紧到 240px，
+  // 免得一个短回复下面挂着一大块预览把评论区撑得很长
+  mdPreviewSplit: {
+    width: '100%',
+    maxHeight: '384px',
+    boxSizing: 'border-box',
+    '@media (max-width: 768px)': {
+      maxHeight: '240px',
+    },
+  },
+  mdPreviewFill: {
+    width: '100%',
+    maxHeight: 'none',
+    height: '100%',
+    minHeight: 0,
+    boxSizing: 'border-box',
   },
   splitHint: {
     alignSelf: 'center',
@@ -633,7 +664,7 @@ export function RichTextEditor({ value, onChange, placeholder, maxLength, disabl
   )
 }
 
-export function MarkdownEditor({ value, onChange, placeholder, maxLength, disabled = false, split = false, onSubmit, heightState, previewHeightState }) {
+export function MarkdownEditor({ value, onChange, placeholder, maxLength, disabled = false, split = false, onSubmit, heightState, previewHeightState, onFocusChange, fill = false }) {
   const { attach: attachHeight, heightStyle: heightStyleFn } = heightState || {}
   const { attach: attachPreviewHeight, heightStyle: previewHeightFn } = previewHeightState || {}
   const { t } = useTranslation()
@@ -1014,8 +1045,8 @@ export function MarkdownEditor({ value, onChange, placeholder, maxLength, disabl
       maxLength={maxLength}
       disabled={disabled}
       onChange={(e) => onChange?.(e.target.value)}
-      onFocus={() => setFocused(true)}
-      onBlur={() => setFocused(false)}
+      onFocus={(e) => { setFocused(true); onFocusChange?.(true, e) }}
+      onBlur={() => { setFocused(false); onFocusChange?.(false) }}
       onScroll={syncHighlight}
       onMouseUp={handleTextareaMouseUp}
       onKeyDown={handleTextareaKeyDown}
@@ -1050,13 +1081,13 @@ export function MarkdownEditor({ value, onChange, placeholder, maxLength, disabl
   // 「跳过首次观察」的状态，拖出来的高度可能记成初始值。
   const previewEl = (
     <div
-      className={styles.mdPreview}
+      className={mergeClasses(
+        styles.mdPreview,
+        split && styles.mdPreviewSplit,
+        fill && split && styles.mdPreviewFill,
+      )}
       ref={split ? undefined : attachPreviewHeight}
-      style={
-        split
-          ? { maxHeight: '384px', width: '100%', boxSizing: 'border-box' }
-          : previewHeightStyle
-      }
+      style={split ? undefined : previewHeightStyle}
     >
       {previewLoading ? t('editor.previewLoading') : previewBody}
     </div>
@@ -1077,7 +1108,7 @@ export function MarkdownEditor({ value, onChange, placeholder, maxLength, disabl
         {split && <Text className={styles.splitHint}>{t('editor.splitPreviewHint')}</Text>}
       </div>
       {split ? (
-        <div className={styles.mdSplit}>
+        <div className={mergeClasses(styles.mdSplit, fill && styles.mdSplitFill)}>
           {textareaEl}
           {previewEl}
         </div>

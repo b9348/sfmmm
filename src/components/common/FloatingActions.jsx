@@ -1,4 +1,4 @@
-import { Button, Text, Menu, MenuTrigger, MenuPopover, MenuList, MenuItem, makeStyles, tokens } from '@fluentui/react-components'
+import { Button, Text, Menu, MenuTrigger, MenuPopover, MenuList, MenuItem, makeStyles, mergeClasses, tokens } from '@fluentui/react-components'
 import { NetStatusLight } from './NetStatusLight'
 
 const useStyles = makeStyles({
@@ -11,6 +11,16 @@ const useStyles = makeStyles({
     flexDirection: 'column',
     gap: '12px',
     alignItems: 'center',
+    transitionProperty: 'transform, opacity',
+    transitionDuration: tokens.durationSlow,
+    transitionTimingFunction: tokens.curveEasyEase,
+  },
+  // 收起态：整列滑到视口右侧外，同时禁用指针命中，
+  // 免得还留在屏幕边缘的按钮被误点（视觉透明 ≠ 点不到）
+  containerCollapsed: {
+    transform: 'translateX(calc(100% + 32px))',
+    opacity: 0,
+    pointerEvents: 'none',
   },
   item: {
     display: 'flex',
@@ -37,10 +47,11 @@ const useStyles = makeStyles({
 /**
  * 悬浮操作按钮组。
  * `light` 可选：替换首位的网络信号灯（页面专属受控灯，如编辑页保活灯）。
+ * `collapsed` 可选：移动端阅读模式下由页面的滚动收起 hook 传入，整列向右滑出视口。
  * 若某项配置了 `menu: { confirmLabel, cancelLabel, onConfirm }`，
  * 则该按钮按下后弹出 Menu 二次确认（与清除评分同模式），防止误操作。
  */
-export function FloatingActions({ items, light }) {
+export function FloatingActions({ items, light, collapsed = false }) {
   const styles = useStyles()
 
   const renderButton = (item) => (
@@ -61,7 +72,7 @@ export function FloatingActions({ items, light }) {
   )
 
   return (
-    <div className={styles.container}>
+    <div className={mergeClasses(styles.container, collapsed ? styles.containerCollapsed : undefined)}>
       {/* 数据库网络信号灯：固定首项、无点击交互。页面可传 light 用专属受控灯替换，
           保证同一位置只有一颗灯 */}
       {light ?? <NetStatusLight />}

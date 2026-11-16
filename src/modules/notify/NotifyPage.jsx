@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
-import { TabList, Tab, makeStyles } from '@fluentui/react-components'
+import { TabList, Tab, makeStyles, tokens } from '@fluentui/react-components'
 import {
   Heart24Regular,
   Star24Regular,
@@ -12,6 +12,8 @@ import { LikeRecords } from '../likes/LikeRecords'
 import ApplicationsPage from '../workshop/ApplicationsPage'
 import MessageInbox from './MessageInbox'
 import { useTabPrefetch } from '../../hooks/useTabPrefetch'
+import { useMediaQuery } from '../../hooks/useMediaQuery'
+import { NarrowMenuButton } from '../../components/common/NarrowMenuButton'
 
 const useStyles = makeStyles({
   root: {
@@ -21,8 +23,32 @@ const useStyles = makeStyles({
     minHeight: 0,
     gap: '8px',
   },
-  tabs: {
+  // 窄屏的汉堡按钮和五个页签并排放在这一行里
+  tabsRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '4px',
     flexShrink: 0,
+    minWidth: 0,
+  },
+  tabs: {
+    flex: '1 1 auto',
+    minWidth: 0,
+    // 窄窗口（≈移动端宽度）适配：五个页签不换行也不收缩，放不下会把整页撑出横向滚动。
+    // 改成页签条自己横向滑动 + 细滚动条，任何宽度都能切到全部页签。
+    overflowX: 'auto',
+    overflowY: 'hidden',
+    scrollbarWidth: 'thin',
+    '&::-webkit-scrollbar': {
+      height: '4px',
+    },
+    '&::-webkit-scrollbar-thumb': {
+      backgroundColor: tokens.colorNeutralStroke1,
+      borderRadius: '2px',
+    },
+    '&::-webkit-scrollbar-track': {
+      backgroundColor: 'transparent',
+    },
   },
   content: {
     flex: 1,
@@ -43,6 +69,9 @@ const TABS = ['replies', 'apps', 'likes', 'rates', 'inbox']
 export function NotifyPage({ onNavigate }) {
   const { t } = useTranslation()
   const styles = useStyles()
+  // 窄屏（≈移动端宽度）：五个页签去掉图标并用 small 尺寸，375px 下能排满一行，
+  // 不再依赖横向滑动去翻“看不见”的页签（滑动仍保留为兜底）
+  const isNarrow = useMediaQuery('(max-width: 768px)')
 
   // 从 URL hash 恢复 tab（Ctrl+R 刷新后保持）
   const getInitialTab = () => {
@@ -77,19 +106,32 @@ export function NotifyPage({ onNavigate }) {
     return () => window.removeEventListener('hashchange', onHashChange)
   }, [])
 
+  // 页签条窄窗口下靠横向滑动展示全部页签：切页后把当前页签滚回可视区
+  const tabsRef = useRef(null)
+  useEffect(() => {
+    tabsRef.current
+      ?.querySelector('[aria-selected="true"]')
+      ?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+  }, [subTab])
+
   return (
     <div className={styles.root}>
-      <TabList
-        className={styles.tabs}
-        selectedValue={subTab}
-        onTabSelect={handleTabSelect}
-      >
-        <Tab value="replies" icon={<Comment24Regular />}>{t('nav.replies')}</Tab>
-        <Tab value="apps" icon={<PersonAccounts24Regular />}>{t('nav.apps')}</Tab>
-        <Tab value="likes" icon={<Heart24Regular />}>{t('nav.likes')}</Tab>
-        <Tab value="rates" icon={<Star24Regular />}>{t('nav.rates')}</Tab>
-        <Tab value="inbox" icon={<Mail24Regular />}>{t('nav.inbox')}</Tab>
-      </TabList>
+      <div className={styles.tabsRow}>
+        <NarrowMenuButton />
+        <TabList
+          ref={tabsRef}
+          className={styles.tabs}
+          size={isNarrow ? 'small' : 'medium'}
+          selectedValue={subTab}
+          onTabSelect={handleTabSelect}
+        >
+          <Tab value="replies" icon={isNarrow ? undefined : <Comment24Regular />}>{t('nav.replies')}</Tab>
+          <Tab value="apps" icon={isNarrow ? undefined : <PersonAccounts24Regular />}>{t('nav.apps')}</Tab>
+          <Tab value="likes" icon={isNarrow ? undefined : <Heart24Regular />}>{t('nav.likes')}</Tab>
+          <Tab value="rates" icon={isNarrow ? undefined : <Star24Regular />}>{t('nav.rates')}</Tab>
+          <Tab value="inbox" icon={isNarrow ? undefined : <Mail24Regular />}>{t('nav.inbox')}</Tab>
+        </TabList>
+      </div>
 
       <div className={styles.content}>
         {TABS.map((tab) => {

@@ -760,6 +760,7 @@
     "downloadCancelled": "ダウンロードをキャンセルしました"
   },
   "editor": {
+    "collapse": "折りたたむ",
     "bold": "太字",
     "italic": "斜体",
     "strikethrough": "取り消し線",

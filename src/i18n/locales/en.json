@@ -760,6 +760,7 @@
     "downloadCancelled": "Download cancelled"
   },
   "editor": {
+    "collapse": "Collapse",
     "bold": "Bold",
     "italic": "Italic",
     "strikethrough": "Strikethrough",

@@ -1,9 +1,9 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useLayoutEffect, useCallback, useRef, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   Card, Text, Button, Spinner, Select, Tooltip,
   Menu, MenuTrigger, MenuPopover, MenuList, MenuItem,
-  makeStyles, tokens,
+  makeStyles, mergeClasses, tokens,
 } from '@fluentui/react-components'
 import {
   Send24Regular, Delete24Regular, Edit24Regular, ArrowReply24Regular,
@@ -17,6 +17,7 @@ import { Lightbox } from '../../components/common/Lightbox'
 import { useImageLightbox } from '../../components/common/useImageLightbox'
 import { Pagination, UserLink } from '../../components'
 import { usePersistedHeight } from '../../hooks/usePersistedHeight'
+import { useMediaQuery } from '../../hooks/useMediaQuery'
 
 const MAX_COMMENT_LENGTH = 3000
 const MAX_REPLY_LENGTH = 3000
@@ -146,19 +147,72 @@ const useStyles = makeStyles({
     width: '100%', height: '60px',
     '&:hover': { backgroundColor: tokens.colorNeutralBackground1Hover },
   },
+  // ── 窄屏全屏输入态 ──
+  // 手机上评论/回复卡片铺满视口：上面一条操作栏（只放「收起」），
+  // 中间编辑区与预览上下两栏，底部钉住原有的提交行。
+  // 用 position:fixed 而不是改页面结构，卡片里原有的提交/取消按钮不用搬家。
+  composerFull: {
+    position: 'fixed',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    zIndex: 1001,
+    margin: 0,
+    borderRadius: 0,
+    border: 'none',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '8px',
+    padding: '8px 10px calc(10px + env(safe-area-inset-bottom))',
+    boxSizing: 'border-box',
+    overflow: 'hidden',
+    boxShadow: 'none',
+    backgroundColor: tokens.colorNeutralBackground1,
+  },
+  composerBar: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: '8px',
+    flexShrink: 0,
+  },
+  composerBarTitle: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    color: tokens.colorNeutralForeground2,
+  },
+  submitRowFull: {
+    flexShrink: 0,
+  },
+  // 全屏回复框顶部的「被回复内容」：按 Markdown 引用渲染，超高时自身滚动，
+  // 不抢输入区的高度
+  quotedTarget: {
+    flexShrink: 0,
+    maxHeight: '160px',
+    overflow: 'auto',
+    padding: '4px 8px',
+    borderRadius: '4px',
+    backgroundColor: tokens.colorNeutralBackground2,
+    border: `1px solid ${tokens.colorNeutralStroke2}`,
+    fontSize: tokens.fontSizeSmall,
+  },
 })
 
 /**
  * 评论/回复编辑器：正文高度可拖动并写入 sqlite（同 usePersistedHeight），
  * 下方带一行小字提示（Ctrl+Enter 提交 / 拖动调高度）。
  */
-function CommentEditor({ heightKey, hint, ...props }) {
+function CommentEditor({ heightKey, hint, fill = false, ...props }) {
   const styles = useStyles()
   const heightState = usePersistedHeight(heightKey, { min: 80, max: 2000, defaultHeight: 200 })
   return (
     <>
-      <MarkdownEditor {...props} heightState={heightState} />
-      {hint && <Text size="small" className={styles.editorHint}>{hint}</Text>}
+      {/* 全屏态不传持久化高度：否则 textarea 会被记忆的 px 高度钉死，撑不满屏幕 */}
+      <MarkdownEditor {...props} fill={fill} heightState={fill ? undefined : heightState} />
+      {hint && !fill && <Text size="small" className={styles.editorHint}>{hint}</Text>}
     </>
   )
 }
@@ -196,6 +250,37 @@ export default function CommentSection({ api, targetId, folderPrefix = 'sfm', sc
   // 发表评论
   const [newComment, setNewComment] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  // 窄屏全屏输入态：文本框获得焦点即把对应卡片铺满视口（点「收起」或提交成功后退出）
+  const isNarrow = useMediaQuery('(max-width: 768px)')
+  const [newFull, setNewFull] = useState(false)
+  const [replyFull, setReplyFull] = useState(false)
+
+  /**
+   * 全屏卡片用 position:fixed 脱离文档流，页面内容会在那一刻少掉卡片的高度。
+   * 滚动到底部时 scrollTop 已经贴在上限，内容一缩浏览器立刻把 scrollTop 夹回去，
+   * 收起后页面就停在夹过的位置（看起来「没回到原位」）。
+   * 所以聚焦瞬间先记下最近那个可滚动祖先的位置，退出全屏、卡片放回文档流后再还原。
+   */
+  const savedScrollRef = useRef(null)
+  const rememberScroll = (node) => {
+    let el = node?.parentElement || null
+    while (el && el !== document.body) {
+      const oy = window.getComputedStyle(el).overflowY
+      if ((oy === 'auto' || oy === 'scroll') && el.scrollHeight > el.clientHeight) {
+        savedScrollRef.current = { el, top: el.scrollTop }
+        return
+      }
+      el = el.parentElement
+    }
+    savedScrollRef.current = null
+  }
+  useLayoutEffect(() => {
+    if (newFull || replyFull) return
+    const saved = savedScrollRef.current
+    if (!saved) return
+    savedScrollRef.current = null
+    saved.el.scrollTop = saved.top
+  }, [newFull, replyFull])
 
   // 楼中楼 replyTo = { parentId, authorName } | null
   const [replyTo, setReplyTo] = useState(null)
@@ -484,6 +569,7 @@ export default function CommentSection({ api, targetId, folderPrefix = 'sfm', sc
       setTotal(prev => prev + 1)
       setCommentTotal(prev => prev + 1)
       setNewComment('')
+      setNewFull(false)
     } catch (e) {
       alert(t('workshop.commentFailed') + e.message)
     } finally {
@@ -569,6 +655,7 @@ export default function CommentSection({ api, targetId, folderPrefix = 'sfm', sc
       }))
       setReplyText('')
       setReplyTo(null)
+      setReplyFull(false)
     } catch (e) {
       alert(t('workshop.replyFailed') + e.message)
     } finally {
@@ -796,19 +883,72 @@ export default function CommentSection({ api, targetId, folderPrefix = 'sfm', sc
   const totalPages = Math.ceil(total / 10)
 
   // 树状楼中楼（Reddit 式）：回复就地渲染在父级下面，层级靠容器左侧竖线 + 缩进表达
+  // 全屏回复时看不到被回复的那条消息，把它的正文按 Markdown 引用（>）渲染在输入框上方，
+  // 省得为了确认「回的是哪句话」反复收起再展开
+  const quotedReplyTarget = useMemo(() => {
+    if (!replyTo) return null
+    const id = Number(replyTo.parentId)
+    const pick = (item) => (item && Number(item.id) === id ? item : null)
+    for (const c of comments) {
+      const hit = pick(c)
+        || pick((c.replies || []).find(r => Number(r.id) === id))
+        || pick((c.ancestors || []).find(r => Number(r.id) === id))
+      if (hit) return hit
+    }
+    for (const rs of Object.values(replyState)) {
+      const hit = pick((rs.replies || []).find(r => Number(r.id) === id))
+        || pick((rs.ancestors || []).find(r => Number(r.id) === id))
+      if (hit) return hit
+    }
+    return null
+  }, [replyTo, comments, replyState])
+
+  const quotedMarkdown = quotedReplyTarget?.content
+    // 每一行都要带引用前缀，否则多段正文只有第一段会渲染成引用块
+    ? quotedReplyTarget.content.split('\n').map(line => `> ${line}`).join('\n')
+    : null
+
   const renderReplyForm = (target) => (
-    <Card className={styles.replyFormCard} id={`reply-form-${target.id}`}>
+    <Card
+      className={mergeClasses(styles.replyFormCard, isNarrow && replyFull && styles.composerFull)}
+      id={`reply-form-${target.id}`}
+    >
+      {isNarrow && replyFull && (
+        <div className={styles.composerBar}>
+          {/* 全屏后看不见被回复的那条评论，这里留一行「回复 @某人」保上下文 */}
+          <Text size={200} className={styles.composerBarTitle}>
+            {t('workshop.replyToUserPlaceholder', { name: target.author_name })}
+          </Text>
+          <Button size="small" appearance="subtle" style={{ marginLeft: 'auto' }} onClick={() => setReplyFull(false)}>
+            {t('editor.collapse')}
+          </Button>
+        </div>
+      )}
+      {isNarrow && replyFull && quotedMarkdown && (
+        <div className={styles.quotedTarget}>
+          <MarkdownContent markdown={quotedMarkdown} />
+        </div>
+      )}
       <CommentEditor
         split
+        fill={isNarrow && replyFull}
         heightKey="editor_height_comment_reply"
         hint={t('workshop.commentEditorHint')}
         value={replyText}
         onChange={setReplyText}
+        // 只认「获得焦点」：失焦往往发生在点提交/取消按钮的那一刻，
+        // 若此时立刻收全屏，按钮会被挪走、mouseup 落空，点击就丢了。
+        // 同时记下当前滚动位置，退出全屏后还原（详见 rememberScroll）
+        onFocusChange={(focused, evt) => {
+          if (!focused) return
+          rememberScroll(evt?.currentTarget)
+          setReplyFull(true)
+        }}
         placeholder={t('workshop.replyToUserPlaceholder', { name: target.author_name })}
         maxLength={MAX_REPLY_LENGTH}
         onSubmit={() => { if (!submitting) handleSubmitReply() }}
       />
-      <div className={styles.submitRow}>
+      <div className={mergeClasses(styles.submitRow, isNarrow && replyFull && styles.submitRowFull)}>
         <Button
           appearance="primary" icon={<Send24Regular />}
           style={{ minWidth: '140px', height: '36px', padding: '0 16px' }}
@@ -817,7 +957,11 @@ export default function CommentSection({ api, targetId, folderPrefix = 'sfm', sc
         >
           {t('workshop.reply')}
         </Button>
-        <Button appearance="subtle" style={{ marginLeft: '8px' }} onClick={() => setReplyTo(null)}>
+        <Button
+          appearance="subtle"
+          style={{ marginLeft: '8px' }}
+          onClick={() => { setReplyTo(null); setReplyFull(false) }}
+        >
           {t('workshop.cancel')}
         </Button>
       </div>
@@ -992,18 +1136,31 @@ export default function CommentSection({ api, targetId, folderPrefix = 'sfm', sc
 
       {/* ── 发表评论表单 ── */}
       {isLoggedIn ? (
-        <Card className={styles.commentFormCard}>
+        <Card className={mergeClasses(styles.commentFormCard, isNarrow && newFull && styles.composerFull)}>
+          {isNarrow && newFull && (
+            <div className={styles.composerBar}>
+              <Button size="small" appearance="subtle" onClick={() => setNewFull(false)}>
+                {t('editor.collapse')}
+              </Button>
+            </div>
+          )}
           <CommentEditor
             split
+            fill={isNarrow && newFull}
             heightKey="editor_height_comment_new"
             hint={t('workshop.commentEditorHint')}
             value={newComment}
             onChange={setNewComment}
+            onFocusChange={(focused, evt) => {
+              if (!focused) return
+              rememberScroll(evt?.currentTarget)
+              setNewFull(true)
+            }}
             placeholder={t('workshop.commentPlaceholder')}
             maxLength={MAX_COMMENT_LENGTH}
             onSubmit={() => { if (!submitting) handleSubmitComment() }}
           />
-          <div className={styles.submitRow}>
+          <div className={mergeClasses(styles.submitRow, isNarrow && newFull && styles.submitRowFull)}>
             <Button
               appearance="primary" icon={<Send24Regular />}
               style={{ minWidth: '140px', height: '36px', padding: '0 16px' }}

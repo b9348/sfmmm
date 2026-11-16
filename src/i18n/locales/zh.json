@@ -760,6 +760,7 @@
     "downloadCancelled": "已取消下载"
   },
   "editor": {
+    "collapse": "收起",
     "bold": "粗体",
     "italic": "斜体",
     "strikethrough": "删除线",

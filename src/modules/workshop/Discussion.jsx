@@ -77,7 +77,7 @@ function latestId(list) {
  * onNewContent：缓存优先渲染后，后台刷新拿到的列表比缓存多出新帖时回调
  * （由 Workshop 在「讨论区」页签上点蓝点提示）。只在未展示讨论区时回调。
  */
-export function Discussion({ active = true, onNewContent }) {
+export function Discussion({ active = true, onNewContent, onDetailOpenChange }) {
   const { t } = useTranslation()
   const styles = useStyles()
   const { user, isLoggedIn } = useAuth()
@@ -136,6 +136,10 @@ export function Discussion({ active = true, onNewContent }) {
   // 避免旧请求的网络刷新覆盖用户已切换到的其他详情
   const detailIdRef = useRef(null)
   useEffect(() => { detailIdRef.current = detail?.id ?? null }, [detail])
+  // 窄屏：讨论详情覆盖层打开时页面要收起顶部 tabs 行（整屏让给详情）
+  useEffect(() => {
+    onDetailOpenChange?.(!!detail)
+  }, [detail, onDetailOpenChange])
   // 列表请求纪元：revalidate 完成时纪元已变说明用户已翻页/换条件，丢弃旧刷新
   const listEpochRef = useRef(0)
   // 详情打开失败（离线且没有缓存 / 已删除 / 云端报错）时给出提示：
@@ -545,8 +549,14 @@ export function Discussion({ active = true, onNewContent }) {
     if (!content) return
     const compute = () => {
       const r = content.getBoundingClientRect()
+      // 与 BrowseMods 同口径：把 tabs 与内容区之间的 row-gap 留白一起盖住，
+      // 让讨论详情导航栏贴住 tabs 下沿而不是空出一条缝；
+      // 窄屏详情打开时 tabs 行已被收起，没有留白可盖，按 0 算
+      const gap = content.previousElementSibling
+        ? (parseFloat(window.getComputedStyle(content.parentElement).rowGap) || 0)
+        : 0
       setOverlayRect({
-        top: r.top,
+        top: r.top - gap,
         left: r.left,
         right: window.innerWidth - r.right,
         bottom: window.innerHeight - r.bottom,

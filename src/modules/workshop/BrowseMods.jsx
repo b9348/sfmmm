@@ -71,7 +71,7 @@ const useStyles = makeStyles({
   },
   })
 
-export function BrowseMods({ initialModId, initialCommentId, onConsumeNavTarget, active = true }) {
+export function BrowseMods({ initialModId, initialCommentId, onConsumeNavTarget, onDetailOpenChange, active = true }) {
   const onConsumeRef = useRef(onConsumeNavTarget)
   useEffect(() => { onConsumeRef.current = onConsumeNavTarget }, [onConsumeNavTarget])
   const styles = useStyles()
@@ -133,6 +133,10 @@ export function BrowseMods({ initialModId, initialCommentId, onConsumeNavTarget,
   // 避免旧请求的网络刷新覆盖用户已切换到的其他详情
   const detailIdRef = useRef(null)
   useEffect(() => { detailIdRef.current = detailMod?.id ?? null }, [detailMod])
+  // 窄屏：详情覆盖层打开时页面要收起顶部 tabs 行（整屏让给详情）
+  useEffect(() => {
+    onDetailOpenChange?.(!!detailMod)
+  }, [detailMod, onDetailOpenChange])
   // 由点击自己打开详情时记下目标 hash，跳过 hashchange 的重复打开
   const suppressHashOpenRef = useRef('')
   // 列表请求纪元：每次发起网络取数自增；revalidate 完成时纪元已变说明用户已翻页/换条件，丢弃旧刷新
@@ -523,8 +527,14 @@ export function BrowseMods({ initialModId, initialCommentId, onConsumeNavTarget,
     if (!content) return
     const compute = () => {
       const r = content.getBoundingClientRect()
+      // 页面 tabs 与内容区之间是父级 flex 的 row-gap 留白。覆盖层要把这段留白一起盖住，
+      // 否则详情导航栏吸顶后会与 tabs 之间空出一条缝（切页时还会露出列表的底边）。
+      // 窄屏详情打开时 tabs 行已被收起，此时没有留白可盖：没有上一个兄弟节点就按 0 算。
+      const gap = content.previousElementSibling
+        ? (parseFloat(window.getComputedStyle(content.parentElement).rowGap) || 0)
+        : 0
       setOverlayRect({
-        top: r.top,
+        top: r.top - gap,
         left: r.left,
         right: window.innerWidth - r.right,
         bottom: window.innerHeight - r.bottom,
