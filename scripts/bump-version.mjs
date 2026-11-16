@@ -6,7 +6,7 @@
  *   node scripts/bump-version.mjs --dry-run    只打印，不落盘
  *   node scripts/bump-version.mjs --set 1.2.3  指定版本
  */
-import { readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -48,6 +48,22 @@ function bumpPatch(version) {
   return `${parts[0]}.${parts[1]}.${Number(parts[2]) + 1}`
 }
 
+/**
+ * Cargo.lock 是生成文件，不参与「三处一致」校验，但里面 app 包的版本要保持同步，
+ * 否则每次 cargo build 都会把它改脏、并在下一次提交里混进来。
+ */
+function syncCargoLock(next, dryRun) {
+  const file = path.join(ROOT, 'src-tauri', 'Cargo.lock')
+  if (!existsSync(file)) return
+  const content = readFileSync(file, 'utf8')
+  const updated = content.replace(
+    /(\[\[package\]\]\r?\nname = "app"\r?\nversion = ")[^"]+(")/,
+    `$1${next}$2`,
+  )
+  if (updated === content) return
+  if (!dryRun) writeFileSync(file, updated, 'utf8')
+}
+
 function main() {
   const args = process.argv.slice(2)
   const dryRun = args.includes('--dry-run')
@@ -69,9 +85,12 @@ function main() {
   const next = explicit || bumpPatch(current)
   for (const entry of entries) {
     const updated = entry.content.replace(entry.pattern, entry.template(next))
-    if (updated === entry.content) throw new Error(`${entry.file} 没有写入新版本号`)
+    if (updated === entry.content && next !== entry.version) {
+      throw new Error(`${entry.file} 没有写入新版本号`)
+    }
     if (!dryRun) writeFileSync(entry.absolute, updated, 'utf8')
   }
+  syncCargoLock(next, dryRun)
 
   console.log(`版本 ${current} → ${next}${dryRun ? '（dry-run，未写入）' : ''}`)
 }

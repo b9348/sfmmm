@@ -13,9 +13,9 @@ changed=$(git diff --cached --name-only)
 [ -z "$changed" ] && exit 0
 
 # 只提交版本文件本身时不再自增（避免 amend 或手工升版时连跳两级）
-if ! printf '%s\n' "$changed" | grep -qvE '^(src-tauri/Cargo\.toml|src-tauri/tauri\.conf\.json|src/version\.js)$'; then
+if ! printf '%s\n' "$changed" | grep -qvE '^(src-tauri/Cargo\.toml|src-tauri/Cargo\.lock|src-tauri/tauri\.conf\.json|src/version\.js)$'; then
   exit 0
 fi
 
 node "$ROOT/scripts/bump-version.mjs"
-git add -- src-tauri/Cargo.toml src-tauri/tauri.conf.json src/version.js
+git add -- src-tauri/Cargo.toml src-tauri/Cargo.lock src-tauri/tauri.conf.json src/version.js
