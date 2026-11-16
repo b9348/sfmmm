@@ -114,7 +114,7 @@ pub fn run() {
             db::db_add_comment, db::db_get_comments, db::db_get_replies, db::db_edit_comment, db::db_delete_comment,
             db::db_locate_mod_comment,
             db::db_like_mod, db::db_unlike_mod,
-            db::db_rate_mod, db::db_unrate_mod,
+            db::db_rate_mod, db::db_unrate_mod, db::db_boost_mod, db::db_unboost_mod,
             db::db_check_updates,
             db::db_fetch_latest,
             db::gh::db_gh_latest_release,

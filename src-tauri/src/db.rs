@@ -356,6 +356,13 @@ rpc_command!(db_like_mod { mod_id: u64, device_id: String });
 rpc_command!(db_unlike_mod { mod_id: u64, device_id: String });
 rpc_command!(db_rate_mod { mod_id: u64, user_id: u64, rating: f64 });
 rpc_command!(db_unrate_mod { mod_id: u64, user_id: u64 });
+rpc_command!(db_boost_mod {
+    mod_id: u64,
+    content: String,
+});
+rpc_command!(db_unboost_mod {
+    mod_id: u64,
+});
 
 // 权限 / 申请
 rpc_command!(db_set_mod_permissions {

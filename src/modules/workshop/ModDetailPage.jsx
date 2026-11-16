@@ -21,10 +21,11 @@ import { Lightbox } from '../../components/common/Lightbox'
 import { useImageLightbox } from '../../components/common/useImageLightbox'
 import { invoke } from '@tauri-apps/api/core'
 import { useAuth } from '../../contexts/useAuth'
-import { submitApplication, likeMod, unlikeMod, getDeviceId, rateMod, unrateMod, addComment, getComments, getCommentReplies, deleteComment, editComment, locateModComment, forceDeleteMod } from '../../services/workshopApi'
+import { submitApplication, likeMod, unlikeMod, getDeviceId, rateMod, unrateMod, boostMod, unboostMod, addComment, getComments, getCommentReplies, deleteComment, editComment, locateModComment, forceDeleteMod } from '../../services/workshopApi'
 import { upsertLikedModToCache, removeLikedModFromCache } from '../../services/likedModsCache'
 import { upsertRatedModToCache, removeRatedModFromCache } from '../../services/ratingCache'
 import CommentSection from './CommentSection'
+import BoostPanel from './BoostPanel'
 import { getDb, getGamePath } from '../../services/dbHelper'
 import { BackButton, CategoryBadge, FloatingActions, UserLink, OfflineCacheNotice, GameVersionBanner } from '../../components'
 import { NoticeBar } from '../../components/common/NoticeBar'
@@ -173,6 +174,11 @@ export default function ModDetailPage({ mod, onBack, onEdit, onDeleted, scrollTo
   const [ratingCount, setRatingCount] = useState(mod.rating_count || 0)
   const [myRating, setMyRating] = useState(mod.my_rating || 0)
   const [ratingBusy, setRatingBusy] = useState(false)
+  // 助推状态：与 likeCount 同一模式——先用列表/详情快照渲染，接口回流后覆盖。
+  // 复用讨论区那套 BoostPanel（样式/交互/头像弹资料都在组件内），这里只管数据与提交。
+  const [boosts, setBoosts] = useState(Array.isArray(mod.boosts) ? mod.boosts : [])
+  const [boostCount, setBoostCount] = useState(mod.boost_count || 0)
+  const [myBoost, setMyBoost] = useState(mod.my_boost || null)
 
   // 侧键返回：由 App 顶层的唯一监听分发过来，这里只声明「看不见时不接管」
   useMouseBackButton(onBack, { active: navActive })
@@ -188,6 +194,9 @@ export default function ModDetailPage({ mod, onBack, onEdit, onDeleted, scrollTo
     setRatingAvg(mod.rating_avg || 0)
     setRatingCount(mod.rating_count || 0)
     setMyRating(mod.my_rating || 0)
+    setBoosts(Array.isArray(mod.boosts) ? mod.boosts : [])
+    setBoostCount(mod.boost_count || 0)
+    setMyBoost(mod.my_boost || null)
   }, [mod])
 
   const handleLikeToggle = async () => {
@@ -210,6 +219,35 @@ export default function ModDetailPage({ mod, onBack, onEdit, onDeleted, scrollTo
     } finally {
       setLikeBusy(false)
     }
+  }
+
+  // 助推：服务端只回计数，本地按「自己已助推」补齐气泡（作者信息来自当前登录用户），
+  // 不整页重拉详情；离开/重新进入详情时以接口返回的 boosts 为准。
+  const handleBoost = async (content) => {
+    if (!user) return
+    const uid = Number(user.user_id)
+    const res = await boostMod(mod.id, content)
+    setBoosts(prev => [
+      {
+        content,
+        author_id: uid,
+        author_name: user.username,
+        author_avatar: user.avatar,
+        created_at: new Date().toISOString(),
+      },
+      ...prev.filter(b => Number(b.author_id) !== uid),
+    ])
+    setMyBoost(content)
+    setBoostCount(res.boost_count ?? boostCount + 1)
+  }
+
+  const handleUnboost = async () => {
+    if (!user) return
+    const uid = Number(user.user_id)
+    const res = await unboostMod(mod.id)
+    setBoosts(prev => prev.filter(b => Number(b.author_id) !== uid))
+    setMyBoost(null)
+    setBoostCount(res.boost_count ?? Math.max(boostCount - 1, 0))
   }
 
   const handleRate = async (rating) => {
@@ -898,6 +936,19 @@ export default function ModDetailPage({ mod, onBack, onEdit, onDeleted, scrollTo
           <NoticeBar tone="error">
             <Text>{uninstallError}</Text>
           </NoticeBar>
+        )}
+        {/* 助推：登录用户始终可见入口；匿名访客只在确有助推时展示气泡，避免空区块 */}
+        {(user || boosts.length > 0 || boostCount > 0) && (
+          <BoostPanel
+            boosts={boosts}
+            boostCount={boostCount}
+            partial={offlinePartial}
+            myBoost={myBoost}
+            userId={user?.user_id}
+            isLoggedIn={!!user}
+            onBoost={handleBoost}
+            onUnboost={handleUnboost}
+          />
         )}
         <CommentSection
           api={modCommentApi}

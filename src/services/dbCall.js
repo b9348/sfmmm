@@ -196,6 +196,9 @@ const WRITE_FAMILIES = {
   db_unlike_mod: ['db_get_mod_detail', 'db_list_mods', 'db_list_liked_mods', 'db_list_game_masters'],
   db_rate_mod: ['db_get_mod_detail', 'db_list_mods', 'db_list_rated_mods'],
   db_unrate_mod: ['db_get_mod_detail', 'db_list_mods', 'db_list_rated_mods'],
+  // mod 助推只出现在详情 DTO，列表不返回助推信息
+  db_boost_mod: ['db_get_mod_detail'],
+  db_unboost_mod: ['db_get_mod_detail'],
   db_create_mod: ['db_list_mods', 'db_get_mod_detail', 'db_list_my_mods', 'db_list_game_masters'],
   db_update_mod: ['db_list_mods', 'db_get_mod_detail', 'db_list_my_mods', 'db_list_game_masters'],
   db_delete_mod: ['db_list_mods', 'db_get_mod_detail', 'db_list_my_mods', 'db_list_liked_mods', 'db_list_rated_mods', 'db_list_game_masters'],

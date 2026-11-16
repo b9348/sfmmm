@@ -306,6 +306,19 @@ export async function unrateMod(mod_id, user_id) {
   return res.data || { my_rating: 0, rating_avg: 0, rating_count: 0 }
 }
 
+// ── mod 助推（语义对齐讨论区 boost：每人对每个 mod ≤1 条、≤16 字符） ──
+// 助推身份由服务端按令牌绑定，参数里不传 user_id（传了也不采信）。
+
+export async function boostMod(mod_id, content) {
+  const res = await dbCall('db_boost_mod', { mod_id: Number(mod_id), content })
+  return res.data || { boost_count: 0, is_boosted: true, content }
+}
+
+export async function unboostMod(mod_id) {
+  const res = await dbCall('db_unboost_mod', { mod_id: Number(mod_id) })
+  return res.data || { boost_count: 0, is_boosted: false }
+}
+
 export async function checkModKey(mod_key) {
   const res = await dbCall('db_check_mod_key', { mod_key })
   return res.data
