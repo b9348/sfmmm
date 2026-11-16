@@ -40,6 +40,7 @@
  *   src-tauri/.env → IMGBED_URL（仅发布脚本拼公开直链用）、DB_URL（源库直连地址，用于更新源库 version_config；可用 SFMMM_SRC_DB_URL 覆盖）
  *   SFMMM_CLOUD_ENV → 指向 AxumVue 仓**根目录**的 .env（服务端已上移到仓根，不再是 server/.env），
  *                     取 PUBLIC_BASE_URL / ADMIN_TOKEN / SFMMM_RELEASE_BASE / R2_*
+ *                     解析顺序：进程环境变量 → 根目录 .env → 同级 ../AxumVue/.env（自动兜底）
  *                     （也可直接用同名环境变量 SFMMM_RELEASE_BASE / SFMMM_ADMIN_TOKEN / R2_* 提供）
  *   .env           → VITE_LATEST_URL（构建时注入前端，同时作为清单回读地址）
  */
@@ -57,9 +58,22 @@ import { createR2Store } from './r2-store.mjs'
 
 const ROOT = path.resolve(fileURLToPath(new URL('..', import.meta.url)))
 const TAURI_DIR = path.join(ROOT, 'src-tauri')
-// 服务端（AxumVue）已是独立仓库：不再按固定路径读 server/.env，
-// 由 SFMMM_CLOUD_ENV 指向那份配置；未设置则视为没有该文件，改用同名环境变量。
-const CLOUD_ENV_FILE = String(process.env.SFMMM_CLOUD_ENV || '').trim()
+const ROOT_ENV_FILE = path.join(ROOT, '.env')
+const ROOT_ENV = readEnvFile(ROOT_ENV_FILE)
+
+// 服务端（AxumVue）已是独立仓库，server/.env 随服务端上移到了仓根。
+// 解析顺序：进程环境变量 → 根目录 .env 的 SFMMM_CLOUD_ENV → 同级的 ../AxumVue/.env（本机开发的默认布局）。
+// 这样配一次 .env 之后，`pnpm release` 直接跑，不必每次在终端 export 一长串。
+function resolveCloudEnvFile() {
+  const configured = String(process.env.SFMMM_CLOUD_ENV || ROOT_ENV.SFMMM_CLOUD_ENV || '').trim()
+  if (configured) {
+    // 相对路径按仓库根解析，避免受当前 shell 工作目录影响
+    return path.isAbsolute(configured) ? configured : path.resolve(ROOT, configured)
+  }
+  const sibling = path.resolve(ROOT, '..', 'AxumVue', '.env')
+  return existsSync(sibling) ? sibling : ''
+}
+const CLOUD_ENV_FILE = resolveCloudEnvFile()
 const TARGET_DIR = path.join(TAURI_DIR, 'target')
 const NSIS_DIR = path.join(TARGET_DIR, 'release', 'bundle', 'nsis')
 const CONF_PATH = path.join(TAURI_DIR, 'tauri.conf.json')
@@ -311,7 +325,7 @@ function readEnvFile(file) {
 
 const tauriEnv = readEnvFile(path.join(TAURI_DIR, '.env'))
 const serverEnv = CLOUD_ENV_FILE ? readEnvFile(CLOUD_ENV_FILE) : {}
-const webEnv = readEnvFile(path.join(ROOT, '.env'))
+const webEnv = ROOT_ENV
 
 const IMGBED_URL = (tauriEnv.IMGBED_URL || '').replace(/\/+$/, '')
 // 发版上传/删除走管理网关（admin 域名）：网关校验 X-Admin-Token 后注入图床令牌，
@@ -821,10 +835,10 @@ function checkConfig() {
     throw new Error('缺少图床公开地址：请在 src-tauri/.env 配置 IMGBED_URL')
   }
   if (!RELEASE_BASE) {
-    throw new Error('缺少发版网关地址：请用 SFMMM_CLOUD_ENV 指向 AxumVue 仓根目录的 .env（其中含 SFMMM_RELEASE_BASE），或直接设同名环境变量')
+    throw new Error('缺少发版网关地址：请在本仓根 .env 写 SFMMM_CLOUD_ENV=<AxumVue 仓根 .env 的路径>，或直接设同名环境变量 SFMMM_RELEASE_BASE')
   }
   if (!ADMIN_TOKEN) {
-    throw new Error('缺少发版网关令牌：请用 SFMMM_CLOUD_ENV 指向 AxumVue 仓根目录的 .env（其中含 ADMIN_TOKEN），或设 SFMMM_ADMIN_TOKEN')
+    throw new Error('缺少发版网关令牌：请在本仓根 .env 写 SFMMM_CLOUD_ENV=<AxumVue 仓根 .env 的路径>，或直接设 SFMMM_ADMIN_TOKEN')
   }
   if (!noDb && !dryRun && (!ADMIN_TOKEN || !PUBLIC_BASE_URL)) {
     throw new Error('缺少服务端配置：请设置 SFMMM_PUBLIC_BASE_URL / SFMMM_ADMIN_TOKEN（或用 --no-db 跳过）')
