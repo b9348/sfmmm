@@ -80,7 +80,10 @@ jobs:
           SFMMM_API_BASE: ${{ secrets.SFMMM_API_BASE }}
           DESKTOP_XPORT_KEY: ${{ secrets.DESKTOP_XPORT_KEY }}
           IMGBED_URL: ${{ secrets.IMGBED_URL }}
-          IMGBED_TOKEN: ${{ secrets.IMGBED_TOKEN }}
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           SFMMM_ADMIN_TOKEN: ${{ secrets.SFMMM_ADMIN_TOKEN }}
           VITE_LANZOU_BEPINEX: ${{ secrets.VITE_LANZOU_BEPINEX }}
           VITE_LANZOU_V2: ${{ secrets.VITE_LANZOU_V2 }}
@@ -103,7 +106,9 @@ jobs:
             fi
           }
           for name in \
-            SFMMM_PUBLIC_BASE_URL DESKTOP_XPORT_KEY IMGBED_URL IMGBED_TOKEN SFMMM_ADMIN_TOKEN \
+            SFMMM_PUBLIC_BASE_URL DESKTOP_XPORT_KEY IMGBED_URL \
+            R2_ENDPOINT R2_BUCKET R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY \
+            SFMMM_ADMIN_TOKEN \
             VITE_LANZOU_BEPINEX VITE_LANZOU_V2 VITE_LANZOU_FONT VITE_LANZOU_RMMOSAIC \
             ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD; do
             require_secret "$name"
@@ -477,6 +482,23 @@ jobs:
       contents: write
 
     steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 11
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+        shell: bash
+
       - name: Download Windows installer
         uses: actions/download-artifact@v8
         with:
@@ -503,56 +525,22 @@ jobs:
             dist/android/*.apk
           generate_release_notes: true
 
-      - name: Upload to ImgBed & Update Cloud Version
+      - name: Upload to R2 & Update Cloud Version
         shell: bash
         env:
           NEW_VERSION: ${{ needs.preflight.outputs.version }}
           IMGBED_URL: ${{ secrets.IMGBED_URL }}
-          IMGBED_TOKEN: ${{ secrets.IMGBED_TOKEN }}
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           PUBLIC_BASE: ${{ secrets.SFMMM_PUBLIC_BASE_URL }}
           ADMIN_TOKEN: ${{ secrets.SFMMM_ADMIN_TOKEN }}
         run: |
           set -euo pipefail
-          IMGBED="${IMGBED_URL%/}"
-          EXE_FILE=$(find dist/desktop -maxdepth 1 -name '*.exe' -type f | head -n 1)
-          if [ -z "$EXE_FILE" ]; then
-            echo "::error::No .exe installer found"
-            exit 1
-          fi
-          echo "Found installer: $EXE_FILE"
-
-          echo "::group::Upload to ImgBed"
-          UPLOAD_RESP=$(curl -s -X POST \
-            "${IMGBED}/upload?uploadChannel=telegram&uploadFolder=sfm/installer/v${NEW_VERSION}&returnFormat=full" \
-            -H "Authorization: Bearer ${IMGBED_TOKEN}" \
-            -F "file=@${EXE_FILE}")
-          echo "ImgBed response: $UPLOAD_RESP"
-          echo "::endgroup::"
-
-          DOWNLOAD_URL=$(echo "$UPLOAD_RESP" | jq -r '.[0].src // empty')
-          if [ -z "$DOWNLOAD_URL" ]; then
-            echo "::error::Failed to upload to ImgBed"
-            exit 1
-          fi
+          echo "::group::Upload to R2"
+          DOWNLOAD_URL=$(node scripts/release-upload-r2.mjs dist/desktop)
           echo "Download URL: $DOWNLOAD_URL"
-
-          echo "::group::Update latest.json manifest"
-          LATEST_URL="${IMGBED}/file/sfm/installer/latest.json"
-          curl -s -X GET \
-            "${IMGBED}/api/manage/delete/sfm/installer/latest.json" \
-            -H "Authorization: Bearer ${IMGBED_TOKEN}" || true
-          printf '{"version":"%s","update_url":"%s"}\n' "$NEW_VERSION" "$DOWNLOAD_URL" > latest.json
-          MANIFEST_RESP=$(curl -s -X POST \
-            "${IMGBED}/upload?uploadChannel=telegram&uploadFolder=sfm/installer&returnFormat=full&uploadNameType=origin" \
-            -H "Authorization: Bearer ${IMGBED_TOKEN}" \
-            -F "file=@latest.json")
-          echo "Manifest upload response: $MANIFEST_RESP"
-          MANIFEST_SRC=$(echo "$MANIFEST_RESP" | jq -r '.[0].src // empty')
-          if [ -z "$MANIFEST_SRC" ]; then
-            echo "::error::Failed to upload latest.json to ImgBed"
-            exit 1
-          fi
-          echo "Manifest available at: $LATEST_URL"
           echo "::endgroup::"
 
           echo "::group::Update version_config via API"
