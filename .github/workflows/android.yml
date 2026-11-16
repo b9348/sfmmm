@@ -207,14 +207,24 @@ jobs:
 
       - name: Collect & sign APKs
         shell: bash
+        env:
+          VERSION: ${{ steps.get_version.outputs.version }}
         run: |
           BT="$ANDROID_HOME/build-tools/34.0.0"
           KS="$TAURI_ANDROID_KEYSTORE_PATH"
           OUT="src-tauri/target/release/apk"
+          PRODUCT=$(node -p "require('./src-tauri/tauri.android.conf.json').productName")
+          PRODUCT=$(echo "$PRODUCT" | tr ' ' '-')
           mkdir -p "$OUT"
           find src-tauri/gen/android/app/build/outputs/apk -name "*.apk" -type f | while read -r APK; do
-            NAME="$(basename "$APK" .apk)"
-            NAME="${NAME%-unsigned}"
+            case "$APK" in
+              *arm64-v8a*) ABI=arm64 ;;
+              *armeabi-v7a*) ABI=armv7 ;;
+              *x86_64*) ABI=x86_64 ;;
+              *x86*) ABI=x86 ;;
+              *) ABI=universal ;;
+            esac
+            NAME="${PRODUCT}-v${VERSION}-android-${ABI}"
             ALIGNED="$RUNNER_TEMP/${NAME}-aligned.apk"
             SIGNED="$OUT/${NAME}.apk"
             if [[ "$APK" == *-unsigned.apk ]]; then
@@ -235,7 +245,7 @@ jobs:
       - name: Upload APK artifact
         uses: actions/upload-artifact@v7
         with:
-          name: android-apk-${{ steps.get_version.outputs.version }}
+          name: sfmmm-android-v${{ steps.get_version.outputs.version }}
           path: src-tauri/target/release/apk/*.apk
           if-no-files-found: error
 
