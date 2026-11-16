@@ -340,7 +340,8 @@ export function WinNavigationView({
   }
 
   const chevronClass = (value) => (expandedGroups[value] ? 'chevron-open' : 'chevron-close')
-  const showPaneContent = !isLeftMinimal || paneOpen
+  // 窄屏抽屉收起时不卸载菜单内容：滑出动画需要它一起移动；
+  // 收起后整块面板已在屏幕外且 pointer-events 关闭，不会露出来也不会拦截点击。
   // 标题：展开态显示，紧凑态隐藏
   const showTitle = paneOpen && !isCompact
   // 窄屏抽屉打开时铺一层遮罩：点击空白处收起，避免面板之外仍能误触下层内容
@@ -447,9 +448,9 @@ export function WinNavigationView({
         '--winnv-compact-pane-length': `${compactPaneLength}px`,
       }}
     >
-      {showScrim && (
+      {isLeftMinimal && (
         <div
-          className="winnv-scrim"
+          className={`winnv-scrim${showScrim ? ' is-open' : ''}`}
           role="presentation"
           onClick={closePane}
         />
@@ -485,9 +486,8 @@ export function WinNavigationView({
               </button>
             </div>
           )}
-          {showPaneContent && (
-            <div className="winnv-pane-surface" aria-hidden={isLeftMinimal && isCompact ? 'true' : undefined}>
-              <div className="winnv-indicator-track">
+          <div className="winnv-pane-surface" aria-hidden={isLeftMinimal && isCompact ? 'true' : undefined}>
+            <div className="winnv-indicator-track">
                 <div
                   className={`winnv-indicator ${indicatorFollowing ? 'is-following' : ''}`}
                   ref={indicatorRef}
@@ -520,8 +520,7 @@ export function WinNavigationView({
                 {/* 版本号置于最底部 */}
                 {paneFooter && <div className="winnv-pane-footer">{paneFooter}</div>}
               </div>
-            </div>
-          )}
+          </div>
         </nav>
       )}
       <main className="winnv-content">

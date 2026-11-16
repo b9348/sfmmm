@@ -95,11 +95,19 @@
   border-radius: 0;
 }
 
-/* 窄屏收起态：面板被 clip-path 裁到 48px 宽；汉堡按钮由页面自己的
-   <NarrowMenuButton /> 渲染在顶部那一行里，这里不再渲染任何可见内容，
-   但面板仍占着左侧 48px 的命中区域，整体关掉指针事件，否则内容区左侧会变成点不动的死区 */
+/* 窄屏抽屉收起态：面板整体移出屏幕左侧。
+   这里不用 clip-path 裁剪动画：裁剪会让 WebView 每帧重绘整块面板，手机上明显掉帧；
+   改成 transform 整层位移，交给合成器处理。 */
+.winnv-shell.is-left-minimal > .winnv-left-panel {
+  clip-path: none;
+  transform: translateX(-100%);
+  transition: transform var(--winnv-normal-duration) var(--winnv-fast-out-slow-in);
+  will-change: transform;
+}
+
 .winnv-shell.is-left-minimal > .winnv-left-panel.is-compact {
   pointer-events: none;
+  clip-path: none;
 }
 
 /* 窄屏抽屉展开态：面板要重新带上底色/阴影/圆角。
@@ -109,8 +117,7 @@
   background: var(--winnv-pane-fill, var(--colorNeutralBackground2, rgba(255, 255, 255, 0.96)));
   box-shadow: 0 8px 22px rgba(0, 0, 0, 0.16);
   border-radius: 0 8px 8px 0;
-  /* 显式给出展开态的裁剪范围，才能和收起态的 inset(0 172px 0 0) 之间插值出滑出动画 */
-  clip-path: inset(0 0 0 0);
+  transform: translateX(0);
 }
 
 /* 窄屏抽屉遮罩：铺满 shell，位于面板(z-index 20)之下、内容之上，点击收起 */
@@ -120,12 +127,16 @@
   z-index: 15;
   background: rgba(0, 0, 0, 0.32);
   cursor: pointer;
-  animation: winnv-scrim-in var(--winnv-normal-duration) var(--winnv-fast-out-slow-in);
+  opacity: 0;
+  pointer-events: none;
+  will-change: opacity;
+  transition: opacity var(--winnv-normal-duration) var(--winnv-fast-out-slow-in);
 }
 
-@keyframes winnv-scrim-in {
-  from { opacity: 0; }
-  to { opacity: 1; }
+/* 展开/收起都走同一段 opacity 过渡，收起时不会瞬间消失 */
+.winnv-scrim.is-open {
+  opacity: 1;
+  pointer-events: auto;
 }
 
 /* 内容区 */
