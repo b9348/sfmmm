@@ -215,13 +215,17 @@ jobs:
           OUT="src-tauri/target/release/apk"
           PRODUCT=$(node -p "require('./src-tauri/tauri.android.conf.json').productName")
           PRODUCT=$(echo "$PRODUCT" | tr ' ' '-')
+          # target 目录在 CI 缓存里，旧 APK 会残留；先清空避免把上次的包一起上传
+          rm -rf "$OUT"
           mkdir -p "$OUT"
           find src-tauri/gen/android/app/build/outputs/apk -name "*.apk" -type f | while read -r APK; do
-            case "$APK" in
-              *arm64-v8a*) ABI=arm64 ;;
-              *armeabi-v7a*) ABI=armv7 ;;
-              *x86_64*) ABI=x86_64 ;;
-              *x86*) ABI=x86 ;;
+            # Tauri 输出目录名固定是 universal，不能据此判断 ABI；直接看 APK 里的 lib 目录
+            ABIS=$(unzip -l "$APK" | awk -F'lib/' '/lib\//{print $2}' | cut -d/ -f1 | sort -u | tr '\n' ' ')
+            case "$ABIS" in
+              "arm64-v8a ") ABI=arm64 ;;
+              "armeabi-v7a ") ABI=armv7 ;;
+              "x86_64 ") ABI=x86_64 ;;
+              "x86 ") ABI=x86 ;;
               *) ABI=universal ;;
             esac
             NAME="${PRODUCT}-v${VERSION}-android-${ABI}"
