@@ -1,0 +1,21 @@
+#!/bin/sh
+# sfmmm version bump hook — 由 `pnpm hooks:install` 安装，源文件 scripts/git-hooks/pre-commit。
+# 每次提交把补丁号 +1 并加入本次提交；合并提交、纯版本改动、SFMMM_SKIP_VERSION_BUMP=1 时跳过。
+set -e
+
+ROOT=$(git rev-parse --show-toplevel)
+cd "$ROOT"
+
+[ "${SFMMM_SKIP_VERSION_BUMP:-0}" = "1" ] && exit 0
+[ -f "$(git rev-parse --git-dir)/MERGE_HEAD" ] && exit 0
+
+changed=$(git diff --cached --name-only)
+[ -z "$changed" ] && exit 0
+
+# 只提交版本文件本身时不再自增（避免 amend 或手工升版时连跳两级）
+if ! printf '%s\n' "$changed" | grep -qvE '^(src-tauri/Cargo\.toml|src-tauri/tauri\.conf\.json|src/version\.js)$'; then
+  exit 0
+fi
+
+node "$ROOT/scripts/bump-version.mjs"
+git add -- src-tauri/Cargo.toml src-tauri/tauri.conf.json src/version.js

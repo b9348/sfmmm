@@ -11,6 +11,8 @@
     "preview": "vite preview",
     "tauri": "node scripts/tauri.mjs",
     "release": "node scripts/release-local.mjs",
+    "version:bump": "node scripts/bump-version.mjs",
+    "hooks:install": "node scripts/install-git-hooks.mjs",
     "quark": "node scripts/quark.mjs",
     "baidu": "node scripts/baidu.mjs",
     "clean:target": "node scripts/clean-target.mjs"
