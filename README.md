@@ -217,11 +217,14 @@ PUBLIC_BASE_URL=https://api.example.com
 ```
 
 Desktop side（桌面端）: `src-tauri/.env` only contains public config such as the
-legacy image-bed host, mirror, release-script credentials and `GITHUB_REPO`.
-See `src-tauri/.env.example`.
+cloud API base (`SFMMM_API_BASE`), legacy image-bed host, mirror, release-script
+credentials and `GITHUB_REPO`. See `src-tauri/.env.example`.
 
 服务端配置见 `server/.env.example`；桌面端 `src-tauri/.env` 只保留公开/发布脚本配置，
 不再包含数据库密码与字段加密密钥。部署与数据库迁移详见 `server/README.md`。
+
+前端分发配置（更新清单、前置包下载点、致谢名单）见根目录 `.env.example`；CI 从仓库
+Variables / Secrets 注入同名变量，未配置的分发项会自动从界面隐藏。
 
 `src-tauri/.env.example` を参照してください。
 

@@ -24,8 +24,14 @@ fn main() {
         }
     }
 
-    // 全部为公开信息，直接注入
-    for name in ["IMGBED_URL", "IMGBED_MIRROR_URL", "IMGBED_LINE3_URL", "GITHUB_REPO"] {
+    // 全部为公开配置，直接注入（不含任何密钥/个人域名）
+    for name in [
+        "IMGBED_URL",
+        "IMGBED_MIRROR_URL",
+        "IMGBED_LINE3_URL",
+        "GITHUB_REPO",
+        "SFMMM_API_BASE",
+    ] {
         if let Some(value) = vars.get(name) {
             println!("cargo:rustc-env={name}={value}");
         }

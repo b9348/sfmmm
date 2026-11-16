@@ -114,7 +114,11 @@ fn ws_url_from(base: &str) -> Result<reqwest::Url, String> {
 }
 
 fn ws_url() -> Result<reqwest::Url, String> {
-    ws_url_from(&crate::api::base_url())
+    let base = crate::api::base_url();
+    if base.is_empty() {
+        return Err("未配置云 API 基址：请在 src-tauri/.env 设置 SFMMM_API_BASE".to_string());
+    }
+    ws_url_from(&base)
 }
 
 fn emit_state(state: &str, retry: Option<Duration>) {

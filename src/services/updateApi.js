@@ -7,7 +7,7 @@ import { setConfig } from './dbHelper'
 import { cdnUrl } from './cdnApi'
 
 // 版本清单固定 URL（图床公开文件，CI 发版时删旧传新维护；无需认证）
-// 构建时通过环境变量注入，例如：VITE_LATEST_URL=https://img.example.com/file/sfm/installer/latest.json
+// 构建时通过环境变量注入，例如：VITE_LATEST_URL=https://cdn.example.com/file/sfm/installer/latest.json
 const LATEST_URL = import.meta.env.VITE_LATEST_URL
 
 // 备用更新源：GitHub Releases latest（公开仓库，无需认证）。

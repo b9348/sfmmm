@@ -336,6 +336,8 @@ export function ModList({ config, onUninstall }) {
   const bepinexPoints = PREREQ_DOWNLOAD_POINTS.bepinex
   const installBepInEx = useCallback(async (url) => {
     if (!gamePath) return
+    const targetUrl = url || bepinexPoints[0]?.url
+    if (!targetUrl) return
     setInstallingBepInEx(true)
     setBepInExProgress(0)
     setBepInExDownloaded(0)
@@ -345,7 +347,7 @@ export function ModList({ config, onUninstall }) {
     setError('')
     try {
       const result = await invoke('db_install_bepinex', {
-        url: url || bepinexPoints[0].url,
+        url: targetUrl,
       })
       // 命中进行中任务时返回 deduplicated=true，同样接管其进度
       bepInExTaskIdRef.current = result.taskId

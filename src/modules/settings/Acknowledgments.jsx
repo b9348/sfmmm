@@ -4,7 +4,10 @@ import { makeStyles, tokens } from '@fluentui/react-components'
 import { useTranslation } from 'react-i18next'
 import { invoke } from '@tauri-apps/api/core'
 
-const ACKNOWLEDGMENTS_URL = 'https://img.example.com/file/sfm/thanks/acknowledgments.md'
+// 感谢名单地址不写死：由根目录 .env 的 VITE_IMGBED_URL（自有分发域名）构建期注入，
+// 未配置时整个卡片不渲染。
+const IMGBED_BASE = (import.meta.env.VITE_IMGBED_URL || '').trim().replace(/\/+$/, '')
+const ACKNOWLEDGMENTS_URL = IMGBED_BASE ? `${IMGBED_BASE}/file/sfm/thanks/acknowledgments.md` : ''
 const CACHE_KEY = 'acknowledgments_cache'
 
 /** Markdown 中语言标题到 i18n 语言代码的映射 */
@@ -142,6 +145,7 @@ export function Acknowledgments() {
   })
 
   useEffect(() => {
+    if (!ACKNOWLEDGMENTS_URL) return
     let cancelled = false
 
     // 第二步：通过 Rust reqwest 静默拉取最新内容（无 WebView 缓存）
@@ -164,6 +168,9 @@ export function Acknowledgments() {
 
     return () => { cancelled = true }
   }, [hydrated])
+
+  // 未配置分发域名：整个卡片不渲染（避免发一个空地址的请求）
+  if (!ACKNOWLEDGMENTS_URL) return null
 
   const currentLang = i18n.language?.startsWith('ja') ? 'ja' : i18n.language?.startsWith('en') ? 'en' : 'zh'
   const section = data?.find((s) => s.lang === currentLang)

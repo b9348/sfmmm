@@ -1,5 +1,6 @@
 //! 云 API 客户端：桌面端不再直连 MySQL，所有云库操作经本地 Tauri 命令代理到
-//! `https://api.example.com/api/user`（可用 `SFMMM_API_BASE` 覆盖）。
+//! `${SFMMM_API_BASE}`（构建期从 `src-tauri/.env` 注入，运行时同名环境变量可覆盖）。
+//! 基址不在代码里写死：构建或运行为空时会直接报「未配置」错误。
 //!
 //! 登录令牌只保存在 Rust 侧（应用配置目录的 `api_token` 文件），前端页面
 //! 通过 Tauri command 间接使用，拿不到令牌本身。
@@ -13,7 +14,6 @@ use std::time::Duration;
 
 use crate::db::{db_err, ApiResponse, DbErrorKind};
 
-const DEFAULT_API_BASE: &str = "https://api.example.com/api/user";
 const TOKEN_FILE: &str = "api_token";
 
 static TOKEN: OnceLock<Mutex<Option<String>>> = OnceLock::new();
@@ -61,12 +61,30 @@ fn upload_http() -> &'static reqwest::Client {
     })
 }
 
+/// 云 API 基址：运行时 `SFMMM_API_BASE` 优先，其次构建期注入的同名变量；都为空返回空串。
+/// 这样仓库/文档里不再出现真实域名，用自己的服务端只需在 `.env` 里填一次。
 pub fn base_url() -> String {
+    let pick = |raw: String| {
+        let t = raw.trim().trim_end_matches('/').to_string();
+        if t.is_empty() { None } else { Some(t) }
+    };
     std::env::var("SFMMM_API_BASE")
         .ok()
-        .map(|s| s.trim().trim_end_matches('/').to_string())
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| DEFAULT_API_BASE.to_string())
+        .and_then(pick)
+        .or_else(|| option_env!("SFMMM_API_BASE").and_then(|s| pick(s.to_string())))
+        .unwrap_or_default()
+}
+
+/// 取基址，未配置时给出可操作的错误（不再拼出相对 URL 让 reqwest 报天书）。
+fn require_base() -> Result<String, String> {
+    let base = base_url();
+    if base.is_empty() {
+        return Err(db_err(
+            DbErrorKind::Network,
+            "未配置云 API 基址：请在 src-tauri/.env 设置 SFMMM_API_BASE".to_string(),
+        ));
+    }
+    Ok(base)
 }
 
 /// 启动时调用：记录配置目录并恢复上次保存的令牌。
@@ -154,7 +172,7 @@ pub async fn rpc_raw_etag(
     if crate::db::offline_dev() {
         return Err(crate::db::offline_dev_err());
     }
-    let url = format!("{}/rpc/{command}", base_url());
+    let url = format!("{}/rpc/{command}", require_base()?);
     // 传输信封：密钥可用时请求体整体加密；信封本身即「新版客户端」能力标记，
     // 服务端据此决定是否加密响应（旧版客户端始终收到明文，完全兼容）。
     let body = crate::xport::seal_args(&args).unwrap_or_else(|| args.clone());
@@ -260,7 +278,7 @@ pub async fn rpc_data<T: DeserializeOwned>(command: &str, args: Value) -> Result
 
 /// 校验服务端健康状态（信号灯 / 诊断用）。
 pub async fn health() -> Result<Value, String> {
-    let url = format!("{}/health", base_url());
+    let url = format!("{}/health", require_base()?);
     let resp = http().get(url).send().await.map_err(|e| {
         db_err(
             DbErrorKind::Network,
@@ -309,9 +327,10 @@ async fn upload_file_direct(
     total: u64,
     on_progress: Option<UploadProgressFn>,
 ) -> Result<Option<ApiResponse>, String> {
+    let base = require_base()?;
     let payload = serde_json::json!({ "name": file_name, "size": total, "folder": folder });
     let mut req = upload_http()
-        .post(format!("{}/upload/presign", base_url()))
+        .post(format!("{base}/upload/presign"))
         .timeout(Duration::from_secs(30))
         .json(&payload);
     if let Some(tok) = token() {
@@ -382,7 +401,7 @@ async fn upload_file_direct(
     }
 
     let mut req = upload_http()
-        .post(format!("{}/upload/complete", base_url()))
+        .post(format!("{base}/upload/complete"))
         .timeout(Duration::from_secs(60))
         .json(&serde_json::json!({ "object_key": object_key }));
     if let Some(tok) = token() {
@@ -406,8 +425,11 @@ async fn upload_file_direct(
 
 /// 直传失败/取消时尽力清理服务端预占与半成品对象（失败不影响主流程报错）。
 async fn abandon_direct_upload(object_key: &str) {
+    let Ok(base) = require_base() else {
+        return;
+    };
     let mut req = upload_http()
-        .post(format!("{}/upload/abandon", base_url()))
+        .post(format!("{base}/upload/abandon"))
         .timeout(Duration::from_secs(15))
         .json(&serde_json::json!({ "object_key": object_key }));
     if let Some(tok) = token() {
@@ -486,7 +508,7 @@ pub async fn upload_file(
     }
     let form = form.part("file", part);
 
-    let url = format!("{}/upload", base_url());
+    let url = format!("{}/upload", require_base()?);
     let mut req = upload_http().post(url).multipart(form);
     if let Some(tok) = token() {
         req = req.bearer_auth(tok);
