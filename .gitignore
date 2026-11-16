@@ -54,6 +54,7 @@ agent-ssh-cli-*.lock
 # 夸克 CLI 的登录态与缓存（config.json 含 access_token，绝不入库）
 scripts/vendor/*/config.json
 scripts/vendor/*/config/
+scripts/vendor/quark/workbuddy/
 # bdpan CLI 二进制按机器安装（pnpm baidu install），不随仓库携带
 scripts/vendor/baidu/bin/
 scripts/vendor/*/storage/

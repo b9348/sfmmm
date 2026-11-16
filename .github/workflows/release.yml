@@ -242,6 +242,7 @@ jobs:
           name: nsis-installer
           path: src-tauri/target/release/bundle/nsis/*.exe
           if-no-files-found: error
+          retention-days: 1
 
   build-android:
     name: Build Android APK (arm64)
@@ -474,6 +475,7 @@ jobs:
           name: sfmmm-android-v${{ needs.preflight.outputs.version }}
           path: src-tauri/target/release/apk/*.apk
           if-no-files-found: error
+          retention-days: 1
 
   release:
     name: Publish Release
@@ -482,6 +484,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      actions: write
 
     steps:
       - name: Checkout
@@ -563,3 +566,25 @@ jobs:
           fi
           echo "Cloud version config updated to v${NEW_VERSION}"
           echo "::endgroup::"
+
+      - name: Clean old Actions artifacts
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const artifacts = await github.paginate(github.rest.actions.listArtifactsForRepo, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              per_page: 100,
+            });
+            let deleted = 0;
+            for (const artifact of artifacts) {
+              if (artifact.workflow_run?.id === context.runId) continue;
+              await github.rest.actions.deleteArtifact({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                artifact_id: artifact.id,
+              });
+              deleted += 1;
+            }
+            core.info(`Deleted ${deleted} old Actions artifacts`);
