@@ -97,5 +97,6 @@ incremental = false
 # 桌面安装包同样受益。
 [profile.release]
 strip = true
-lto = "thin"
+lto = true
 codegen-units = 1
+opt-level = "s"
