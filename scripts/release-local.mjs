@@ -38,7 +38,8 @@
  *
  * 配置全部取自本地文件或环境变量：
  *   src-tauri/.env → IMGBED_URL（仅发布脚本拼公开直链用）、DB_URL（源库直连地址，用于更新源库 version_config；可用 SFMMM_SRC_DB_URL 覆盖）
- *   SFMMM_CLOUD_ENV → 指向 AxumVue 仓的 server/.env，取 PUBLIC_BASE_URL / ADMIN_TOKEN / SFMMM_RELEASE_BASE / R2_*
+ *   SFMMM_CLOUD_ENV → 指向 AxumVue 仓**根目录**的 .env（服务端已上移到仓根，不再是 server/.env），
+ *                     取 PUBLIC_BASE_URL / ADMIN_TOKEN / SFMMM_RELEASE_BASE / R2_*
  *                     （也可直接用同名环境变量 SFMMM_RELEASE_BASE / SFMMM_ADMIN_TOKEN / R2_* 提供）
  *   .env           → VITE_LATEST_URL（构建时注入前端，同时作为清单回读地址）
  */
@@ -820,10 +821,10 @@ function checkConfig() {
     throw new Error('缺少图床公开地址：请在 src-tauri/.env 配置 IMGBED_URL')
   }
   if (!RELEASE_BASE) {
-    throw new Error('缺少发版网关地址：请在 server/.env 配置 SFMMM_RELEASE_BASE（或设同名环境变量）')
+    throw new Error('缺少发版网关地址：请用 SFMMM_CLOUD_ENV 指向 AxumVue 仓根目录的 .env（其中含 SFMMM_RELEASE_BASE），或直接设同名环境变量')
   }
   if (!ADMIN_TOKEN) {
-    throw new Error('缺少发版网关令牌：请在 server/.env 配置 ADMIN_TOKEN（或设 SFMMM_ADMIN_TOKEN）')
+    throw new Error('缺少发版网关令牌：请用 SFMMM_CLOUD_ENV 指向 AxumVue 仓根目录的 .env（其中含 ADMIN_TOKEN），或设 SFMMM_ADMIN_TOKEN')
   }
   if (!noDb && !dryRun && (!ADMIN_TOKEN || !PUBLIC_BASE_URL)) {
     throw new Error('缺少服务端配置：请设置 SFMMM_PUBLIC_BASE_URL / SFMMM_ADMIN_TOKEN（或用 --no-db 跳过）')
