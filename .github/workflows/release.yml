@@ -36,6 +36,8 @@ jobs:
       - name: Validate version and tag
         id: version
         shell: bash
+        env:
+          DRY_RUN: ${{ inputs.dry_run }}
         run: |
           set -euo pipefail
           VERSION=$(node -p "require('./src-tauri/tauri.conf.json').version")
@@ -60,7 +62,7 @@ jobs:
             fi
           fi
 
-          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ] && [ "${DRY_RUN:-false}" != "true" ]; then
             REMOTE_TAG_SHA=$(git ls-remote origin "refs/tags/$TAG" | awk '{print $1}')
             if [ -n "$REMOTE_TAG_SHA" ]; then
               if [ "$REMOTE_TAG_SHA" != "$(git rev-parse HEAD)" ]; then
