@@ -31,6 +31,9 @@ import { ModCard } from './ModCard'
 import { commentIdFromHash, consumeEntryPoint, discardEntryPoint, peekEntryPoint, restoreScroll } from '../../utils/navReturn'
 import { isDetailHash, previousView, restoreView } from '../../utils/navHistory'
 
+// 列表页可选的排序值；旧的 rating / published_at 会被归一化回「最近更新」
+const BROWSE_SORT_VALUES = ['created_at', 'likes']
+
 const useStyles = makeStyles({
   root: {
     display: 'flex',
@@ -75,8 +78,13 @@ export function BrowseMods({ initialModId, initialCommentId, onConsumeNavTarget,
   const { t } = useTranslation()
   const { user, isLoggedIn } = useAuth()
   const deviceIdRef = useRef(getDeviceId())
+  // 只读一次原始值：后续持久化 effect 会把 sessionStorage 覆盖成归一化后的 sortBy，
+  // 而排序方向迁移需要在覆盖前判断旧值是否为 rating / published_at。
+  const [savedBrowseSort] = useState(() => sessionStorage.getItem('workshop_browse_sort') || '')
   const [search, setSearch] = useState('')
-  const [sortBy, setSortBy] = useState(() => sessionStorage.getItem('workshop_browse_sort') || 'created_at')
+  const [sortBy, setSortBy] = useState(() => (
+    BROWSE_SORT_VALUES.includes(savedBrowseSort) ? savedBrowseSort : 'created_at'
+  ))
   // 时间正/倒序：desc（新→旧，默认）| asc（旧→新），持久化到 sqlite config 表
   const [sortOrder, setSortOrder] = useState('desc')
   const [categoryFilter, setCategoryFilter] = useState('')
@@ -432,11 +440,22 @@ export function BrowseMods({ initialModId, initialCommentId, onConsumeNavTarget,
       try {
         const value = await getConfig('workshop_browse_sort_order')
         if (value === 'asc' || value === 'desc') {
-          setSortOrder(value)
+          const savedSort = savedBrowseSort
+          // 空值表示没有历史排序选择，不触发迁移，保留已持久化的方向偏好
+          const savedSortWasLegacy = savedSort !== '' && !BROWSE_SORT_VALUES.includes(savedSort)
+          const effectiveOrder = savedSortWasLegacy ? 'desc' : value
+          setSortOrder(effectiveOrder)
+          if (savedSortWasLegacy && value !== 'desc') {
+            // 旧排序值已归一化为「最近更新」，持久化的 asc 一并重置，
+            // 避免下次启动时又回到「最早在前」。
+            setConfig('workshop_browse_sort_order', 'desc').catch((e) => {
+              console.warn('[BrowseMods] 归一化时间排序方向失败:', e)
+            })
+          }
           // 恢复的方向非默认时立即按该方向拉取：
           // initialFetch 门控不会因 sortOrder 变化重拉，需显式请求才能让持久化偏好生效
-          if (value !== 'desc') {
-            fetchMods(1, search, categoryFilter, sortBy, value, { force: true })
+          if (effectiveOrder !== 'desc') {
+            fetchMods(1, search, categoryFilter, sortBy, effectiveOrder, { force: true })
           }
         }
       } catch (e) {
@@ -683,9 +702,7 @@ export function BrowseMods({ initialModId, initialCommentId, onConsumeNavTarget,
         disabled={loading}
         sortOptions={[
           { value: 'created_at', label: t('workshop.sortRecent') },
-          { value: 'published_at', label: t('workshop.sortNewest') },
           { value: 'likes', label: t('workshop.sortLikes') },
-          { value: 'rating', label: t('workshop.sortRating') },
         ]}
         sortBy={sortBy}
         onSortByChange={(v) => { setSortBy(v); setPage(1); fetchMods(1, search, categoryFilter, v, sortOrder) }}

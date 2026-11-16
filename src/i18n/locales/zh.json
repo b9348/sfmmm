@@ -22,7 +22,7 @@
     "title": "更新说明",
     "gotIt": "知道了",
     "content": {
-      "workshop-sort": "创意工坊排序新增「有编辑」「新发布」两种方式，可按最近编辑或发布时间浏览"
+      "workshop-sort": "创意工坊排序精简为「最近更新」「最多赞」两种方式，按最近发布或编辑时间浏览"
     }
   },
   "window": {
@@ -736,10 +736,8 @@
     "notifTargetMod": "mod - {{name}}",
     "notifTargetDiscussion": "讨论 - {{title}}",
     "sortBy": "排序",
-    "sortRecent": "有编辑",
-    "sortNewest": "新发布",
+    "sortRecent": "最近更新",
     "sortLikes": "最多赞",
-    "sortRating": "评分最高",
     "sortTime": "时间方向",
     "commentSortLabel": "评论排序",
     "replySortLabel": "楼中楼排序",

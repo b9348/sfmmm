@@ -22,7 +22,7 @@
     "title": "更新内容",
     "gotIt": "OK",
     "content": {
-      "workshop-sort": "クリエイティブ工房の並び替えに「編集あり」「新規公開」を追加しました"
+      "workshop-sort": "クリエイティブ工房の並び替えを「最近更新」「いいね順」の2種類に統合しました"
     }
   },
   "window": {
@@ -736,10 +736,8 @@
     "notifTargetMod": "mod「{{name}}」",
     "notifTargetDiscussion": "ディスカッション「{{title}}」",
     "sortBy": "並び替え",
-    "sortRecent": "編集あり",
-    "sortNewest": "新規公開",
+    "sortRecent": "最近更新",
     "sortLikes": "いいね順",
-    "sortRating": "評価が高い順",
     "sortTime": "時間順",
     "commentSortLabel": "コメント順",
     "replySortLabel": "ネスト返信順",

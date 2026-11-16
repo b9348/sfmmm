@@ -22,7 +22,7 @@
     "title": "What's New",
     "gotIt": "Got it",
     "content": {
-      "workshop-sort": "Workshop sorting now offers \"Edited\" and \"Newly published\" to browse by latest edit or publish time"
+      "workshop-sort": "Workshop sorting now offers \"Recently updated\" and \"Most likes\", ordered by latest publish or edit time"
     }
   },
   "window": {
@@ -736,10 +736,8 @@
     "notifTargetMod": "mod \"{{name}}\"",
     "notifTargetDiscussion": "discussion \"{{title}}\"",
     "sortBy": "Sort by",
-    "sortRecent": "Edited",
-    "sortNewest": "Newly published",
+    "sortRecent": "Recently updated",
     "sortLikes": "Most likes",
-    "sortRating": "Top rated",
     "sortTime": "Time order",
     "commentSortLabel": "Comments",
     "replySortLabel": "Nested replies",

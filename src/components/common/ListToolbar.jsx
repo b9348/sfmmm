@@ -55,8 +55,10 @@ export function ListToolbar({
 }) {
   const { t } = useTranslation()
   const styles = useStyles()
-  // 时间正/倒序仅对时间类排序有意义，指标排序（点赞/评分等）固定降序
-  const timeSortEnabled = sortBy === 'created_at' || sortBy === 'published_at'
+  // 时间正/倒序仅对「最近更新」有意义，指标排序（点赞等）固定降序
+  const timeSortEnabled = sortBy === 'created_at'
+  // 非时间排序时服务端固定降序，显示值同步为 desc，避免展示不生效的 asc
+  const displayedSortOrder = timeSortEnabled ? sortOrder : 'desc'
 
   return (
     <Card className={styles.toolbarCard}>
@@ -93,7 +95,7 @@ export function ListToolbar({
           <Text size="small">{t('workshop.sortTime')}</Text>
           <Select
             size="small"
-            value={sortOrder}
+            value={displayedSortOrder}
             onChange={(_, d) => onSortOrderChange(d.value)}
             disabled={disabled || !timeSortEnabled}
           >

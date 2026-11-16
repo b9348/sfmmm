@@ -602,9 +602,7 @@ export function Discussion({ active = true, onNewContent }) {
         disabled={loading}
         sortOptions={[
           { value: 'created_at', label: t('workshop.sortRecent') },
-          { value: 'published_at', label: t('workshop.sortNewest') },
           { value: 'likes', label: t('workshop.sortLikes') },
-          { value: 'boosts', label: t('discussion.boostCount', { count: '' }) },
         ]}
         sortBy={sortBy}
         onSortByChange={(v) => { setSortBy(v); setPage(1); fetchList(1, search, v, sortOrder, { force: true }) }}
