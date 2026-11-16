@@ -45,6 +45,7 @@ import { BOTTOM_TOASTER_ID } from '../common/BottomToaster'
 import { useUserNav } from '../../contexts/useUserNav'
 import { useNotification } from '../../contexts/NotificationContext'
 import { useV2PrereqNotice } from '../../contexts/useV2PrereqNotice'
+import { usePlatform } from '../../hooks/usePlatform'
 import { getConfig } from '../../services/dbHelper'
 import { blockInvalidPath } from '../../services/pathCheck'
 // 走具体文件路径而非 '../../components' 桶文件：侧栏是首屏常驻组件，桶文件会把
@@ -69,6 +70,8 @@ export function TabNavigation({ value, onChange, isCollapsed, onToggleCollapse, 
   const { dispatchToast } = useToastController(BOTTOM_TOASTER_ID)
   const { openUser } = useUserNav()
   const { unread, refreshUnread } = useNotification()
+  // APK 分支：手机端纯社区模式，不提供本地模组/存档、启动游戏、订阅记录
+  const { isMobile } = usePlatform()
   // v2 前置版本提醒（启动游戏时触发，见 V2PrereqNoticeProvider）
   const v2Notice = useV2PrereqNotice()
   const [authOpen, setAuthOpen] = useState(false)
@@ -110,7 +113,9 @@ export function TabNavigation({ value, onChange, isCollapsed, onToggleCollapse, 
   }, [value])
 
   const menuItems = [
-    {
+    // 本地模组（含存档）整组是桌面独占：手机端没有游戏目录、不能解压安装，
+    // 也就不展示这一项及其子菜单
+    ...(isMobile ? [] : [{
       value: 'localmods',
       label: t('nav.localmods'),
       icon: <BoxMultiple24Regular />,
@@ -122,19 +127,20 @@ export function TabNavigation({ value, onChange, isCollapsed, onToggleCollapse, 
         { value: 'localmods:v2', label: t('nav.v2'), icon: <Code24Regular /> },
         { value: 'localmods:saves', label: t('nav.saves'), icon: <Save24Regular /> },
       ],
-    },
+    }]),
     // { value: 'import-export', label: '导入/导出', icon: <ArrowSwap24Regular /> },
     {
       value: 'workshop',
       label: t('nav.workshop'),
       icon: <Cloud24Regular />,
       // 子菜单对应创意工坊页面顶部 tab（browse/discuss/my/records），
-      // 图标与 Workshop 页面 TabList 保持一致
+      // 图标与 Workshop 页面 TabList 保持一致。
+      // 「订阅记录」依赖桌面下载安装任务表，手机端不展示
       children: [
         { value: 'workshop:browse', label: t('workshop.cloud'), icon: <Cloud24Regular /> },
         { value: 'workshop:discuss', label: t('nav.discuss'), icon: <Comment24Regular /> },
         { value: 'workshop:my', label: t('workshop.mine'), icon: <Person24Regular /> },
-        { value: 'workshop:records', label: t('nav.subscriptions'), icon: <ArrowSync24Regular /> },
+        ...(isMobile ? [] : [{ value: 'workshop:records', label: t('nav.subscriptions'), icon: <ArrowSync24Regular /> }]),
       ],
     },
     {
@@ -174,10 +180,11 @@ export function TabNavigation({ value, onChange, isCollapsed, onToggleCollapse, 
     },
   ]
 
-  // 底部菜单：启动游戏紧跟设置，底部顺序为 启动游戏 → 设置 → 版本号
-  const footerMenuItems = [
-    { value: LAUNCH_VALUE, label: t('nav.launchGame'), icon: <Play24Regular /> },
-  ]
+  // 底部菜单：启动游戏紧跟设置，底部顺序为 启动游戏 → 设置 → 版本号。
+  // 手机端不能启动 PC 游戏（launch_game 走桌面 exe），整项去掉
+  const footerMenuItems = isMobile
+    ? []
+    : [{ value: LAUNCH_VALUE, label: t('nav.launchGame'), icon: <Play24Regular /> }]
 
   const handleLogout = () => {
     logout()
@@ -283,11 +290,11 @@ export function TabNavigation({ value, onChange, isCollapsed, onToggleCollapse, 
       role="button"
       tabIndex={0}
       className="winnv-item"
-      title={isCollapsed ? t('nav.loginRegister') : undefined}
+      title={isCollapsed ? (isMobile ? t('workshop.login') : t('nav.loginRegister')) : undefined}
       onClick={() => { setAuthOpen(true) }}
     >
       <span className="winnv-icon winnv-icon-node"><Person24Regular /></span>
-      <span className="winnv-label">{t('nav.loginRegister')}</span>
+      <span className="winnv-label">{isMobile ? t('workshop.login') : t('nav.loginRegister')}</span>
     </div>
   )
 

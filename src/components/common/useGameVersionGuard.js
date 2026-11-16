@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { getGamePath } from '../../services/dbHelper'
+import { usePlatform } from '../../hooks/usePlatform'
 
 // 进程内缓存：同一 game_path 的 ok/unknown 结果复用（解析含解压操作，虽只读 <1MB 但免重复 IO）。
 // blocked 不缓存——用户在设置页升级/换目录后必须能立刻解除提示；game_path 变更天然使缓存失效。
@@ -14,8 +15,13 @@ let cache = { gamePath: null, result: null }
  * @returns {{ status: 'checking'|'allowed'|'blocked', version: string|null, required: string }}
  */
 export function useGameVersionGuard() {
-  const [gate, setGate] = useState({ status: 'checking', version: null, required: '' })
+  // 手机端没有游戏目录，版本校验也没有意义：直接按 allowed 起步且不发 invoke
+  const { isMobile } = usePlatform()
+  const [gate, setGate] = useState(() => (isMobile
+    ? { status: 'allowed', version: null, required: '' }
+    : { status: 'checking', version: null, required: '' }))
   useEffect(() => {
+    if (isMobile) return
     let cancelled = false
     ;(async () => {
       try {
@@ -42,6 +48,6 @@ export function useGameVersionGuard() {
       }
     })()
     return () => { cancelled = true }
-  }, [])
+  }, [isMobile])
   return gate
 }

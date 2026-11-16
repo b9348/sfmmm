@@ -370,6 +370,8 @@
     "pageInput": "页码",
     "register": "注册账号",
     "login": "登录",
+    "registerOnPc": "注册账号请在 PC 端完成",
+    "mobileBrowseOnly": "手机端仅支持浏览，安装 / 订阅请在 PC 端操作",
     "loginHint": "登录后可管理你的模组",
     "username": "用户名",
     "password": "密码",

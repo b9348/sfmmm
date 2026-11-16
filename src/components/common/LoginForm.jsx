@@ -4,11 +4,14 @@ import { Input, Button, Text, tokens, Tooltip, Dialog, DialogSurface, DialogBody
 import { login, register } from '../../services/workshopApi'
 import { useAuth } from '../../contexts/useAuth'
 import { getAvatarUrl, getAllAvatars } from '../../utils/avatars'
+import { usePlatform } from '../../hooks/usePlatform'
 
 export function LoginForm({ onSuccess, defaultIsRegister }) {
   const { t } = useTranslation()
   const { loginSuccess } = useAuth()
-  const [isRegister, setIsRegister] = useState(() => !!defaultIsRegister)
+  // 手机端只允许登录：注册要填头像、要方便输入长用户名，产品上统一引导到 PC 端
+  const { isMobile } = usePlatform()
+  const [isRegister, setIsRegister] = useState(() => (isMobile ? false : !!defaultIsRegister))
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
@@ -90,14 +93,21 @@ export function LoginForm({ onSuccess, defaultIsRegister }) {
         {error && (
           <Text size="small" style={{ color: tokens.colorPaletteRedForeground1 }}>{error}</Text>
         )}
+        {isMobile && (
+          <Text size="small" style={{ color: tokens.colorNeutralForeground2, fontStyle: 'italic' }}>
+            {t('workshop.registerOnPc')}
+          </Text>
+        )}
       </div>
       <div style={{ display: 'flex', gap: '6px', marginTop: '8px' }}>
         <Button size="small" appearance="primary" onClick={handleSubmit} disabled={busy}>
           {busy ? t('workshop.processing') : isRegister ? t('workshop.registerBtn') : t('workshop.login')}
         </Button>
-        <Button size="small" appearance="subtle" onClick={() => { setIsRegister(!isRegister); setError(''); setSelectedAvatar(null) }}>
-          {isRegister ? t('workshop.hasAccount') : t('workshop.noAccount')}
-        </Button>
+        {!isMobile && (
+          <Button size="small" appearance="subtle" onClick={() => { setIsRegister(!isRegister); setError(''); setSelectedAvatar(null) }}>
+            {isRegister ? t('workshop.hasAccount') : t('workshop.noAccount')}
+          </Button>
+        )}
       </div>
     </>
   )

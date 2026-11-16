@@ -13,6 +13,7 @@ import { cdnUrl } from '../../../services/cdnApi'
 import { copyText } from '../../../services/ndmApi'
 import { localizeError } from '../../../utils/localizeError'
 import { compareSemver, normalizeManifestFiles, openDirHighlightItems } from './modFileUtils'
+import { usePlatform } from '../../../hooks/usePlatform'
 
 const useStyles = makeStyles({
   // 版本行的操作区：宽屏用 display:contents 直接当 FileRow 单行里的 flex 项（布局不变）；
@@ -82,6 +83,9 @@ export function ModFileRow({
 }) {
   const styles = useStyles()
   const { t } = useTranslation()
+  // APK 分支：手机端只做浏览/评论，安装、仅下载、退订这些要读写游戏目录的动作
+  // 全部不出现，改由一行说明引导回 PC 端
+  const { isMobile } = usePlatform()
   // 「查看文件列表」只展示文件：目录条目（末尾 /）与安装根前缀都在这里归一掉
   const previewFiles = normalizeManifestFiles(file.manifest, category, modKey)
   // 下载直链按当前生效线路改写（设置里启用 CDN 加速时换成加速域名）
@@ -101,7 +105,7 @@ export function ModFileRow({
       name={file.file_name}
       version={file.version}
       fileSize={file.file_size}
-      footer={downloadUrl ? (
+      footer={downloadUrl && !isMobile ? (
         // 点击同时复制直链并交给系统浏览器：复制供外部下载器用，打开浏览器可手动下载
         <div className={styles.downloadRow}>
           <Text className={styles.downloadLabel}>{t('workshop.downloadLink')}:</Text>
@@ -122,11 +126,15 @@ export function ModFileRow({
       ) : null}
     >
       <div className={styles.actions}>
-        {installed && (
+        {installed && !isMobile && (
           <Text className={styles.meta}>
             {t('workshop.localVersion', { version: installed.installed_version })}
           </Text>
         )}
+        {isMobile && (
+          <Text className={styles.meta}>{t('workshop.mobileBrowseOnly')}</Text>
+        )}
+        {!isMobile && (<>
         <Button
           size="small"
           icon={<ArrowDownload24Regular />}
@@ -238,6 +246,7 @@ export function ModFileRow({
                 失败原因由详情页统一抬到页面级 NoticeBar（浮条 8s 后自动关闭，错过就找不到了） */}
           </div>
         )}
+        </>)}
         {/* 未安装时也能预览将要写入的文件列表（来自发布者上传的 manifest） */}
         {!installed && previewFiles.length > 0 && (
           <Popover withArrow positioning="below-start">
@@ -260,7 +269,7 @@ export function ModFileRow({
             </PopoverSurface>
           </Popover>
         )}
-        {isInstalled && (
+        {isInstalled && !isMobile && (
           <>
             <Button
               size="small"

@@ -8,6 +8,7 @@ import {
   SquareMultipleRegular,
   SubtractRegular,
 } from '@fluentui/react-icons'
+import { usePlatform } from '../hooks/usePlatform'
 
 const useStyles = makeStyles({
   titleBar: {
@@ -89,9 +90,13 @@ const useStyles = makeStyles({
 export function TitleBar() {
   const styles = useStyles()
   const { t } = useTranslation()
+  // 手机端没有桌面窗口控制（最小化/最大化/关闭），窗口 API 也会拒绝调用
+  const { isMobile } = usePlatform()
   const [isMaximized, setIsMaximized] = useState(false)
 
   useEffect(() => {
+    if (isMobile) return
+
     const checkMaximized = async () => {
       const appWindow = getCurrentWindow()
       const maximized = await appWindow.isMaximized()
@@ -108,7 +113,10 @@ export function TitleBar() {
     return () => {
       unlisten.then((fn) => fn())
     }
-  }, [])
+  }, [isMobile])
+
+  // 手机端整条标题栏不渲染：无边框窗口控制只属于桌面端，系统状态栏已占顶部
+  if (isMobile) return null
 
   const handleMinimize = async () => {
     const appWindow = getCurrentWindow()

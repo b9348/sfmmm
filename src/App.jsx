@@ -1,7 +1,7 @@
 import { useState, useEffect, useReducer, useRef, useCallback, lazy, Suspense } from 'react'
 import { listen } from '@tauri-apps/api/event'
 import { FluentProvider, webLightTheme, webDarkTheme, Dialog, DialogSurface, DialogBody, DialogTitle, DialogContent, DialogActions, DialogTrigger, Button, Text, Toaster, Spinner } from '@fluentui/react-components'
-import { makeStyles, tokens } from '@fluentui/react-components'
+import { makeStyles, mergeClasses, tokens } from '@fluentui/react-components'
 // 常驻骨架组件走具体文件路径，不经 `./components` 桶文件：桶文件 re-export 了
 // components 目录下全部组件，会把只被页面用到的弹窗/表单也拉进首屏模块图。
 import { TabNavigation } from './components/layout/TabNavigation'
@@ -33,6 +33,7 @@ import { NarrowMenuButton } from './components/common/NarrowMenuButton'
 import { NarrowNavProvider } from './contexts/NarrowNavContext.jsx'
 import { usePersistUI } from './hooks/usePersistUI'
 import { useMediaQuery } from './hooks/useMediaQuery'
+import { usePlatform } from './hooks/usePlatform'
 import { getConfigs, setConfig } from './services/dbHelper'
 import { checkVersion, applyUpdate, prepareUpdate, getUpdateStatus, armPendingUpdate } from './services/updateApi'
 import { isInBackoff, canAutoApply } from './services/updatePolicy'
@@ -53,6 +54,12 @@ const useStyles = makeStyles({
     height: '100vh',
     width: '100vw',
     overflow: 'hidden',
+  },
+  // 手机端 WebView 是边到边绘制：状态栏区域的触摸会被系统下拉通知栏截走，
+  // 顶部 tabs / 汉堡会点不到。至少留出一个状态栏高度；有刘海/挖孔时用系统安全区。
+  mobileRoot: {
+    paddingTop: 'max(env(safe-area-inset-top, 0px), 24px)',
+    backgroundColor: tokens.colorNeutralBackground2,
   },
   appShell: {
     display: 'flex',
@@ -111,6 +118,9 @@ const initialState = { isFirstRun: null, config: null, sawWelcome: false }
 // 顶层标签集合：导航历史恢复时只接受这些值，避免把脏数据写回 selectedTab
 const NAV_TABS = new Set(['mods', 'saves', 'import-export', 'workshop', 'localmods', 'notify', 'settings'])
 
+// 手机端可用标签：纯社区模式（浏览/讨论/通知/设置），不含任何本地文件操作页
+const MOBILE_TABS = ['workshop', 'notify', 'settings']
+
 // 窄屏顶栏标题：只有「本页没有页签行、汉堡无处可并」的页面才由 App 统一出一行，
 // 有页签的页面（localmods / workshop / notify）自己把汉堡放进页签行，不再额外占一行
 const NARROW_APP_BAR_TITLE = { saves: 'nav.saves', 'import-export': 'nav.importExport', settings: 'nav.settings' }
@@ -135,6 +145,10 @@ function appReducer(state, action) {
 
 function App() {
   const styles = useStyles()
+  // APK 分支：手机端是纯社区模式，只保留 社区/通知/设置 三个标签。
+  // 桌面能力（本地模组、存档、导入导出、下载安装、订阅记录）在移动端既不渲染
+  // 也不发起云查询，相关入口统一由 isMobile 关掉。
+  const { isMobile } = usePlatform()
   const [selectedTab, setSelectedTab] = useState('mods')
   const [navTarget, setNavTarget] = useState(null)
   const { sidebarCollapsed, toggleSidebar } = usePersistUI()
@@ -221,6 +235,9 @@ function App() {
   useEffect(() => {
     let cancelled = false
     const startup = async () => {
+      // 手机端没有 PC 安装包自更新管线（APK 更新走发布页/应用商店），整段跳过：
+      // 既不发检测更新请求，也不碰 pending_update / update_tasks 这些桌面状态
+      if (isMobile) return
       try {
         const info = await checkVersion(APP_VERSION)
         if (cancelled) return
@@ -322,13 +339,15 @@ function App() {
     }
     startup()
     return () => { cancelled = true }
-  }, [])
+  }, [isMobile])
 
   // 静默自动更新：全局监听下载进度。仅处理启动编排自动发起的任务（taskId 匹配）：
   // - ready：经 getUpdateStatus 复核安装包就绪、文件在盘且版本仍为最新版后才写入
   //   pending_update（防陈旧提升，不绕过启动编排的版本校验）
   // - failed：记录失败退避时间戳（手动下载失败不压制自动更新，由设置页展示错误）
   useEffect(() => {
+    // 手机端不参与 PC 安装包静默更新：不监听 update-progress，避免写 pending_update
+    if (isMobile) return
     let cancelled = false
     let unlisten = null
     listen('update-progress', (ev) => {
@@ -354,7 +373,7 @@ function App() {
       else unlisten = fn
     }).catch((e) => console.warn('[Update] 监听更新进度失败:', e))
     return () => { cancelled = true; unlisten?.() }
-  }, [])
+  }, [isMobile])
 
   const { t } = useTranslation()
   const [uninstallTarget, setUninstallTarget] = useState(null)
@@ -402,10 +421,14 @@ function App() {
         const LEGACY_LOCAL_TABS = { mods: 'localmods', v1: 'localmods', v2: 'localmods' }
         // 旧版本 点赞/申请 独立 tab → 新版本统一收纳到 notify
         const LEGACY_NOTIFY_TABS = { likes: 'notify', apply: 'notify' }
-        const validTabs = ['localmods', 'saves', 'import-export', 'workshop', 'notify', 'settings']
+        const validTabs = isMobile
+          ? MOBILE_TABS
+          : ['localmods', 'saves', 'import-export', 'workshop', 'notify', 'settings']
         let restoredTab = configMap.selected_tab
         if (LEGACY_LOCAL_TABS[restoredTab]) restoredTab = LEGACY_LOCAL_TABS[restoredTab]
         if (LEGACY_NOTIFY_TABS[restoredTab]) restoredTab = LEGACY_NOTIFY_TABS[restoredTab]
+        // 手机端残留的桌面 tab（localmods/saves/import-export）一律回落到社区页
+        if (isMobile && !validTabs.includes(restoredTab)) restoredTab = 'workshop'
         if (restoredTab && validTabs.includes(restoredTab)) {
           setSelectedTab(restoredTab)
           // 旧值映射后回写持久化，避免每次启动都走映射
@@ -416,7 +439,11 @@ function App() {
 
         // 游戏目录配好即视为初始化完成。无需再校验 exe_path——它是从 game_path
         // 派生的死字段（启动游戏由 Rust 端 launch_game 自行 join 文件名），已删除。
-        if (configMap.initialized === 'true' || configMap.game_path) {
+        // 手机端没有"游戏目录"概念（也不做本地模组），直接视为已初始化，
+        // 跳过欢迎屏/首启向导，进主界面。
+        if (isMobile) {
+          dispatch({ type: 'INIT_COMPLETE', config: { ...configMap, initialized: 'true' } })
+        } else if (configMap.initialized === 'true' || configMap.game_path) {
           dispatch({ type: 'INIT_COMPLETE', config: { ...configMap, initialized: 'true' } })
         } else {
           dispatch({ type: 'FIRST_RUN' })
@@ -424,7 +451,12 @@ function App() {
       } catch (e) {
         console.error('Failed to initialize app:', e)
         if (isMounted) {
-          dispatch({ type: 'FIRST_RUN' })
+          if (isMobile) {
+            // 读本地配置失败也不能把手机端卡在欢迎屏（那里要选游戏目录）
+            dispatch({ type: 'INIT_COMPLETE', config: { initialized: 'true' } })
+          } else {
+            dispatch({ type: 'FIRST_RUN' })
+          }
         }
       }
     }
@@ -434,7 +466,7 @@ function App() {
     return () => {
       isMounted = false
     }
-  }, [])
+  }, [isMobile])
 
   const handleWelcomeComplete = async (configData) => {
     dispatch({ type: 'WELCOME_COMPLETE', config: configData })
@@ -457,6 +489,8 @@ function App() {
   // 落 effect 再 setState 会多一轮渲染，也命中 react-hooks/set-state-in-effect。
   // 一旦用户点过「知道了」，handleCloseGuide 会写入 guideSeenMap，本表达式随即转 false。
   const shouldShowGuide =
+    // 手机端不弹漫游引导：引导定位的是桌面排序下拉框，社区页在手机上也不常驻
+    !isMobile &&
     state.isFirstRun === false &&
     // 全新安装（走过欢迎屏）不弹更新说明
     !state.sawWelcome &&
@@ -473,7 +507,12 @@ function App() {
 
   // 上面若判定要弹引导，就渲染在工坊页——同样在渲染期推导，与 shouldShowGuide 同源。
   // 首帧 selectedTab 可能仍是上次停留的 tab，故用 shouldShowGuide 覆盖它。
-  const activeTab = shouldShowGuide ? 'workshop' : selectedTab
+  // 手机端兜底：持久化下来的桌面 tab 一律回落到社区页（侧栏也不会再给出那些入口）
+  const activeTab = shouldShowGuide
+    ? 'workshop'
+    : isMobile && !MOBILE_TABS.includes(selectedTab)
+      ? 'workshop'
+      : selectedTab
 
   // 导航历史：每次页面停留（标签 + hash）都对齐栈游标，侧键前进/后退按栈恢复。
   // 详情页的开关本身由各详情组件的 hashchange 处理，这里只负责记账，
@@ -504,7 +543,9 @@ function App() {
   // 把「恢复视图」的实现交给 navHistory：切标签 + 写 hash 都在这里统一执行
   useEffect(() => {
     setViewRestorer((view) => {
-      if (view.tab && NAV_TABS.has(view.tab) && view.tab !== activeTabRef.current) {
+      // 手机端只接受移动端标签集合，桌面页的浏览历史不恢复（否则会切到不存在的页）
+      const allowed = isMobile ? MOBILE_TABS.includes(view.tab) : NAV_TABS.has(view.tab)
+      if (view.tab && allowed && view.tab !== activeTabRef.current) {
         setSelectedTab(view.tab)
         setConfig('selected_tab', view.tab).catch((e) => {
           console.error('Failed to persist selected tab:', e)
@@ -514,7 +555,7 @@ function App() {
       if (window.location.hash !== hash) window.location.hash = hash
     })
     return () => setViewRestorer(null)
-  }, [])
+  }, [isMobile])
 
   // 唯一的侧键监听：详情页自己先处理，没人接管时按导航历史后退/前进
   useNavBrowsing()
@@ -565,7 +606,7 @@ function App() {
   if (state.isFirstRun) {
     return (
       <FluentProvider theme={resolvedTheme === 'dark' ? webDarkTheme : webLightTheme} className={`app-theme-${resolvedTheme}`}>
-        <div className={styles.root}>
+        <div className={mergeClasses(styles.root, isMobile && styles.mobileRoot)}>
           <TitleBar />
           <WelcomeScreen onComplete={handleWelcomeComplete} />
         </div>
@@ -598,7 +639,7 @@ function App() {
                 {/* 下载中心必须挂在所有页面之上：进度数据源是全局事件，
                     任何页面进出都只是换消费者，任务本身不随组件卸载消失 */}
                 <DownloadCenterProvider>
-                <div className={styles.root}>
+                <div className={mergeClasses(styles.root, isMobile && styles.mobileRoot)}>
                   <TitleBar />
                   <div className={styles.appShell}>
                     <TabNavigation
@@ -650,9 +691,8 @@ function App() {
                       </NarrowNavProvider>
                     </TabNavigation>
                   </div>
-                  {/* 悬浮下载条：挂在 App 根下而非某个页面里，切换标签/进出详情页
-                      都不影响它——这正是"离开页面仍能看进度"的实现基础 */}
-                  <DownloadStatusBar />
+                  {/* 悬浮下载条：桌面端全局显示；手机端没有安装/下载能力，不渲染 */}
+                  {!isMobile && <DownloadStatusBar />}
                 </div>
               </DownloadCenterProvider>
               </AnnouncementProvider>
@@ -682,7 +722,7 @@ function App() {
           </DialogSurface>
         </Dialog>
 
-        {shouldShowGuide && (
+        {shouldShowGuide && !isMobile && (
           <SpotlightGuide targetSelector="[data-tour='workshop-sort-select']" guideId={WORKSHOP_SORT_GUIDE} onDone={handleCloseGuide} />
         )}
       </AuthProvider>

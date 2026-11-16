@@ -1,0 +1,257 @@
+name: Build Android APK
+
+# 只跑在 apk 分支：桌面主线的 release.yml 不受影响。
+# - push 到 apk 分支：构建出 artifact（不发版）
+# - 打 android-v* 标签 / 手动 dispatch：构建并发布 Release
+on:
+  push:
+    branches: [apk]
+    tags: ['android-v*']
+  workflow_dispatch:
+    inputs:
+      version_override:
+        description: '版本号（留空则用 src-tauri/tauri.conf.json 的版本）'
+        required: false
+        type: string
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-apk:
+    name: Build Android APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Get version
+        id: get_version
+        shell: bash
+        run: |
+          if [ -n "${{ inputs.version_override }}" ]; then
+            VERSION="${{ inputs.version_override }}"
+          elif [[ "$GITHUB_REF" == refs/tags/android-v* ]]; then
+            VERSION="${GITHUB_REF#refs/tags/android-v}"
+          else
+            VERSION=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          fi
+          # Android 专用配置里的版本号必须与本次构建一致（APK 的 versionName 取的就是它）
+          node -e "const fs=require('fs');const p='src-tauri/tauri.android.conf.json';const c=JSON.parse(fs.readFileSync(p,'utf8'));c.version='$VERSION';fs.writeFileSync(p,JSON.stringify(c,null,2)+'\n')"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag_name=android-v$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Detected version: android-v$VERSION"
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          # 与 pnpm-lock.yaml 的 lockfileVersion 9.0 匹配
+          version: 11
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: 'pnpm'
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Android SDK
+        shell: bash
+        run: |
+          # setup-android@v3 在 cmdline-tools 16 上会尝试安装已移除的 "tools" 包而失败，
+          # 这里直接用 runner 镜像预装的 SDK。
+          SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          test -d "$SDK"
+          echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
+          SDKMGR="$(command -v sdkmanager || true)"
+          if [ -z "$SDKMGR" ]; then
+            SDKMGR="$(find "$SDK/cmdline-tools" -maxdepth 3 -type f -name sdkmanager | head -n 1)"
+          fi
+          test -n "$SDKMGR"
+          echo "Using sdkmanager: $SDKMGR"
+          echo "$(dirname "$SDKMGR")" >> "$GITHUB_PATH"
+          yes | "$SDKMGR" --licenses >/dev/null 2>&1 || true
+
+      - name: Setup Android NDK
+        shell: bash
+        run: |
+          sdkmanager --install "platforms;android-34" "build-tools;34.0.0"
+          NDK_VER=$(ls -1 "$ANDROID_HOME/ndk" 2>/dev/null | sort -V | tail -n 1 || true)
+          if [ -z "$NDK_VER" ]; then
+            echo "No preinstalled NDK found, installing pinned version..."
+            sdkmanager --install "ndk;27.2.12479018"
+            NDK_VER=27.2.12479018
+          fi
+          NDK_HOME="$ANDROID_HOME/ndk/$NDK_VER"
+          test -f "$NDK_HOME/source.properties"
+          echo "Using NDK $NDK_VER at $NDK_HOME"
+          echo "NDK_HOME=$NDK_HOME" >> "$GITHUB_ENV"
+
+      # src-tauri/rust-toolchain.toml 固定 channel = "nightly"，
+      # 因此这里必须装 nightly 并把 android target 装到同一套工具链上
+      - name: Setup Rust (nightly + Android target)
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          targets: 'aarch64-linux-android'
+
+      - name: Install dependencies
+        run: pnpm install
+        shell: bash
+
+      - name: Create .env
+        shell: bash
+        run: |
+          # 与桌面 release 同一套配置；不含 DB/图床上传令牌（APK 不需要）
+          # 真实域名只放 Secrets：公开仓库的 Actions 日志会回显展开后的命令
+          PUBLIC_BASE="${{ secrets.SFMMM_PUBLIC_BASE_URL }}"
+          if [ -z "$PUBLIC_BASE" ]; then
+            echo "::error::Missing repository secret SFMMM_PUBLIC_BASE_URL (e.g. https://api.example.com)"
+            exit 1
+          fi
+          API_BASE="${{ secrets.SFMMM_API_BASE }}"
+          if [ -z "$API_BASE" ]; then API_BASE="${PUBLIC_BASE%/}/api/user"; fi
+          echo "SFMMM_API_BASE=${API_BASE%/}" > src-tauri/.env
+          echo "DESKTOP_XPORT_KEY=${{ secrets.DESKTOP_XPORT_KEY }}" >> src-tauri/.env
+          echo "IMGBED_URL=${{ secrets.IMGBED_URL }}" >> src-tauri/.env
+          echo "GITHUB_REPO=${{ github.repository }}" >> src-tauri/.env
+          echo "VITE_LATEST_URL=${{ secrets.IMGBED_URL }}/file/sfm/installer/latest.json" > .env
+          echo "VITE_IMGBED_URL=${{ secrets.IMGBED_URL }}" >> .env
+          echo "VITE_LANZOU_BEPINEX=${{ secrets.VITE_LANZOU_BEPINEX }}" >> .env
+          echo "VITE_LANZOU_V2=${{ secrets.VITE_LANZOU_V2 }}" >> .env
+          echo "VITE_LANZOU_FONT=${{ secrets.VITE_LANZOU_FONT }}" >> .env
+          echo "VITE_LANZOU_RMMOSAIC=${{ secrets.VITE_LANZOU_RMMOSAIC }}" >> .env
+          echo "VITE_QUARK_URL=${{ secrets.VITE_QUARK_URL }}" >> .env
+          echo "VITE_GITHUB_REPO=${{ github.repository }}" >> .env
+
+      - name: Remove local Cargo config for CI
+        run: rm -f src-tauri/.cargo/config.toml
+        shell: bash
+
+      - name: Switch to Android config
+        run: cp src-tauri/tauri.android.conf.json src-tauri/tauri.conf.json
+        shell: bash
+
+      - name: Cache Rust
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            src-tauri/target
+          key: ${{ runner.os }}-cargo-android-${{ hashFiles('src-tauri/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-android-
+
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('src-tauri/gen/android/**/*.gradle*', 'src-tauri/gen/android/gradle/wrapper/**') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
+
+      - name: Init Tauri Android (if needed)
+        shell: bash
+        run: |
+          if [ ! -d "src-tauri/gen/android" ]; then
+            pnpm tauri android init
+          else
+            echo "Android project already initialized"
+          fi
+
+      # 签名：优先用仓库 Secrets 里的固定 keystore（同一把钥匙才能覆盖安装升级）；
+      # 没配置时退回临时调试钥匙 —— 注意每次构建钥匙都不同，新 APK 需要先卸载旧版再装。
+      - name: Prepare signing keystore
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        shell: bash
+        run: |
+          KS="$RUNNER_TEMP/sfm-release.keystore"
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "使用仓库 Secrets 中的签名 keystore"
+            echo "$KEYSTORE_B64" | base64 -d > "$KS"
+            echo "TAURI_ANDROID_KEY_ALIAS=${KEY_ALIAS:-androiddebugkey}" >> "$GITHUB_ENV"
+            echo "TAURI_ANDROID_KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD" >> "$GITHUB_ENV"
+            echo "TAURI_ANDROID_KEY_PASSWORD=${KEY_PASSWORD:-$KEYSTORE_PASSWORD}" >> "$GITHUB_ENV"
+          else
+            echo "::warning::未配置 ANDROID_KEYSTORE_BASE64，使用临时调试钥匙（每次构建签名不同，安装前需卸载旧版）"
+            keytool -genkeypair -keystore "$KS" -storepass android -keypass android \
+              -alias androiddebugkey -keyalg RSA -keysize 2048 -validity 10000 \
+              -dname "CN=Android Debug,O=SFM,C=US"
+            echo "TAURI_ANDROID_KEY_ALIAS=androiddebugkey" >> "$GITHUB_ENV"
+            echo "TAURI_ANDROID_KEYSTORE_PASSWORD=android" >> "$GITHUB_ENV"
+            echo "TAURI_ANDROID_KEY_PASSWORD=android" >> "$GITHUB_ENV"
+          fi
+          test -s "$KS"
+          echo "TAURI_ANDROID_KEYSTORE_PATH=$KS" >> "$GITHUB_ENV"
+
+      - name: Build APK
+        run: pnpm tauri android build --apk --target aarch64
+        shell: bash
+
+      - name: Collect & sign APKs
+        shell: bash
+        run: |
+          BT="$ANDROID_HOME/build-tools/34.0.0"
+          KS="$TAURI_ANDROID_KEYSTORE_PATH"
+          OUT="src-tauri/target/release/apk"
+          mkdir -p "$OUT"
+          find src-tauri/gen/android/app/build/outputs/apk -name "*.apk" -type f | while read -r APK; do
+            NAME="$(basename "$APK" .apk)"
+            NAME="${NAME%-unsigned}"
+            ALIGNED="$RUNNER_TEMP/${NAME}-aligned.apk"
+            SIGNED="$OUT/${NAME}.apk"
+            if [[ "$APK" == *-unsigned.apk ]]; then
+              echo "Aligning & signing: $APK"
+              "$BT/zipalign" -f -p 4 "$APK" "$ALIGNED"
+              "$BT/apksigner" sign --ks "$KS" --ks-pass pass:"$TAURI_ANDROID_KEYSTORE_PASSWORD" \
+                --key-pass pass:"$TAURI_ANDROID_KEY_PASSWORD" --ks-key-alias "$TAURI_ANDROID_KEY_ALIAS" \
+                --out "$SIGNED" "$ALIGNED"
+            else
+              echo "Copying already-signed: $APK"
+              cp -f "$APK" "$SIGNED"
+            fi
+            "$BT/apksigner" verify --print-certs "$SIGNED"
+          done
+          ls -la "$OUT"
+          test -n "$(find "$OUT" -name '*.apk' -print -quit)"
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: android-apk-${{ steps.get_version.outputs.version }}
+          path: src-tauri/target/release/apk/*.apk
+          if-no-files-found: error
+
+      - name: Create Release with APK
+        if: startsWith(github.ref, 'refs/tags/android-v')
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ steps.get_version.outputs.tag_name }}
+          name: Android ${{ steps.get_version.outputs.tag_name }}
+          files: |
+            src-tauri/target/release/apk/*.apk
+          generate_release_notes: true
+          body: |
+            ## Android APK ${{ steps.get_version.outputs.tag_name }}
+
+            纯社区版：浏览/搜索模组与讨论、评论、通知、账号设置。
+            安装、下载、订阅记录、本地模组/存档等桌面能力不在手机端提供。
+
+            **注册账号请在 PC 端完成。**

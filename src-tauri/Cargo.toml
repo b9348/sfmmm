@@ -30,17 +30,21 @@ serde = { version = "1.0", features = ["derive"] }
 log = "0.4"
 # 用 ~ 收紧到 2.12.x：12 位小版本已验证，避免 cargo update 顺带升到未验证的 2.13+
 tauri = { version = "~2.12.5", features = [] }
-# 单实例守卫：避免多开进程各自持有连接池
+# 单实例守卫：避免多开进程各自持有连接池。
+# crate 根带 `#![cfg(not(any(target_os = "android", target_os = "ios")))]`，只能桌面构建，
+# 因此放在 target 依赖里——APK（apk 分支）构建时直接不引入该 crate。
 # 用 ~2.5 收紧：2.6.x 会要求 tauri ^2.12 之上的未验证小版本，避免 cargo update 连带升级 tauri
-tauri-plugin-single-instance = "~2.5"
 tauri-plugin-log = "2"
 tauri-plugin-sql = { version = "2", features = ["sqlite"] }
 tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2"
 tauri-plugin-shell = "2"
-tauri-plugin-http = { version = "2", features = ["native-tls"] }
+# apk 分支统一走 rustls：Android 上没有可用的系统 TLS 后端（native-tls 在 Android
+# 需要自行交叉编译 OpenSSL），rustls 是纯 Rust 实现，桌面/移动共用同一套根证书
+# （webpki-roots，公共 HTTPS 站点足够；安卓也不存在企业自签根的场景）。
+tauri-plugin-http = { version = "2", default-features = false, features = ["rustls-tls"] }
 # 云 API 客户端 / 下载 / 上传
-reqwest = { version = "0.12", features = ["json", "stream", "gzip", "multipart", "blocking"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "gzip", "multipart", "blocking", "rustls-tls"] }
 encoding_rs = "0.8"
 sha2 = { workspace = true }
 hex = { workspace = true }
@@ -65,14 +69,18 @@ chrono = "0.4"
 regex = "1"
 lz4_flex = "0.11"
 lzma-rs = "0.3"
-# 通知长连接：默认特性不含 TLS，wss:// 必须显式开启；native-tls 与 reqwest 一致
-# 走系统信任库（Windows 为 SChannel），便于复用系统代理/证书设置。
-tokio-tungstenite = { version = "0.30", features = ["native-tls"] }
+# 通知长连接：默认特性不含 TLS，wss:// 必须显式开启；apk 分支用 rustls
+# （与 reqwest 同源根证书），在 Android 与桌面用同一份 TLS 依赖。
+tokio-tungstenite = { version = "0.30", features = ["rustls-tls-webpki-roots"] }
 
 # db/installer.rs 读/写 NSIS 安装器记录的安装目录（HKCU\Software\sfmmm\sfmmm）。
 # 走 winreg 而不是 `reg.exe`：reg.exe 的输出受控制台代码页影响，中文/日文路径会乱码。
 [target.'cfg(windows)'.dependencies]
 winreg = "0.52"
+
+# 单实例守卫只在桌面构建注册（见 lib.rs 的 #[cfg(desktop)]）：APK 侧不存在多开语义
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+tauri-plugin-single-instance = "~2.5"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full"] }
@@ -83,3 +91,11 @@ tokio = { version = "1", features = ["full"] }
 # 历史遗留的 incremental 目录用 `pnpm clean:target --apply` 回收。
 [profile.dev]
 incremental = false
+
+# Android 的 libapp_lib.so 默认带完整符号表，单 ABI 就有 35MB+，比桌面安装包还大。
+# 符号对运行没有用处，统一在 release 构建里剥掉，并用 thin LTO 进一步压缩；
+# 桌面安装包同样受益。
+[profile.release]
+strip = true
+lto = "thin"
+codegen-units = 1
