@@ -2,7 +2,7 @@
 
 Tauri 2 桌面应用（游戏 Mod 管理器）：React 19 + Fluent UI v9 前端（`src/`）+ Rust 本地层（`src-tauri/`），包管理器用 pnpm。
 
-云端（Axum 服务端 + Vue 管理后台）已拆到独立仓库 `your_name/AxumVue`。本仓只含客户端，不再有 `server/`、`admin/`、`docs/` 目录，也没有本地 MySQL 直连。
+云端（Axum 服务端 + Vue 管理后台）已拆到独立仓库：本地 `../AxumVue`，远程 `your_name/AxumVue`（私有）。本仓只含客户端，不再有 `server/`、`admin/`、`docs/` 目录，也没有本地 MySQL 直连。
 
 ## 架构
 
