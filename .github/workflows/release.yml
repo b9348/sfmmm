@@ -75,7 +75,9 @@ jobs:
             echo "::error::Missing repo variable SFMMM_PUBLIC_BASE_URL (e.g. https://api.example.com)"
             exit 1
           fi
-          echo "SFMMM_API_BASE=${PUBLIC_BASE%/}/api/user" > src-tauri/.env
+          API_BASE="${{ vars.SFMMM_API_BASE }}"
+          if [ -z "$API_BASE" ]; then API_BASE="${PUBLIC_BASE%/}/api/user"; fi
+          echo "SFMMM_API_BASE=${API_BASE%/}" > src-tauri/.env
           echo "DESKTOP_XPORT_KEY=${{ secrets.DESKTOP_XPORT_KEY }}" >> src-tauri/.env
           echo "IMGBED_URL=${{ secrets.IMGBED_URL }}" >> src-tauri/.env
           echo "GITHUB_REPO=${{ github.repository }}" >> src-tauri/.env
