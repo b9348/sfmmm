@@ -370,6 +370,8 @@
     "pageInput": "ページ番号",
     "register": "アカウント登録",
     "login": "ログイン",
+    "registerOnPc": "アカウント登録は PC 版で行ってください",
+    "mobileBrowseOnly": "スマホでは閲覧のみ。インストール / 購読は PC 版で行ってください",
     "loginHint": "ログインして Mod を管理",
     "username": "ユーザー名",
     "password": "パスワード",

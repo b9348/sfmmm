@@ -8,6 +8,7 @@ import { Discussion } from './Discussion'
 import SubscriptionRecords from '../subscribe/SubscriptionRecords'
 import { useTabPrefetch } from '../../hooks/useTabPrefetch'
 import { useMediaQuery } from '../../hooks/useMediaQuery'
+import { usePlatform } from '../../hooks/usePlatform'
 import { NarrowMenuButton } from '../../components/common/NarrowMenuButton'
 import { AnnouncementBanner } from '../../components/announcement/AnnouncementBanner'
 
@@ -81,6 +82,8 @@ const useStyles = makeStyles({
 
 // tab 顺序即预加载链：当前 tab 激活时预挂载下一个（云→讨论→我的→订阅）
 const TABS = ['browse', 'discuss', 'my', 'records']
+// 手机端没有下载安装能力，「订阅记录」页（桌面下载任务列表）整页不挂载
+const MOBILE_TABS = ['browse', 'discuss', 'my']
 
 // 「讨论区有新帖」标记：只有打开过一次讨论区才清除。
 // 放模块级变量而非组件 state —— 离开创意工坊时 Workshop 会卸载，
@@ -90,6 +93,8 @@ let discussUnread = false
 export function Workshop({ initialModId, initialCommentId, onConsumeNavTarget }) {
   const { t } = useTranslation()
   const styles = useStyles()
+  const { isMobile } = usePlatform()
+  const tabs = isMobile ? MOBILE_TABS : TABS
   // 窄屏（≈移动端宽度）：页签条去掉图标、碎化尺寸，四个页签在 375px 下能排满一行，
   // 不再依赖横向滑动去翻看不到的页签（滑动仍保留为兜底）
   const isNarrow = useMediaQuery('(max-width: 768px)')
@@ -114,7 +119,8 @@ export function Workshop({ initialModId, initialCommentId, onConsumeNavTarget })
   const getInitialTab = () => {
     if (/^#\/discuss\//.test(window.location.hash)) return 'discuss'
     const m = window.location.hash.match(/^#\/workshop\/(\w+)/)
-    return m && ['browse', 'my', 'records', 'discuss'].includes(m[1]) ? m[1] : 'browse'
+    // 手机端不认 records：残留 hash 一律回落到「云」
+    return m && tabs.includes(m[1]) ? m[1] : 'browse'
   }
   const [subTab, setSubTab] = useState(getInitialTab)
   // 窄屏且当前 tab 上正开着详情 → 收起 tabs 行（含汉堡），整屏让给详情
@@ -139,9 +145,11 @@ export function Workshop({ initialModId, initialCommentId, onConsumeNavTarget })
       discussUnread = true
       setDiscussUnreadState(true)
     }
+    // getInitialTab 每次渲染重建（依赖 tabs/isMobile），这里只读取当时的 hash，无需进依赖
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
   // 预加载链：当前 tab 激活时预挂载下一个 tab（云→讨论→我的→订阅），切换即时展示
-  const { mounted } = useTabPrefetch(subTab, TABS)
+  const { mounted } = useTabPrefetch(subTab, tabs)
 
   const handleTabSelect = (_, d) => {
     // 打开过一次讨论区即清除新帖蓝点
@@ -178,6 +186,8 @@ export function Workshop({ initialModId, initialCommentId, onConsumeNavTarget })
     }
     window.addEventListener('hashchange', onHashChange)
     return () => window.removeEventListener('hashchange', onHashChange)
+    // 同上：hash 变化时按当前平台可见 tab 解析，无需把 getInitialTab 进依赖
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [markDiscussRead])
 
   // 页签条在窄窗口下要靠横向滑动才能看到全部页签，因此切页后（含侧栏子菜单、
@@ -213,13 +223,13 @@ export function Workshop({ initialModId, initialCommentId, onConsumeNavTarget })
             </span>
           </Tab>
           <Tab value="my" icon={isNarrow ? undefined : <Person24Regular />}>{t('workshop.mine')}</Tab>
-          <Tab value="records" icon={isNarrow ? undefined : <ArrowSync24Regular />}>{t('nav.subscriptions')}</Tab>
+          {!isMobile && <Tab value="records" icon={isNarrow ? undefined : <ArrowSync24Regular />}>{t('nav.subscriptions')}</Tab>}
         </TabList>
       </div>
       )}
 
       <div className={styles.content}>
-        {TABS.map((tab) => {
+        {tabs.map((tab) => {
           // 未挂载（含未预加载）的 tab 不渲染；已挂载的保持挂载，仅切换显隐
           if (!mounted.has(tab)) return null
           const visible = tab === subTab

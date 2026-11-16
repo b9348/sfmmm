@@ -30,6 +30,7 @@ import { useGameVersionGuard } from '../../components/common/useGameVersionGuard
 import { ModCard } from './ModCard'
 import { commentIdFromHash, consumeEntryPoint, discardEntryPoint, peekEntryPoint, restoreScroll } from '../../utils/navReturn'
 import { isDetailHash, previousView, restoreView } from '../../utils/navHistory'
+import { usePlatform } from '../../hooks/usePlatform'
 
 // 列表页可选的排序值；旧的 rating / published_at 会被归一化回「最近更新」
 const BROWSE_SORT_VALUES = ['created_at', 'likes']
@@ -77,6 +78,8 @@ export function BrowseMods({ initialModId, initialCommentId, onConsumeNavTarget,
   const styles = useStyles()
   const { t } = useTranslation()
   const { user, isLoggedIn } = useAuth()
+  // 手机端不提供「发布 MOD」：编辑器依赖 PC 文件选择与本地打包
+  const { isMobile } = usePlatform()
   const deviceIdRef = useRef(getDeviceId())
   // 只读一次原始值：后续持久化 effect 会把 sessionStorage 覆盖成归一化后的 sortBy，
   // 而排序方向迁移需要在覆盖前判断旧值是否为 rating / published_at。
@@ -790,7 +793,7 @@ export function BrowseMods({ initialModId, initialCommentId, onConsumeNavTarget,
 
       <FloatingActions items={[
         { key: 'refresh', icon: <ArrowClockwise24Regular />, onClick: () => fetchMods(page, search, categoryFilter, sortBy, sortOrder, { force: true }), disabled: loading, label: t('workshop.refresh') },
-        { key: 'publish', icon: <Add24Regular />, appearance: 'primary', onClick: handlePublishClick, label: t('workshop.publishMod') },
+        ...(isMobile ? [] : [{ key: 'publish', icon: <Add24Regular />, appearance: 'primary', onClick: handlePublishClick, label: t('workshop.publishMod') }]),
       ]} />
 
       <LoginDialog open={loginOpen} onClose={() => setLoginOpen(false)} onSuccess={handleLoginSuccess} />

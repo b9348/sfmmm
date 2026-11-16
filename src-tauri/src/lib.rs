@@ -5,6 +5,7 @@ mod fs_util;
 mod migrations;
 mod notify_ws;
 mod webview_check;
+#[cfg(desktop)]
 mod window;
 mod xport;
 
@@ -236,7 +237,10 @@ pub fn run() {
 
             // 窗口几何恢复（窗口在 tauri.conf.json 中 visible:false）：
             // 此处先同步应用上次尺寸/位置，WebView 首帧渲染完成后由前端调用 show()，
-            // 用户看到的第一个画面就是最终几何；4 秒兜底强制显示，防前端异常导致窗口不出现
+            // 用户看到的第一个画面就是最终几何；4 秒兜底强制显示，防前端异常导致窗口不出现。
+            // 桌面独占：APK 窗口由系统全屏管理，没有可恢复的尺寸/位置，也不需要兜底 show。
+            #[cfg(desktop)]
+            {
             if let Some(window) = app.get_webview_window("main") {
                 let db_path = app.path().app_config_dir().ok().map(|d| d.join("config.db"));
                 let (restored, maximized) = window::restore_window_geometry(&window, db_path.as_deref());
@@ -255,6 +259,7 @@ pub fn run() {
                         log::warn!("前端未按时显示窗口，已兜底强制显示");
                     }
                 });
+            }
             }
 
             // 日志必须 release 也落盘：后端会在上抛错误前把原始详情（含数据库地址、

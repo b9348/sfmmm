@@ -21,6 +21,7 @@ import { useGridColumns } from '../../hooks/useGridColumns'
 import { usePersistedNumber } from '../../hooks/usePersistedNumber'
 import { CreateModPage, EditModPage } from './ModEditorPage'
 import { enterView, leaveView } from '../../utils/navHistory'
+import { usePlatform } from '../../hooks/usePlatform'
 
 const useStyles = makeStyles({
   root: {
@@ -48,6 +49,8 @@ export function MyMods({ active = true, onDetailOpenChange }) {
   const styles = useStyles()
   const { t } = useTranslation()
   const { user, isLoggedIn } = useAuth()
+  // 手机端不提供发布/编辑模组（编辑器依赖 PC 文件选择与本地打包），只保留浏览与删除
+  const { isMobile } = usePlatform()
   const deviceIdRef = useRef(getDeviceId())
   // 删除结果提示：与讨论区一致的全局右下角 Toaster
   const { dispatchToast } = useToastController(BOTTOM_TOASTER_ID)
@@ -262,9 +265,11 @@ export function MyMods({ active = true, onDetailOpenChange }) {
           {t('workshop.modCount', { username: user.username, count: mods.length })}
         </Text>
         <ItemsPerRowControl value={itemsPerRow} onChange={handleItemsPerRowChange} disabled={loading} />
-        <Button size="small" icon={<Add24Regular />} appearance="primary" onClick={() => setShowCreatePage(true)}>
-          {t('workshop.publishMod')}
-        </Button>
+        {!isMobile && (
+          <Button size="small" icon={<Add24Regular />} appearance="primary" onClick={() => setShowCreatePage(true)}>
+            {t('workshop.publishMod')}
+          </Button>
+        )}
         <Button size="small" icon={<ArrowClockwise24Regular />} onClick={() => fetchMods({ force: true })} disabled={loading}>
           {t('workshop.refresh')}
         </Button>
@@ -285,7 +290,7 @@ export function MyMods({ active = true, onDetailOpenChange }) {
               mod={mod}
               onClick={() => handleDetail(mod)}
               actions={<>
-                <Button size="small" icon={<Edit24Regular />} appearance="subtle" onClick={(e) => { e.stopPropagation(); handleEdit(mod) }} />
+                {!isMobile && <Button size="small" icon={<Edit24Regular />} appearance="subtle" onClick={(e) => { e.stopPropagation(); handleEdit(mod) }} />}
                 <Button size="small" icon={<Delete24Regular />} appearance="subtle" onClick={(e) => { e.stopPropagation(); handleDelete(mod.id) }} />
               </>}
             />

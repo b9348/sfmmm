@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { getCurrentWindow, PhysicalSize, PhysicalPosition } from '@tauri-apps/api/window'
 import { getDb as getSharedDb } from '../services/dbHelper'
+import { isMobileUA } from './usePlatform'
 
 function debounce(fn, delay) {
   let timer
@@ -51,8 +52,9 @@ async function writeConfig(key, value) {
 }
 
 export function usePersistUI() {
+  // 手机端窗口由系统管理，没有需要等待的"首帧后再显示"时序：初值就是 ready
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
-  const [windowReady, setWindowReady] = useState(false)
+  const [windowReady, setWindowReady] = useState(() => isMobileUA(navigator.userAgent))
   const appWindow = useRef(null)
 
   // Load sidebar state from DB on mount
@@ -76,6 +78,12 @@ export function usePersistUI() {
 
   // Restore window size/position on mount, then listen for changes
   useEffect(() => {
+    // 手机端窗口由系统管理：没有可持久化的尺寸/位置，窗口 show 也不需要
+    // （Tauri 移动端窗口 API 会拒绝调用，白屏时序兜底由系统负责）
+    if (isMobileUA(navigator.userAgent)) {
+      return
+    }
+
     let unlistenResize, unlistenMove
 
     ;(async () => {

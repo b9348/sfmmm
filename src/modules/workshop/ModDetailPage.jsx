@@ -35,6 +35,7 @@ import { LANGUAGES, LANG_LABELS } from '../../i18n/languages'
 import { localizeError } from '../../utils/localizeError'
 import { useMouseBackButton } from '../../hooks/useMouseBackButton'
 import { useMediaQuery } from '../../hooks/useMediaQuery'
+import { usePlatform } from '../../hooks/usePlatform'
 import { useScrollCollapse } from '../../hooks/useScrollCollapse'
 import { ModFileRow } from './modDetail/ModFileRow'
 import { useUserNav } from '../../contexts/useUserNav'
@@ -209,6 +210,8 @@ export default function ModDetailPage({ mod, onBack, onEdit, onDeleted, scrollTo
   // 移动端阅读模式：正文下滚时顶部栏向上收起、右下悬浮按钮向右收起，上滚再呼出。
   // 宽屏不启用（enabled=false 时不挂 scroll 监听，也不会有任何位移）
   const isNarrow = useMediaQuery('(max-width: 768px)')
+  // APK 分支：手机端没有安装记录可查（也不读写游戏目录），跳过安装态校验
+  const { isMobile } = usePlatform()
   const { scrollRef, collapsed: chromeCollapsed } = useScrollCollapse({ enabled: isNarrow })
   const perms = mod.user_permissions || {}
   const canEdit = perms.is_author || perms.can_edit_mod_info || perms.can_edit_all_langs || (perms.editable_langs && perms.editable_langs.length > 0)
@@ -501,18 +504,21 @@ export default function ModDetailPage({ mod, onBack, onEdit, onDeleted, scrollTo
 
   // 切屏回来 / 首次挂载：重查安装记录刷新已安装态
   useEffect(() => {
+    // 手机端不查安装记录：详情页只做浏览/评论
+    if (isMobile) return
     // checkInstalled 为命名异步取数函数，setState 均在 await 之后，
     // 规则对命名函数保守误报，故豁免
     // eslint-disable-next-line react-hooks/set-state-in-effect
     checkInstalled()
-  }, [checkInstalled])
+  }, [checkInstalled, isMobile])
 
   // 用户可能在资源管理器里手动删除/改名文件，窗口重新获得焦点时再校验一次
   useEffect(() => {
+    if (isMobile) return
     const onFocus = () => { checkInstalled() }
     window.addEventListener('focus', onFocus)
     return () => window.removeEventListener('focus', onFocus)
-  }, [checkInstalled])
+  }, [checkInstalled, isMobile])
 
   // 强制删除（dev）：先删图床物理文件，再由后端事务硬删除全部关联数据，成功后刷新列表并返回。
   // 结果用右下角 toast 提示；失败时先关掉确认弹窗再提示，避免 toast 被模态遮罩压住

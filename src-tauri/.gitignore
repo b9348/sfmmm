@@ -2,3 +2,5 @@
 # will have compiled files and executables
 /target/
 /gen/schemas
+# APK 分支：android 工程由 `pnpm tauri android init` 生成，不入库（CI 里按需 init）
+/gen/android/

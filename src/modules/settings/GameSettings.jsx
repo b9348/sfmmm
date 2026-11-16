@@ -31,6 +31,7 @@ import i18n from '../../i18n'
 import { checkVersion, checkGitHubUpdate, prepareUpdate, applyUpdate, getUpdateStatus, compareVersions, armPendingUpdate, cancelUpdate } from '../../services/updateApi'
 import APP_VERSION from '../../version.js'
 import { DownloadProgress } from '../../components'
+import { usePlatform } from '../../hooks/usePlatform'
 
 // 外部链接由构建期环境变量提供（根 .env），未配置时对应入口不渲染
 const QUARK_URL = import.meta.env.VITE_QUARK_URL || ''
@@ -126,6 +127,9 @@ const useStyles = makeStyles({
 export function GameSettings({ config, onConfigChange, appUpdateInfo }) {
   const { t, i18n: i18nInstance } = useTranslation()
   const styles = useStyles()
+  // 手机端隐藏「游戏目录」和「程序更新」两类桌面独占设置：
+  // 前者要读写本地游戏目录，后者是 PC 安装包自更新（APK 更新不走这条链）
+  const { isMobile } = usePlatform()
   const [gamePath, setGamePath] = useState(config?.game_path || '')
   // 游戏路径含中文等非 ASCII 字符时的红字提示（BepInEx 无法在中文路径下工作）
   const [pathError, setPathError] = useState('')
@@ -666,6 +670,8 @@ export function GameSettings({ config, onConfigChange, appUpdateInfo }) {
         </>
       )}
 
+      {/* 桌面独占：游戏目录 + 程序自更新。手机端没有本地游戏目录，也没有 PC 安装包更新管线 */}
+      {!isMobile && (<>
       <div className={styles.item}>
         <div className={styles.itemLabel}>
           <Text className={styles.itemTitle}>{t('settings.gamePath')}</Text>
@@ -820,6 +826,7 @@ export function GameSettings({ config, onConfigChange, appUpdateInfo }) {
       </div>
 
       <Divider />
+      </>)}
 
       <div className={styles.item}>
         <div className={styles.itemLabel}>

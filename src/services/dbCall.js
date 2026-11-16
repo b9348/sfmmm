@@ -180,6 +180,9 @@ const FALLBACK_ONLY_COMMANDS = new Set([
  * 监听它即可立即重拉，不必轮询。detail = { command, families }
  */
 export const CACHE_INVALIDATED_EVENT = 'sfmmm:cache-invalidated'
+// 缓存优先命中后，后台网络刷新成功：页面据此立即撤掉「正在使用缓存」提示，
+// 不再等 6 秒 toast 自然消失（接口已经返回内容时继续提示会误导用户）。
+export const CACHE_REVALIDATED_EVENT = 'sfmmm:cache-revalidated'
 
 function dispatchCacheInvalidated(command, families) {
   if (typeof window === 'undefined') return
@@ -299,7 +302,13 @@ export async function dbCall(command, args = {}, mapResult, opts = {}) {
   if (cacheable && !force && !FALLBACK_ONLY_COMMANDS.has(command)) {
     const hit = await readRequestCache(key)
     if (hit) {
-      const revalidate = runNetwork(hit).then(finalize).catch(() => null)
+      const revalidate = runNetwork(hit)
+        .then((raw) => {
+          // 网络刷新成功：通知所有缓存提示立即关闭（页面自己也可能还没来得及更新状态）
+          window.dispatchEvent(new CustomEvent(CACHE_REVALIDATED_EVENT, { detail: { command } }))
+          return finalize(raw)
+        })
+        .catch(() => null)
       return finalize({ ...hit.payload, __fromCache: true, __cachedAt: hit.cachedAt, __revalidate: revalidate })
     }
   }

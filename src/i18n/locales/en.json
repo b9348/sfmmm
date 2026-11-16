@@ -370,6 +370,8 @@
     "pageInput": "Page number",
     "register": "Register",
     "login": "Login",
+    "registerOnPc": "Please create an account on the desktop app",
+    "mobileBrowseOnly": "Browse only on mobile. Install / subscribe on desktop.",
     "loginHint": "Login to manage your mods",
     "username": "Username",
     "password": "Password",
