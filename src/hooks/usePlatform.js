@@ -9,7 +9,7 @@
  * 原生依赖（少一个插件、少一条 capability 权限，APK 体积也小一点）。
  * UA 在进程生命周期内不变，所以这里同步算一次即可，不用 effect 异步探测。
  *
- * @returns {{ platform: string, isAndroid: boolean, isMobile: boolean, isTauri: boolean, ready: boolean }}
+ * @returns {{ platform: string, isAndroid: boolean, isMobile: boolean, isTauri: boolean, isWindows: boolean, ready: boolean }}
  */
 export function usePlatform() {
   return detectPlatform()
@@ -17,16 +17,18 @@ export function usePlatform() {
 
 export function detectPlatform() {
   if (typeof navigator === 'undefined') {
-    return { platform: 'desktop', isAndroid: false, isMobile: false, isTauri: false, ready: true }
+    return { platform: 'desktop', isAndroid: false, isMobile: false, isTauri: false, isWindows: false, ready: true }
   }
   const ua = navigator.userAgent || ''
   const isAndroid = /android/i.test(ua)
   const isMobile = isMobileUA(ua)
+  const isTauri = typeof window !== 'undefined' && !!window.__TAURI_INTERNALS__
   return {
     platform: isAndroid ? 'android' : isMobile ? 'ios' : 'desktop',
     isAndroid,
     isMobile,
-    isTauri: typeof window !== 'undefined' && !!window.__TAURI_INTERNALS__,
+    isTauri,
+    isWindows: isTauri && /Windows NT/i.test(ua),
     ready: true,
   }
 }

@@ -8,6 +8,8 @@ import {
   Comment24Regular,
   Mail24Regular,
 } from '@fluentui/react-icons'
+import { F95Page } from '../f95/F95Page'
+import { usePlatform } from '../../hooks/usePlatform'
 import { LikeRecords } from '../likes/LikeRecords'
 import ApplicationsPage from '../workshop/ApplicationsPage'
 import MessageInbox from './MessageInbox'
@@ -58,7 +60,7 @@ const useStyles = makeStyles({
   },
 })
 
-const TABS = ['replies', 'apps', 'likes', 'rates', 'inbox']
+const TABS = ['replies', 'apps', 'likes', 'rates', 'inbox', 'f95likes']
 
 /**
  * 通知页：内部 TabList 收纳 [回复, 申请, 点赞, 评分, 站内信] 五个 tab，
@@ -68,6 +70,7 @@ const TABS = ['replies', 'apps', 'likes', 'rates', 'inbox']
  */
 export function NotifyPage({ onNavigate }) {
   const { t } = useTranslation()
+  const { isWindows } = usePlatform()
   const styles = useStyles()
   // 窄屏（≈移动端宽度）：五个页签去掉图标并用 small 尺寸，375px 下能排满一行，
   // 不再依赖横向滑动去翻“看不见”的页签（滑动仍保留为兜底）
@@ -128,6 +131,7 @@ export function NotifyPage({ onNavigate }) {
           <Tab value="replies" icon={isNarrow ? undefined : <Comment24Regular />}>{t('nav.replies')}</Tab>
           <Tab value="apps" icon={isNarrow ? undefined : <PersonAccounts24Regular />}>{t('nav.apps')}</Tab>
           <Tab value="likes" icon={isNarrow ? undefined : <Heart24Regular />}>{t('nav.likes')}</Tab>
+          {isWindows && <Tab value="f95likes">{t('f95.givenLikes')}</Tab>}
           <Tab value="rates" icon={isNarrow ? undefined : <Star24Regular />}>{t('nav.rates')}</Tab>
           <Tab value="inbox" icon={isNarrow ? undefined : <Mail24Regular />}>{t('nav.inbox')}</Tab>
         </TabList>
@@ -140,6 +144,7 @@ export function NotifyPage({ onNavigate }) {
           let content
           const visible = tab === subTab
           if (tab === 'likes') content = <LikeRecords panel="liked" visible={visible} />
+          else if (tab === 'f95likes') content = isWindows && <F95Page active={visible} likedOnly />
           else if (tab === 'rates') content = <LikeRecords panel="rated" visible={visible} />
           else if (tab === 'inbox') content = <MessageInbox visible={visible} />
           else if (tab === 'apps') content = <ApplicationsPage panel="apps" onNavigate={onNavigate} visible={visible} />

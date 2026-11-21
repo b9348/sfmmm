@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { TabList, Tab, makeStyles, tokens } from '@fluentui/react-components'
 import { Cloud24Regular, Person24Regular, ArrowSync24Regular, Comment24Regular } from '@fluentui/react-icons'
+import { F95Page } from '../f95/F95Page'
 import { BrowseMods } from './BrowseMods'
 import { MyMods } from './MyMods'
 import { Discussion } from './Discussion'
@@ -81,7 +82,7 @@ const useStyles = makeStyles({
 })
 
 // tab 顺序即预加载链：当前 tab 激活时预挂载下一个（云→讨论→我的→订阅）
-const TABS = ['browse', 'discuss', 'my', 'records']
+const TABS = ['browse', 'discuss', 'my', 'records', 'f95']
 // 手机端没有下载安装能力，「订阅记录」页（桌面下载任务列表）整页不挂载
 const MOBILE_TABS = ['browse', 'discuss', 'my']
 
@@ -93,7 +94,7 @@ let discussUnread = false
 export function Workshop({ initialModId, initialCommentId, onConsumeNavTarget }) {
   const { t } = useTranslation()
   const styles = useStyles()
-  const { isMobile } = usePlatform()
+  const { isMobile, isWindows } = usePlatform()
   const tabs = isMobile ? MOBILE_TABS : TABS
   // 窄屏（≈移动端宽度）：页签条去掉图标、碎化尺寸，四个页签在 375px 下能排满一行，
   // 不再依赖横向滑动去翻看不到的页签（滑动仍保留为兜底）
@@ -213,6 +214,7 @@ export function Workshop({ initialModId, initialCommentId, onConsumeNavTarget })
           onTabSelect={handleTabSelect}
         >
           <Tab value="browse" icon={isNarrow ? undefined : <Cloud24Regular />}>{t('workshop.cloud')}</Tab>
+          {isWindows && <Tab value="f95">{t('f95.title')}</Tab>}
           <Tab value="discuss" icon={isNarrow ? undefined : <Comment24Regular />}>
             <span className={styles.tabLabel}>
               {t('nav.discuss')}
@@ -235,6 +237,7 @@ export function Workshop({ initialModId, initialCommentId, onConsumeNavTarget })
           const visible = tab === subTab
           let content
           if (tab === 'browse') content = <BrowseMods active={visible} initialModId={initialModId} initialCommentId={initialCommentId} onConsumeNavTarget={onConsumeNavTarget} onDetailOpenChange={handleBrowseDetail} />
+          else if (tab === 'f95') content = isWindows && <F95Page active={visible} />
           else if (tab === 'discuss') content = <Discussion active={visible} onNewContent={markDiscussUnread} onDetailOpenChange={handleDiscussDetail} />
           else if (tab === 'my') content = <MyMods active={visible} onDetailOpenChange={handleMyDetail} />
           else content = <SubscriptionRecords active={visible} />

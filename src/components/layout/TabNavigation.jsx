@@ -71,7 +71,7 @@ export function TabNavigation({ value, onChange, isCollapsed, onToggleCollapse, 
   const { openUser } = useUserNav()
   const { unread, refreshUnread } = useNotification()
   // APK 分支：手机端纯社区模式，不提供本地模组/存档、启动游戏、订阅记录
-  const { isMobile } = usePlatform()
+  const { isMobile, isWindows } = usePlatform()
   // v2 前置版本提醒（启动游戏时触发，见 V2PrereqNoticeProvider）
   const v2Notice = useV2PrereqNotice()
   const [authOpen, setAuthOpen] = useState(false)
@@ -138,6 +138,7 @@ export function TabNavigation({ value, onChange, isCollapsed, onToggleCollapse, 
       // 「订阅记录」依赖桌面下载安装任务表，手机端不展示
       children: [
         { value: 'workshop:browse', label: t('workshop.cloud'), icon: <Cloud24Regular /> },
+        ...(isWindows ? [{ value: 'workshop:f95', label: t('f95.title'), icon: <Library24Regular /> }] : []),
         { value: 'workshop:discuss', label: t('nav.discuss'), icon: <Comment24Regular /> },
         { value: 'workshop:my', label: t('workshop.mine'), icon: <Person24Regular /> },
         ...(isMobile ? [] : [{ value: 'workshop:records', label: t('nav.subscriptions'), icon: <ArrowSync24Regular /> }]),
@@ -169,6 +170,7 @@ export function TabNavigation({ value, onChange, isCollapsed, onToggleCollapse, 
           badge: unread.applications > 0 ? (unread.applications > 99 ? '99+' : unread.applications) : undefined,
         },
         { value: 'notify:likes', label: t('nav.likes'), icon: <Heart24Regular /> },
+        ...(isWindows ? [{ value: 'notify:f95likes', label: t('f95.givenLikes'), icon: <Heart24Regular /> }] : []),
         { value: 'notify:rates', label: t('nav.rates'), icon: <Star24Regular /> },
         {
           value: 'notify:inbox',

@@ -31,6 +31,8 @@ import i18n from '../../i18n'
 import { checkVersion, checkGitHubUpdate, prepareUpdate, applyUpdate, getUpdateStatus, compareVersions, armPendingUpdate, cancelUpdate } from '../../services/updateApi'
 import APP_VERSION from '../../version.js'
 import { DownloadProgress } from '../../components'
+import { F95CacheSettings } from './F95CacheSettings'
+import { F95TranslationSettings } from './F95TranslationSettings'
 import { usePlatform } from '../../hooks/usePlatform'
 
 // 外部链接由构建期环境变量提供（根 .env），未配置时对应入口不渲染
@@ -129,7 +131,7 @@ export function GameSettings({ config, onConfigChange, appUpdateInfo }) {
   const styles = useStyles()
   // 手机端隐藏「游戏目录」和「程序更新」两类桌面独占设置：
   // 前者要读写本地游戏目录，后者是 PC 安装包自更新（APK 更新不走这条链）
-  const { isMobile } = usePlatform()
+  const { isMobile, isWindows } = usePlatform()
   const [gamePath, setGamePath] = useState(config?.game_path || '')
   // 游戏路径含中文等非 ASCII 字符时的红字提示（BepInEx 无法在中文路径下工作）
   const [pathError, setPathError] = useState('')
@@ -704,6 +706,11 @@ export function GameSettings({ config, onConfigChange, appUpdateInfo }) {
           )}
         </div>
       </div>
+
+      {isWindows && <>
+        <F95CacheSettings inline />
+        <F95TranslationSettings inline />
+      </>}
 
       <Divider />
 
