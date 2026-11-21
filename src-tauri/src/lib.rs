@@ -1,6 +1,8 @@
 mod api;
 mod commands;
 pub mod db;
+#[cfg(windows)]
+mod f95;
 mod fs_util;
 mod migrations;
 mod notify_ws;
@@ -66,6 +68,62 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_http::init())
         .invoke_handler(tauri::generate_handler![
+            #[cfg(windows)]
+            f95::f95_open_login,
+            #[cfg(windows)]
+            f95::f95_open_registration,
+            #[cfg(windows)]
+            f95::f95_status,
+            #[cfg(windows)]
+            f95::f95_cached_threads,
+            #[cfg(windows)]
+            f95::f95_cache_location,
+            #[cfg(windows)]
+            f95::f95_set_cache_location,
+            #[cfg(windows)]
+            f95::f95_cached_thread,
+            #[cfg(windows)]
+            f95::f95_set_cache_mode,
+            #[cfg(windows)]
+            f95::f95_set_force_content,
+            #[cfg(windows)]
+            f95::f95_cached_post,
+            #[cfg(windows)]
+            f95::f95_cache_thread_opening,
+            #[cfg(windows)]
+            f95::f95_refresh_cached_post,
+            #[cfg(windows)]
+            f95::f95_discover_threads,
+            #[cfg(windows)]
+            f95::f95_update_threads,
+            #[cfg(windows)]
+            f95::f95_refresh_likes,
+            #[cfg(windows)]
+            f95::reactions::f95_given_likes,
+            #[cfg(windows)]
+            f95::reactions::f95_set_post_like,
+            #[cfg(windows)]
+            f95::translation::f95_translation_settings,
+            #[cfg(windows)]
+            f95::translation::f95_save_translation_settings,
+            #[cfg(windows)]
+            f95::translation::f95_cached_translation,
+            #[cfg(windows)]
+            f95::translation::f95_translate_post,
+            #[cfg(windows)]
+            f95::translation::f95_test_translation,
+            #[cfg(windows)]
+            f95::f95_open_thread,
+            #[cfg(windows)]
+            f95::f95_scan_thread,
+            #[cfg(windows)]
+            f95::f95_stop_scan,
+            #[cfg(windows)]
+            f95::f95_open_post,
+            #[cfg(windows)]
+            f95::downloads::f95_download_attachment,
+            #[cfg(windows)]
+            f95::f95_sign_out,
             commands::system::open_folder,
             commands::system::open_file,
             commands::system::launch_game,
@@ -276,6 +334,10 @@ pub fn run() {
                     .build(),
             )?;
             Ok(())
+        })
+        .on_window_event(|_window, _event| {
+            #[cfg(windows)]
+            f95::handle_window_event(_window, _event);
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

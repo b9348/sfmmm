@@ -97,10 +97,16 @@ fn ensure_downloads_dir(base: &str) -> Result<PathBuf, String> {
     Ok(dir)
 }
 
+#[cfg(windows)]
+pub(crate) fn game_downloads_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let game_path = read_game_path(app)?;
+    ensure_downloads_dir(game_path.trim_end_matches('\\'))
+}
+
 /// 把上传文件名/URL 尾段清洗成安全的 Windows 文件名：
 /// 去掉路径分隔符与查询串，过滤 `< > : " | ? *` 与控制字符，
 /// 去掉首尾空白和结尾的点/空格（Windows 上尾随点与空格是非法名）。
-fn sanitize_file_name(raw: &str) -> String {
+pub(crate) fn sanitize_file_name(raw: &str) -> String {
     let tail = raw.rsplit(['/', '\\']).next().unwrap_or("");
     let tail = tail.split(['?', '#']).next().unwrap_or("");
     let cleaned: String = tail
