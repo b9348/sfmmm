@@ -4,7 +4,7 @@ import { makeStyles, tokens } from '@fluentui/react-components'
 import { useTranslation } from 'react-i18next'
 import { invoke } from '@tauri-apps/api/core'
 
-// 感谢名单地址不写死：由根目录 .env 的 VITE_IMGBED_URL（自有分发域名）构建期注入，
+// 感谢名单地址不写死：由根目录 .env 的 VITE_IMGBED_URL（R2 桶自定义域）构建期注入，
 // 未配置时整个卡片不渲染。
 const IMGBED_BASE = (import.meta.env.VITE_IMGBED_URL || '').trim().replace(/\/+$/, '')
 const ACKNOWLEDGMENTS_URL = IMGBED_BASE ? `${IMGBED_BASE}/file/sfm/thanks/acknowledgments.md` : ''
@@ -105,7 +105,7 @@ function parseSections(markdown) {
 }
 
 /**
- * 通过 Rust reqwest 拉取（绕过 WebView 缓存），返回纯文本
+ * 通过 Rust reqwest 拉取 R2 公开对象（带时间戳绕过 CDN 缓存），返回纯文本
  */
 async function fetchViaRust(url) {
   const raw = await invoke('http_request', { url, method: 'GET' })
@@ -148,8 +148,8 @@ export function Acknowledgments() {
     if (!ACKNOWLEDGMENTS_URL) return
     let cancelled = false
 
-    // 第二步：通过 Rust reqwest 静默拉取最新内容（无 WebView 缓存）
-    fetchViaRust(ACKNOWLEDGMENTS_URL)
+    // 第二步：通过 Rust reqwest 静默拉取最新内容（时间戳绕过 R2/CDN 缓存）
+    fetchViaRust(`${ACKNOWLEDGMENTS_URL}?v=${Date.now()}`)
       .then((text) => {
         if (cancelled) return
         // 写入缓存
