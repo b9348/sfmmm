@@ -48,6 +48,7 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "str
 encoding_rs = "0.8"
 sha2 = { workspace = true }
 hex = { workspace = true }
+uuid = { version = "1", features = ["v4"] }
 # 传输信封加解密（/api/user/rpc 双向）：桌面端仍不直连数据库，只对传输层
 # 信封做 AES-256-GCM 解封/封装；密钥为独立的 DESKTOP_XPORT_KEY，与 DB 无关。
 aes-gcm = { workspace = true }

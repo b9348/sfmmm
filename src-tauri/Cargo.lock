@@ -160,6 +160,7 @@ dependencies = [
  "tauri-plugin-sql",
  "tokio",
  "tokio-tungstenite",
+ "uuid",
  "winreg 0.52.0",
  "zeroize",
  "zip",
