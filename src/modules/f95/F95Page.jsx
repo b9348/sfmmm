@@ -78,7 +78,10 @@ const useStyles = makeStyles({
     width: '100%', maxWidth: '1060px', boxSizing: 'border-box', margin: '0 auto',
     padding: tokens.spacingHorizontalL, overflowWrap: 'anywhere',
   },
-  cachedActions: { display: 'flex', flexWrap: 'wrap', gap: tokens.spacingHorizontalS },
+  cachedActions: {
+    display: 'flex', alignItems: 'center', flexWrap: 'wrap',
+    flexShrink: 0, gap: tokens.spacingHorizontalS,
+  },
   cachedText: { whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' },
   cachedLinks: { display: 'grid', gap: tokens.spacingVerticalS, overflowWrap: 'anywhere' },
 })
@@ -557,70 +560,78 @@ export function F95Page({ active = true, likedOnly = false }) {
           </div>
         </header>
         {original ? active && <F95WebPane target={original.target} /> : (
-          <>
-            <div className={styles.cachedActions}>
-              {likeButton(cachedPost.threadUrl, cachedPost.id, cachedPost.first, cachedPost.likes)}
-              {!cachedPost.content_html && signedIn && busy !== 'f95_refresh_cached_post' && (
-                <Button size="small" disabled={Boolean(busy)}
-                  onClick={() => run('f95_refresh_cached_post', { threadUrl: cachedPost.threadUrl, postId: cachedPost.id })}>
-                  {t('f95.restoreLayout')}
-                </Button>
-              )}
-              <Button size="small" disabled={!signedIn || Boolean(busy)} onClick={() => setOriginal({
-                target: { kind: 'post', value: cachedPost.id }, title, floor,
-              })}>
-                {t('f95.openOriginalPost')}
-              </Button>
-            </div>
-            {attachmentNotice}
-            {error && <MessageBar intent="error">
-              <MessageBarBody>{t('f95.errors.' + error, { defaultValue: t('f95.errors.unexpected') })}</MessageBarBody>
-            </MessageBar>}
-            <div className={styles.readerBody}>
-              <article className={styles.cachedArticle} data-f95-cached-article="">
-                <F95TranslatedPost key={cachedPost.id + (cachedPost.content_html ?? cachedPost.content ?? '')} postId={cachedPost.id}>
-                  {cachedPost.content_html ? (
-                    <CachedF95Post
-                      html={cachedPost.content_html}
-                      baseUrl={cachedPost.threadUrl}
-                      spoilerLabel={t('f95.cachedSpoiler')}
-                      onAttachment={downloadAttachment}
-                      attachmentsDisabled={Boolean(busy) || attachment?.state === 'running'}
-                    />
-                  ) : (
-                    <>
-                      {busy === 'f95_refresh_cached_post' ? (
-                        <div data-sfmmm-translation-status="">
-                          <Spinner size="tiny" label={t('f95.restoringLayout')} />
-                        </div>
-                      ) : (
-                        <Text size="small" className={styles.summary} data-sfmmm-translation-status="">
-                          {t(layoutError ? 'f95.restoreLayoutFailed' : 'f95.plainTextCache')}
-                        </Text>
-                      )}
-                      {(cachedPost.content ?? '').split(/\n{2,}/).filter(Boolean).map((paragraph, index) => (
-                        <Text key={index} as="p" className={styles.cachedText}>{paragraph}</Text>
-                      ))}
-                      {cachedPost.links.length > 0 && (
-                        <ul className={styles.cachedLinks} data-sfmmm-translation-status="">
-                          {cachedPost.links.map(link => (
-                            <li key={link.url}>
-                              {isF95AttachmentLink(link.url) ? (
-                                <Link as="button" disabled={Boolean(busy) || attachment?.state === 'running'}
-                                  onClick={() => downloadAttachment(link.url, link.label)}>
-                                  {link.label}
-                                </Link>
-                              ) : <Link href={link.url}>{link.label}</Link>}
-                            </li>
-                          ))}
-                        </ul>
-                      )}
-                    </>
+          <F95TranslatedPost
+            key={cachedPost.id + (cachedPost.content_html ?? cachedPost.content ?? '')}
+            postId={cachedPost.id}
+            renderLayout={({ actions, notice, body }) => (
+              <>
+                <div className={styles.cachedActions}>
+                  {likeButton(cachedPost.threadUrl, cachedPost.id, cachedPost.first, cachedPost.likes)}
+                  {!cachedPost.content_html && signedIn && busy !== 'f95_refresh_cached_post' && (
+                    <Button size="small" disabled={Boolean(busy)}
+                      onClick={() => run('f95_refresh_cached_post', { threadUrl: cachedPost.threadUrl, postId: cachedPost.id })}>
+                      {t('f95.restoreLayout')}
+                    </Button>
                   )}
-                </F95TranslatedPost>
-              </article>
-            </div>
-          </>
+                  <Button size="small" disabled={!signedIn || Boolean(busy)} onClick={() => setOriginal({
+                    target: { kind: 'post', value: cachedPost.id }, title, floor,
+                  })}>
+                    {t('f95.openOriginalPost')}
+                  </Button>
+                  {actions}
+                </div>
+                {attachmentNotice}
+                {error && <MessageBar intent="error">
+                  <MessageBarBody>{t('f95.errors.' + error, { defaultValue: t('f95.errors.unexpected') })}</MessageBarBody>
+                </MessageBar>}
+                {notice}
+                <div className={styles.readerBody}>
+                  <article className={styles.cachedArticle} data-f95-cached-article="">
+                    {body}
+                  </article>
+                </div>
+              </>
+            )}
+          >
+            {cachedPost.content_html ? (
+              <CachedF95Post
+                html={cachedPost.content_html}
+                baseUrl={cachedPost.threadUrl}
+                spoilerLabel={t('f95.cachedSpoiler')}
+                onAttachment={downloadAttachment}
+                attachmentsDisabled={Boolean(busy) || attachment?.state === 'running'}
+              />
+            ) : (
+              <>
+                {busy === 'f95_refresh_cached_post' ? (
+                  <div data-sfmmm-translation-status="">
+                    <Spinner size="tiny" label={t('f95.restoringLayout')} />
+                  </div>
+                ) : (
+                  <Text size="small" className={styles.summary} data-sfmmm-translation-status="">
+                    {t(layoutError ? 'f95.restoreLayoutFailed' : 'f95.plainTextCache')}
+                  </Text>
+                )}
+                {(cachedPost.content ?? '').split(/\n{2,}/).filter(Boolean).map((paragraph, index) => (
+                  <Text key={index} as="p" className={styles.cachedText}>{paragraph}</Text>
+                ))}
+                {cachedPost.links.length > 0 && (
+                  <ul className={styles.cachedLinks} data-sfmmm-translation-status="">
+                    {cachedPost.links.map(link => (
+                      <li key={link.url}>
+                        {isF95AttachmentLink(link.url) ? (
+                          <Link as="button" disabled={Boolean(busy) || attachment?.state === 'running'}
+                            onClick={() => downloadAttachment(link.url, link.label)}>
+                            {link.label}
+                          </Link>
+                        ) : <Link href={link.url}>{link.label}</Link>}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </>
+            )}
+          </F95TranslatedPost>
         )}
       </section>
     )

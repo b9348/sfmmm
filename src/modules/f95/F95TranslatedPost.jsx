@@ -1,19 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
-import { Button, MessageBar, MessageBarBody, Spinner, Switch, makeStyles, tokens } from '@fluentui/react-components'
+import { Button, MessageBar, MessageBarBody, Spinner, Switch } from '@fluentui/react-components'
 import { Channel, invoke } from '@tauri-apps/api/core'
 import { useTranslation } from 'react-i18next'
 import { createTranslationLayout } from './translationLayout'
 
-const useStyles = makeStyles({
-  toolbar: {
-    display: 'flex', alignItems: 'center', flexWrap: 'wrap',
-    gap: tokens.spacingHorizontalM, marginBlockEnd: tokens.spacingVerticalM,
-  },
-})
-
-export function F95TranslatedPost({ postId, children }) {
+export function F95TranslatedPost({ postId, children, renderLayout }) {
   const { t } = useTranslation()
-  const styles = useStyles()
   const source = useRef(null)
   const layout = useRef(null)
   const request = useRef(null)
@@ -74,25 +66,23 @@ export function F95TranslatedPost({ postId, children }) {
     }
   }
 
-  return (
+  const actions = (
     <>
-      <div className={styles.toolbar}>
-        {count < total && (
-          <Button size="small" disabled={busy} onClick={translatePost}>
-            {t(count ? 'f95.translation.continue' : 'f95.translation.translate')}
-          </Button>
-        )}
-        {count > 0 && <Switch
-          label={t('f95.translation.show')}
-          checked={shown}
-          onChange={(_, data) => { setShown(data.checked); layout.current?.show(data.checked) }}
-        />}
-        {busy && <Spinner size="tiny" label={t('f95.translation.progress', { count, total })} />}
-      </div>
-      {error && <MessageBar intent="error"><MessageBarBody>
-        {t('f95.translation.errors.' + error, { defaultValue: t('f95.translation.errors.generic') })}
-      </MessageBarBody></MessageBar>}
-      <div ref={source}>{children}</div>
+      {count < total && (
+        <Button size="small" disabled={busy} onClick={translatePost}>
+          {t(count ? 'f95.translation.continue' : 'f95.translation.translate')}
+        </Button>
+      )}
+      {count > 0 && <Switch
+        label={t('f95.translation.show')}
+        checked={shown}
+        onChange={(_, data) => { setShown(data.checked); layout.current?.show(data.checked) }}
+      />}
+      {busy && <Spinner size="tiny" label={t('f95.translation.progress', { count, total })} />}
     </>
   )
+  const notice = error && <MessageBar intent="error"><MessageBarBody>
+    {t('f95.translation.errors.' + error, { defaultValue: t('f95.translation.errors.generic') })}
+  </MessageBarBody></MessageBar>
+  return renderLayout({ actions, notice, body: <div ref={source}>{children}</div> })
 }
