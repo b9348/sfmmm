@@ -810,18 +810,10 @@ pub async fn f95_open_account(
     let app = window.app_handle();
     let destination = Url::parse(if register { REGISTER } else { LOGIN }).unwrap();
     if let Some(browser) = app.get_webview_window(LABEL) {
-        let can_resume = browser.url().ok().is_some_and(|url| {
-            if url.origin().ascii_serialization() != ORIGIN {
-                return false;
-            }
-            let section = url.path().split('/').nth(1).unwrap_or_default();
-            section == "cdn-cgi"
-                || if register {
-                    matches!(section, "register" | "account-confirmation")
-                } else {
-                    matches!(section, "login" | "two-step" | "lost-password")
-                }
-        });
+        let can_resume = browser
+            .url()
+            .ok()
+            .is_some_and(|url| can_resume_account_page(&url, register));
         if !can_resume {
             browser.navigate(destination).map_err(|_| "windowOpen")?;
         }
@@ -837,6 +829,21 @@ pub async fn f95_open_account(
         .build()
         .map_err(|_| "windowOpen")?;
     reader::position_pane(&window, &browser, &bounds)
+}
+
+fn can_resume_account_page(url: &Url, register: bool) -> bool {
+    if url.origin().ascii_serialization() != ORIGIN {
+        return false;
+    }
+    let mut segments = url.path().trim_matches('/').split('/');
+    // F95 redirects /register/ to /login/register. Match the nested route
+    // before deciding whether the active page can resume sign-in.
+    match (segments.next(), segments.next()) {
+        (Some("register" | "account-confirmation"), _)
+        | (Some("login"), Some("register" | "account-confirmation")) => register,
+        (Some("login" | "two-step" | "lost-password"), _) => !register,
+        _ => false,
+    }
 }
 
 fn browser_profile(app: &tauri::AppHandle) -> Result<std::path::PathBuf, &'static str> {
@@ -1777,6 +1784,27 @@ async fn wait_for_browser<T: serde::de::DeserializeOwned>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn account_resume_distinguishes_the_registration_redirect_from_login() {
+        for route in ["/register/", "/login/register", "/login/register/verify"] {
+            let url = Url::parse(&format!("{ORIGIN}{route}")).unwrap();
+            assert!(can_resume_account_page(&url, true));
+            assert!(!can_resume_account_page(&url, false));
+        }
+        for route in [
+            "/login/",
+            "/login/two-step",
+            "/two-step/",
+            "/lost-password/",
+        ] {
+            let url = Url::parse(&format!("{ORIGIN}{route}")).unwrap();
+            assert!(can_resume_account_page(&url, false));
+            assert!(!can_resume_account_page(&url, true));
+        }
+        let other_site = Url::parse("https://example.org/login/register").unwrap();
+        assert!(!can_resume_account_page(&other_site, true));
+    }
 
     fn page(number: usize, candidates: usize) -> SamplePage {
         SamplePage {
