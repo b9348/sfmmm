@@ -1,6 +1,6 @@
-(postId) => {
+(postId, reader) => {
   if (window !== window.top || location.origin !== 'https://f95zone.to' ||
-      !location.pathname.startsWith('/threads/')) return
+      (reader && !location.pathname.startsWith('/threads/'))) return
 
   const applyLayout = () => {
     const style = document.createElement('style')
@@ -8,14 +8,15 @@
       .samBannerUnit[data-position], .samCodeUnit[data-position] {
         display: none !important;
       }
+      .p-body { min-width: 0; }
+    ` + (reader ? `
       article.message--post:not([data-sfmmm-reader-post]),
       [data-sfmmm-reader-path]:not([data-sfmmm-reader-post]) >
         :not([data-sfmmm-reader-path], .overlay-container, .tooltip, .flashMessage) {
         display: none !important;
       }
-      .p-body { min-width: 0; }
       .message-body { overflow-wrap: anywhere; }
-    `
+    ` : '')
     document.documentElement.append(style)
   }
   const focusPost = () => {
@@ -42,6 +43,7 @@
     })
     observer.observe(document, { childList: true })
   }
+  if (!reader) return
   if (!focusPost()) {
     const observer = new MutationObserver(() => {
       if (focusPost()) observer.disconnect()

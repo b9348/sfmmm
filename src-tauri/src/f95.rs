@@ -13,7 +13,7 @@ use std::{
     time::Duration,
 };
 use tauri::ipc::Channel;
-use tauri::webview::{NewWindowResponse, PageLoadEvent};
+use tauri::webview::NewWindowResponse;
 use tauri::{Manager, Url, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 
 pub(crate) const LABEL: &str = "f95-login";
@@ -40,10 +40,6 @@ const REGISTER: &str = "https://f95zone.to/register/";
 
 const SEARCH: &str = "https://f95zone.to/search/";
 static REACTION_JOB: AtomicU64 = AtomicU64::new(0);
-static LOGIN_WINDOW_PENDING: AtomicBool = AtomicBool::new(false);
-static LOGIN_WAITING_FOR_PAGE: AtomicBool = AtomicBool::new(false);
-static LOGIN_PAGE_READY: AtomicBool = AtomicBool::new(false);
-static LOGIN_REQUESTED_AT: Mutex<Option<std::time::Instant>> = Mutex::new(None);
 static STOP_SCAN: AtomicBool = AtomicBool::new(false);
 static BROWSER_WORK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
@@ -797,67 +793,43 @@ fn require_main(window: &WebviewWindow) -> Result<(), &'static str> {
 }
 
 #[tauri::command]
-pub async fn f95_open_login(window: WebviewWindow) -> Result<(), &'static str> {
-    open_account_window(window, false).await
-}
-
-#[tauri::command]
-pub async fn f95_open_registration(window: WebviewWindow) -> Result<(), &'static str> {
-    open_account_window(window, true).await
-}
-
-async fn open_account_window(window: WebviewWindow, register: bool) -> Result<(), &'static str> {
+pub async fn f95_open_account(
+    window: WebviewWindow,
+    register: bool,
+    bounds: reader::ReaderBounds,
+) -> Result<(), &'static str> {
     require_main(&window)?;
     let _work = BROWSER_WORK.lock().await;
     let app = window.app_handle();
     let destination = Url::parse(if register { REGISTER } else { LOGIN }).unwrap();
-
     if let Some(browser) = app.get_webview_window(LABEL) {
-        let is_registration = browser.url().ok().is_some_and(|url| {
-            url.origin().ascii_serialization() == ORIGIN
-                && url.path().trim_matches('/').split('/').next() == Some("register")
+        let can_resume = browser.url().ok().is_some_and(|url| {
+            if url.origin().ascii_serialization() != ORIGIN {
+                return false;
+            }
+            let section = url.path().split('/').nth(1).unwrap_or_default();
+            section == "cdn-cgi"
+                || if register {
+                    matches!(section, "register" | "account-confirmation")
+                } else {
+                    matches!(section, "login" | "two-step" | "lost-password")
+                }
         });
-        if register != is_registration {
+        if !can_resume {
             browser.navigate(destination).map_err(|_| "windowOpen")?;
         }
-        show_login_window(&browser)?;
-        LOGIN_WINDOW_PENDING.store(!register, Ordering::Relaxed);
-        LOGIN_WAITING_FOR_PAGE.store(false, Ordering::Relaxed);
-        return Ok(());
+        return reader::position_pane(&window, &browser, &bounds);
     }
-    LOGIN_PAGE_READY.store(false, Ordering::Relaxed);
-    let mut builder = WebviewWindowBuilder::new(app, LABEL, WebviewUrl::External(destination))
-        .title("F95Zone")
-        .visible(false)
-        .on_page_load(|_, page| {
-            if matches!(page.event(), PageLoadEvent::Finished)
-                && page.url().origin().ascii_serialization() == ORIGIN
-            {
-                LOGIN_PAGE_READY.store(true, Ordering::Relaxed);
-            }
-        })
-        .inner_size(980.0, 720.0)
-        .data_directory(browser_profile(app)?)
-        .devtools(false)
+
+    let browser = reader::pane_builder(&window, LABEL, "F95Zone Account", destination, &bounds)?
+        .initialization_script(reader::page_layout(None, false))
         .on_navigation(|url| {
             url.origin().ascii_serialization() == ORIGIN
                 || downloads::allows_attachment_navigation(url)
         })
-        .on_new_window(|_, _| NewWindowResponse::Deny)
-        .on_download(downloads::handle_download);
-
-    if let Some(url) = browser_proxy() {
-        builder = builder.proxy_url(url);
-    }
-    let browser = builder.build().map_err(|_| "windowOpen")?;
-    LOGIN_WINDOW_PENDING.store(!register, Ordering::Relaxed);
-    LOGIN_WAITING_FOR_PAGE.store(!register, Ordering::Relaxed);
-    if register {
-        show_login_window(&browser)?;
-    } else {
-        *LOGIN_REQUESTED_AT.lock().map_err(|_| "windowOpen")? = Some(std::time::Instant::now());
-    }
-    Ok(())
+        .build()
+        .map_err(|_| "windowOpen")?;
+    reader::position_pane(&window, &browser, &bounds)
 }
 
 fn browser_profile(app: &tauri::AppHandle) -> Result<std::path::PathBuf, &'static str> {
@@ -872,11 +844,6 @@ fn browser_proxy() -> Option<Url> {
         .ok()
         .and_then(|value| Url::parse(&value).ok())
         .filter(|url| matches!(url.scheme(), "http" | "socks5"))
-}
-
-fn show_login_window(browser: &WebviewWindow) -> Result<(), &'static str> {
-    browser.show().map_err(|_| "windowOpen")?;
-    browser.set_focus().map_err(|_| "windowOpen")
 }
 
 #[derive(serde::Serialize)]
@@ -895,23 +862,7 @@ pub async fn f95_status(window: WebviewWindow) -> Result<F95Status, &'static str
             account: None,
         });
     };
-    let (mut status, account) = browser_session(&browser)?;
-    if status == "signedIn" && LOGIN_WINDOW_PENDING.load(Ordering::Relaxed) {
-        browser.hide().map_err(|_| "windowOpen")?;
-        LOGIN_WINDOW_PENDING.store(false, Ordering::Relaxed);
-        LOGIN_WAITING_FOR_PAGE.store(false, Ordering::Relaxed);
-    } else if status == "pending" && LOGIN_WAITING_FOR_PAGE.load(Ordering::Relaxed) {
-        let waited = LOGIN_REQUESTED_AT
-            .lock()
-            .map_err(|_| "windowOpen")?
-            .is_some_and(|start| start.elapsed() >= Duration::from_secs(4));
-        if LOGIN_PAGE_READY.load(Ordering::Relaxed) || waited {
-            show_login_window(&browser)?;
-            LOGIN_WAITING_FOR_PAGE.store(false, Ordering::Relaxed);
-        } else {
-            status = "loadingLogin";
-        }
-    }
+    let (status, account) = browser_session(&browser)?;
     Ok(F95Status { status, account })
 }
 
@@ -949,8 +900,6 @@ pub async fn f95_sign_out(window: WebviewWindow) -> Result<&'static str, &'stati
             .map_err(|_| "sessionCheck")?;
         browser.destroy().map_err(|_| "windowOpen")?;
     }
-    LOGIN_WINDOW_PENDING.store(false, Ordering::Relaxed);
-    LOGIN_WAITING_FOR_PAGE.store(false, Ordering::Relaxed);
     downloads::clear_attachment_download();
     Ok("signedOut")
 }

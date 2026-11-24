@@ -11,7 +11,7 @@ import { useF95BrowseStyles, useF95CardStyles } from './browseStyles'
 import { CachedF95Post } from './CachedF95Post'
 import { F95TranslationSettings } from '../settings/F95TranslationSettings'
 import { F95TranslatedPost } from './F95TranslatedPost'
-import { F95OriginalReader } from './F95OriginalReader'
+import { F95WebPane } from './F95WebPane'
 import { ArrowLeft20Regular } from '@fluentui/react-icons'
 import { isF95AttachmentLink } from './attachmentLinks'
 
@@ -111,6 +111,7 @@ export function F95Page({ active = true, likedOnly = false }) {
   const [forceContent, setForceContent] = useState(false)
   const [cachedPost, setCachedPost] = useState(null)
   const [original, setOriginal] = useState(null)
+  const [accountPage, setAccountPage] = useState(null)
   const [layoutError, setLayoutError] = useState(false)
   const [attachment, setAttachment] = useState(null)
   const [selectedThread, setSelectedThread] = useState(null)
@@ -131,7 +132,7 @@ export function F95Page({ active = true, likedOnly = false }) {
   const scanning = discovering || updatingThreads || refreshingLikes || busy === 'f95_scan_thread'
   const sample = selectedThread ? scans[selectedThread.url] : null
   const contentMode = forceContent || sample?.mode === 'content'
-  const reading = Boolean(cachedPost || original)
+  const reading = Boolean(cachedPost || original || accountPage)
   const activityLabel = fetchingOpening ? t('f95.cachingOpening')
     : discovering ? t('f95.discovering')
     : updatingThreads ? t('f95.updatingThreads')
@@ -296,15 +297,14 @@ export function F95Page({ active = true, likedOnly = false }) {
         return
       }
       await invoke(command, args)
-      if (command === 'f95_open_registration') return
       if (command === 'f95_sign_out') {
         currentScan.current = null
         accountRef.current = null
         setGiven(emptyLikes)
         setGivenPartial(false)
         setGivenUnresolved(0)
+        setStatus('signedOut')
       }
-      setStatus(command === 'f95_open_login' ? 'loadingLogin' : 'signedOut')
     } catch (reason) {
       if (String(reason) === 'scanStopped') setStopped(true)
       else if (String(reason) !== 'givenBrowserOpen' || !args?.quiet) setError(String(reason))
@@ -361,6 +361,7 @@ export function F95Page({ active = true, likedOnly = false }) {
           const result = await invoke('f95_status')
           if (mounted && !action.current) {
             setStatus(result.status)
+            if (result.status === 'signedIn') setAccountPage(null)
             if (accountRef.current !== result.account || result.status !== 'signedIn') {
               accountRef.current = result.account
               setGiven(emptyLikes)
@@ -416,7 +417,7 @@ export function F95Page({ active = true, likedOnly = false }) {
     if (attachmentRequest.current) return
     if (!signedIn) {
       setAttachment({ state: 'login' })
-      await run('f95_open_login')
+      setAccountPage('login')
       return
     }
     attachmentRequest.current = true
@@ -427,14 +428,14 @@ export function F95Page({ active = true, likedOnly = false }) {
     } catch (reason) {
       if (String(reason) === 'sessionCheck') {
         setAttachment({ state: 'login' })
-        await run('f95_open_login')
+        setAccountPage('login')
       } else {
         setAttachment({ state: 'error', reason: String(reason) })
       }
     } finally {
       attachmentRequest.current = false
     }
-  }, [signedIn, run])
+  }, [signedIn])
 
   useEffect(() => {
     if (attachment?.state !== 'done') return
@@ -504,9 +505,18 @@ export function F95Page({ active = true, likedOnly = false }) {
   const currentPage = Math.min(page, totalPages)
   const entries = cards.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE)
 
-  function openCard(entry) {
+  function rememberListScroll() {
     const container = pageRoot.current?.parentElement?.parentElement
     if (container) listScroll.current = { container, top: container.scrollTop }
+  }
+
+  function openAccount(mode) {
+    rememberListScroll()
+    setAccountPage(mode)
+  }
+
+  function openCard(entry) {
+    rememberListScroll()
     if (entry.hasContent) {
       run('f95_cached_post', { threadUrl: entry.thread.url, postId: entry.id }, signedIn)
     } else if (entry.kind === 'thread') {
@@ -516,6 +526,20 @@ export function F95Page({ active = true, likedOnly = false }) {
     } else {
       setOriginal({ target: { kind: 'post', value: entry.id }, title: entry.thread.title, floor: entry.title })
     }
+  }
+
+  if (accountPage) {
+    return (
+      <section className={styles.reader} data-sfmmm-f95-view="">
+        <header className={styles.readerHeading}>
+          <Button icon={<ArrowLeft20Regular />} onClick={() => setAccountPage(null)}>
+            {t(cachedPost ? 'f95.backToCachedPost' : 'f95.backToResults')}
+          </Button>
+          <h2 className={styles.readerTitle}>{t(accountPage === 'register' ? 'f95.register' : 'f95.accountLogin')}</h2>
+        </header>
+        {active && <F95WebPane key={accountPage} accountMode={accountPage} />}
+      </section>
+    )
   }
 
   if (original || cachedPost) {
@@ -532,7 +556,7 @@ export function F95Page({ active = true, likedOnly = false }) {
             <Text size="small">{[original ? t('f95.originalPostView') : t('f95.cachedContentTitle'), floor].filter(Boolean).join(' · ')}</Text>
           </div>
         </header>
-        {original ? active && <F95OriginalReader target={original.target} /> : (
+        {original ? active && <F95WebPane target={original.target} /> : (
           <>
             <div className={styles.cachedActions}>
               {likeButton(cachedPost.threadUrl, cachedPost.id, cachedPost.first, cachedPost.likes)}
@@ -629,7 +653,6 @@ export function F95Page({ active = true, likedOnly = false }) {
                 )}
               </div>
             )}
-            {(busy === 'f95_open_login' || status === 'loadingLogin') && <Spinner size="tiny" label={t('f95.webLoginLoading')} />}
             {syncingGiven && <Spinner size="tiny" label={t('f95.syncingGiven')} />}
             {givenPartial && <MessageBar intent="warning">
               <MessageBarBody>{t('f95.givenPartial')}</MessageBarBody>
@@ -704,10 +727,10 @@ export function F95Page({ active = true, likedOnly = false }) {
           </Button>
         ) : (
           <div className={styles.actions}>
-            <Button size="small" disabled={Boolean(busy)} onClick={() => run('f95_open_login')}>
-              {t(status === 'pending' || status === 'loadingLogin' ? 'f95.webLoginResume' : 'f95.login')}
+            <Button size="small" disabled={Boolean(busy)} onClick={() => openAccount('login')}>
+              {t(status === 'pending' ? 'f95.webLoginResume' : 'f95.login')}
             </Button>
-            <Link as="button" disabled={Boolean(busy)} onClick={() => run('f95_open_registration')}>
+            <Link as="button" disabled={Boolean(busy)} onClick={() => openAccount('register')}>
               {t('f95.register')}
             </Link>
           </div>

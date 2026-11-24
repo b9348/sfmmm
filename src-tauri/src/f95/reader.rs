@@ -31,6 +31,43 @@ impl ReaderBounds {
     }
 }
 
+pub(super) fn pane_builder<'a>(
+    window: &'a WebviewWindow,
+    label: &str,
+    title: &str,
+    url: Url,
+    bounds: &ReaderBounds,
+) -> Result<WebviewWindowBuilder<'a, tauri::Wry, tauri::AppHandle>, &'static str> {
+    let (x, y, width, height) = bounds.within(window)?;
+    let app = window.app_handle();
+    // A native child keeps SFMMM's main Tauri webview and IPC intact.
+    let mut builder = WebviewWindowBuilder::new(app, label, WebviewUrl::External(url))
+        .title(title)
+        .parent_raw(window.hwnd().map_err(|_| "windowOpen")?)
+        .decorations(false)
+        .shadow(false)
+        .visible(false)
+        .focused(false)
+        .skip_taskbar(true)
+        .position(x, y)
+        .inner_size(width.max(1.0), height.max(1.0))
+        .data_directory(browser_profile(app)?)
+        .devtools(false)
+        .on_new_window(|_, _| NewWindowResponse::Deny)
+        .on_download(downloads::handle_download);
+    if let Some(proxy) = browser_proxy() {
+        builder = builder.proxy_url(proxy);
+    }
+    Ok(builder)
+}
+
+pub(super) fn page_layout(post_id: Option<u64>, focus_post: bool) -> String {
+    format!(
+        "({PAGE_STYLE})({}, {focus_post})",
+        serde_json::json!(post_id.map(|id| id.to_string()))
+    )
+}
+
 #[tauri::command]
 pub async fn f95_open_reader(
     window: WebviewWindow,
@@ -58,29 +95,12 @@ pub async fn f95_open_reader(
             (url, None, Some(id))
         }
     };
-    let (x, y, width, height) = bounds.within(&window)?;
     let app = window.app_handle();
     if let Some(reader) = app.get_webview_window(LABEL) {
         reader.destroy().map_err(|_| "windowOpen")?;
     }
-    // The reader is a native child window. The original SFMMM webview stays the
-    // only webview owned by the main Tauri window, including for its IPC commands.
-    let mut builder = WebviewWindowBuilder::new(app, LABEL, WebviewUrl::External(url))
-        .title("F95Zone Reader")
-        .parent_raw(window.hwnd().map_err(|_| "windowOpen")?)
-        .decorations(false)
-        .shadow(false)
-        .visible(false)
-        .focused(false)
-        .skip_taskbar(true)
-        .position(x, y)
-        .inner_size(width.max(1.0), height.max(1.0))
-        .data_directory(browser_profile(app)?)
-        .devtools(false)
-        .initialization_script(format!(
-            "({PAGE_STYLE})({})",
-            serde_json::json!(post_id.map(|id| id.to_string()))
-        ))
+    let reader = pane_builder(&window, LABEL, "F95Zone Reader", url, &bounds)?
+        .initialization_script(page_layout(post_id, true))
         .on_navigation(move |url| {
             if let Some(id) = thread_id(url) {
                 return opening_thread_id
@@ -95,28 +115,31 @@ pub async fn f95_open_reader(
                     }))
                 || downloads::attachment_id(url).is_some()
         })
-        .on_new_window(|_, _| NewWindowResponse::Deny)
-        .on_download(downloads::handle_download);
-    if let Some(proxy) = browser_proxy() {
-        builder = builder.proxy_url(proxy);
-    }
-    let reader = builder.build().map_err(|_| "windowOpen")?;
-    if width > 0.0 && height > 0.0 {
-        reader.show().map_err(|_| "windowOpen")?;
-    }
-    Ok(())
+        .build()
+        .map_err(|_| "windowOpen")?;
+    position_pane(&window, &reader, &bounds)
 }
 
 #[tauri::command]
 pub fn f95_position_reader(
     window: WebviewWindow,
     bounds: ReaderBounds,
+    account: bool,
 ) -> Result<(), &'static str> {
     require_main(&window)?;
-    let Some(reader) = window.app_handle().get_webview_window(LABEL) else {
+    let label = if account { super::LABEL } else { LABEL };
+    let Some(reader) = window.app_handle().get_webview_window(label) else {
         return Ok(());
     };
-    let (x, y, width, height) = bounds.within(&window)?;
+    position_pane(&window, &reader, &bounds)
+}
+
+pub(super) fn position_pane(
+    window: &WebviewWindow,
+    reader: &WebviewWindow,
+    bounds: &ReaderBounds,
+) -> Result<(), &'static str> {
+    let (x, y, width, height) = bounds.within(window)?;
     if width <= 0.0 || height <= 0.0 {
         return reader.hide().map_err(|_| "windowOpen");
     }
@@ -133,10 +156,15 @@ pub fn f95_position_reader(
 }
 
 #[tauri::command]
-pub fn f95_close_reader(window: WebviewWindow) -> Result<(), &'static str> {
+pub fn f95_close_reader(window: WebviewWindow, account: bool) -> Result<(), &'static str> {
     require_main(&window)?;
-    if let Some(reader) = window.app_handle().get_webview_window(LABEL) {
-        reader.destroy().map_err(|_| "windowOpen")?;
+    let label = if account { super::LABEL } else { LABEL };
+    if let Some(reader) = window.app_handle().get_webview_window(label) {
+        if account {
+            reader.hide().map_err(|_| "windowOpen")?;
+        } else {
+            reader.destroy().map_err(|_| "windowOpen")?;
+        }
     }
     Ok(())
 }

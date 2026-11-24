@@ -69,9 +69,7 @@ pub fn run() {
         .plugin(tauri_plugin_http::init())
         .invoke_handler(tauri::generate_handler![
             #[cfg(windows)]
-            f95::f95_open_login,
-            #[cfg(windows)]
-            f95::f95_open_registration,
+            f95::f95_open_account,
             #[cfg(windows)]
             f95::f95_status,
             #[cfg(windows)]
