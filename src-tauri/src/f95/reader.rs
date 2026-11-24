@@ -152,7 +152,57 @@ pub(super) fn position_pane(
     if !reader.is_visible().unwrap_or(false) {
         reader.show().map_err(|_| "windowOpen")?;
     }
-    Ok(())
+    bring_pane_forward(reader)
+}
+
+pub(super) fn bring_pane_forward(reader: &WebviewWindow) -> Result<(), &'static str> {
+    use std::ffi::c_void;
+
+    const SWP_NOSIZE: u32 = 0x0001;
+    const SWP_NOMOVE: u32 = 0x0002;
+    const SWP_NOACTIVATE: u32 = 0x0010;
+
+    #[link(name = "user32")]
+    extern "system" {
+        fn SetWindowPos(
+            window: *mut c_void,
+            insert_after: *mut c_void,
+            x: i32,
+            y: i32,
+            width: i32,
+            height: i32,
+            flags: u32,
+        ) -> i32;
+    }
+
+    let pane = reader.clone();
+    reader
+        .run_on_main_thread(move || {
+            let Ok(hwnd) = pane.hwnd() else { return };
+            if pane.is_visible().ok() != Some(true) {
+                return;
+            }
+            // Tauri's size/position setters preserve z-order. On Windows the
+            // main WebView2 surface can sit above this sibling HWND.
+            let raised = unsafe {
+                SetWindowPos(
+                    hwnd.0,
+                    std::ptr::null_mut(), // HWND_TOP, within the same parent
+                    0,
+                    0,
+                    0,
+                    0,
+                    SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE,
+                )
+            };
+            if raised == 0 {
+                log::warn!(
+                    "Could not raise embedded F95 pane: {}",
+                    std::io::Error::last_os_error()
+                );
+            }
+        })
+        .map_err(|_| "windowOpen")
 }
 
 #[tauri::command]

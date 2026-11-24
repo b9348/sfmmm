@@ -23,6 +23,13 @@ pub(crate) fn handle_window_event(window: &tauri::Window, event: &tauri::WindowE
             api.prevent_close();
             let _ = window.hide();
         }
+        tauri::WindowEvent::Focused(true) if window.label() == "main" => {
+            for label in [reader::LABEL, LABEL] {
+                if let Some(pane) = window.app_handle().get_webview_window(label) {
+                    let _ = reader::bring_pane_forward(&pane);
+                }
+            }
+        }
         tauri::WindowEvent::Destroyed if window.label() == "main" => {
             for label in [reader::LABEL, LABEL] {
                 if let Some(browser) = window.app_handle().get_webview_window(label) {
