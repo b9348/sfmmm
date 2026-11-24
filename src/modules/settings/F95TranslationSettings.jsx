@@ -39,7 +39,7 @@ export function F95TranslationSettings({ showTitle = true, inline = false }) {
     setMessage(null)
     try {
       const result = await invoke('f95_save_translation_settings', {
-        endpoint: config.endpoint, model: config.model, language: config.language,
+        service: config.service, endpoint: config.endpoint, model: config.model, language: config.language,
         apiKey: apiKey.trim() || null, clearKey,
       })
       setConfig(result)
@@ -66,15 +66,25 @@ export function F95TranslationSettings({ showTitle = true, inline = false }) {
     }
   }
 
+  const isFree = config?.service === 'free'
+
   const body = (
       <div className={styles.body} style={inline ? { padding: 0, minWidth: 0 } : undefined}>
         {config && <>
+          <Field label={t('f95.translation.service')}>
+            <Select size={inline ? "small" : "medium"} value={config.service} disabled={busy} onChange={(_, data) => change('service', data.value)}>
+              <option value="custom">{t('f95.translation.serviceCustom')}</option>
+              <option value="free">{t('f95.translation.serviceFree')}</option>
+            </Select>
+          </Field>
+          {!isFree && <>
           <Field label={t('f95.translation.endpoint')} required>
             <Input size={inline ? "small" : "medium"} value={config.endpoint} disabled={busy} onChange={(_, data) => change('endpoint', data.value)} />
           </Field>
           <Field label={t('f95.translation.model')} required>
             <Input size={inline ? "small" : "medium"} value={config.model} disabled={busy} onChange={(_, data) => change('model', data.value)} />
           </Field>
+          </>}
           <Field label={t('f95.translation.language')}>
             <Select size={inline ? "small" : "medium"} value={config.language} disabled={busy} onChange={(_, data) => change('language', data.value)}>
               <option value="zh-CN">简体中文</option>
@@ -84,11 +94,11 @@ export function F95TranslationSettings({ showTitle = true, inline = false }) {
               <option value="ko">한국어</option>
             </Select>
           </Field>
-          <Field label={t('f95.translation.apiKey')} hint={config.hasKey ? t('f95.translation.hasKey') : undefined}>
+          {!isFree && <Field label={t('f95.translation.apiKey')} hint={config.hasKey ? t('f95.translation.hasKey') : undefined}>
             <Input size={inline ? "small" : "medium"} type="password" autoComplete="new-password" disabled={busy} value={apiKey}
               onChange={(_, data) => { setApiKey(data.value); setDirty(true); setMessage(null) }} />
-          </Field>
-          <Text size="small">{t('f95.translation.serviceNote')}</Text>
+          </Field>}
+          <Text size="small">{t(isFree ? 'f95.translation.freeNote' : 'f95.translation.serviceNote')}</Text>
           <div className={styles.actions}>
             <Button size="small" appearance="primary" disabled={busy || !dirty} onClick={() => save()}>
               {t('f95.translation.save')}
@@ -96,7 +106,7 @@ export function F95TranslationSettings({ showTitle = true, inline = false }) {
             <Button size="small" disabled={busy || dirty} onClick={test}>
               {t('f95.translation.test')}
             </Button>
-            {config.hasKey && <Button size="small" disabled={busy} onClick={() => save(true)}>
+            {!isFree && config.hasKey && <Button size="small" disabled={busy} onClick={() => save(true)}>
               {t('f95.translation.clearKey')}
             </Button>}
           </div>
