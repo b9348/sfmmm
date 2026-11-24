@@ -1,7 +1,6 @@
 use super::*;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use tauri::menu::{Menu, MenuBuilder};
 use zeroize::Zeroizing;
 
 const SETTING: &str = "f95_translation";
@@ -9,8 +8,6 @@ const DEFAULT_ENDPOINT: &str = "https://api.deepseek.com";
 const DEFAULT_MODEL: &str = "deepseek-flash";
 const LAYOUT: &str = include_str!("../../../src/modules/f95/translationLayout.js");
 const LIVE: &str = include_str!("translation-live.js");
-const TRANSLATE_MENU: &str = "f95-translate-post";
-const TOGGLE_MENU: &str = "f95-toggle-translation";
 static LIVE_JOB: AtomicU64 = AtomicU64::new(0);
 static TRANSLATING: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(2);
 
@@ -572,58 +569,6 @@ async fn translate(
     }
 }
 
-fn interface_language(app: &tauri::AppHandle) -> String {
-    crate::db::subscribe::open_sqlite(app)
-        .ok()
-        .and_then(|db| {
-            db.query_row(
-                "SELECT value FROM config WHERE key = 'language'",
-                [],
-                |row| row.get(0),
-            )
-            .ok()
-        })
-        .unwrap_or_else(|| "en".into())
-}
-
-fn live_messages(language: &str) -> &'static serde_json::Value {
-    use std::sync::OnceLock;
-
-    static ZH: OnceLock<serde_json::Value> = OnceLock::new();
-    static EN: OnceLock<serde_json::Value> = OnceLock::new();
-    static JA: OnceLock<serde_json::Value> = OnceLock::new();
-    let (messages, source) = match language {
-        "zh" => (&ZH, include_str!("../../../src/i18n/locales/zh.json")),
-        "ja" => (&JA, include_str!("../../../src/i18n/locales/ja.json")),
-        _ => (&EN, include_str!("../../../src/i18n/locales/en.json")),
-    };
-    messages.get_or_init(|| {
-        let mut locale: serde_json::Value =
-            serde_json::from_str(source).expect("valid SFMMM locale");
-        locale["f95"]["translation"].take()
-    })
-}
-
-pub(super) fn menu(app: &tauri::AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
-    let messages = live_messages(&interface_language(app));
-    MenuBuilder::new(app)
-        .text(TRANSLATE_MENU, messages["liveTranslate"].as_str().unwrap())
-        .text(TOGGLE_MENU, messages["liveToggle"].as_str().unwrap())
-        .build()
-}
-
-#[tauri::command]
-pub async fn f95_refresh_interface_language(window: WebviewWindow) -> Result<(), &'static str> {
-    require_main(&window)?;
-    let app = window.app_handle();
-    if let Some(browser) = app.get_webview_window(LABEL) {
-        browser
-            .set_menu(menu(app).map_err(|_| "windowOpen")?)
-            .map_err(|_| "windowOpen")?;
-    }
-    Ok(())
-}
-
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct LivePost {
@@ -631,64 +576,47 @@ struct LivePost {
     parts: Vec<Part>,
 }
 
-pub(super) fn handle_menu(window: &tauri::Window, event: tauri::menu::MenuEvent) {
-    if window.label() != LABEL {
-        return;
-    }
-    let app = window.app_handle().clone();
-    let Some(browser) = app.get_webview_window(LABEL) else {
-        return;
-    };
-    if event.id() == TOGGLE_MENU {
-        let _ = browser.eval("window.__sfmmmLiveTranslation?.toggle()");
-    } else if event.id() == TRANSLATE_MENU {
-        tauri::async_runtime::spawn(async move {
-            translate_live(app, browser).await;
-        });
-    }
-}
-
-async fn translate_live(app: tauri::AppHandle, browser: WebviewWindow) {
-    if browser
+#[tauri::command]
+pub async fn f95_translate_reader(window: WebviewWindow, toggle: bool) -> Result<(), &'static str> {
+    require_main(&window)?;
+    let browser = window
+        .app_handle()
+        .get_webview_window(super::reader::LABEL)
+        .ok_or("emptyPost")?;
+    if !browser
         .url()
         .ok()
-        .and_then(|url| thread_id(&url).map(str::to_owned))
-        .is_none()
+        .is_some_and(|url| thread_id(&url).is_some())
     {
-        return;
+        return Err("emptyPost");
     }
-    let Some(main) = app.get_webview_window("main") else {
-        return;
-    };
+    if toggle {
+        return browser
+            .eval("window.__sfmmmLiveTranslation?.toggle()")
+            .map_err(|_| "emptyPost");
+    }
     let key = LIVE_JOB.fetch_add(1, Ordering::Relaxed);
     let layout = LAYOUT.replacen(
         "export function createTranslationLayout",
         "function createTranslationLayout",
         1,
     );
-    let locale = live_messages(&interface_language(&app));
-    let messages =
-        serde_json::json!({"progress": locale["liveProgress"], "errors": locale["errors"]});
-    let script = format!("({LIVE})(({layout})(), {key}, {messages})");
+    let script = format!("({LIVE})(({layout})(), {key})");
     let (tx, rx) = tokio::sync::oneshot::channel();
     let tx = Mutex::new(Some(tx));
-    if browser
+    browser
         .eval_with_callback(script, move |value| {
             if let Some(tx) = tx.lock().ok().and_then(|mut tx| tx.take()) {
                 let _ = tx.send(value);
             }
         })
-        .is_err()
-    {
-        return;
-    }
-    let Ok(Ok(value)) = tokio::time::timeout(Duration::from_secs(3), rx).await else {
-        return;
-    };
-    let Ok(post) = serde_json::from_str::<LivePost>(&value) else {
-        return;
-    };
-    let result = translate(&main, &post.post_id, &post.parts, |batch| {
+        .map_err(|_| "emptyPost")?;
+    let value = tokio::time::timeout(Duration::from_secs(3), rx)
+        .await
+        .map_err(|_| "emptyPost")?
+        .map_err(|_| "emptyPost")?;
+    let post = serde_json::from_str::<LivePost>(&value).map_err(|_| "emptyPost")?;
+    let result = translate(&window, &post.post_id, &post.parts, |batch| {
         if let Ok(batch) = serde_json::to_string(&batch) {
             let _ = browser.eval(format!(
                 "window.__sfmmmLiveTranslation?.receive({key}, {batch})"
@@ -696,31 +624,13 @@ async fn translate_live(app: tauri::AppHandle, browser: WebviewWindow) {
         }
     })
     .await;
-    let error = serde_json::to_string(&result.err()).unwrap_or_else(|_| "null".into());
-    let _ = browser.eval(format!(
-        "window.__sfmmmLiveTranslation?.finish({key}, {error})"
-    ));
+    let _ = browser.eval(format!("window.__sfmmmLiveTranslation?.finish({key})"));
+    result
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn live_translation_uses_each_interface_language() {
-        for (language, label) in [
-            ("zh", "翻译当前楼层"),
-            ("en", "Translate post"),
-            ("ja", "現在の投稿を翻訳"),
-        ] {
-            let messages = live_messages(language);
-            assert_eq!(messages["liveTranslate"], label);
-            for key in ["liveToggle", "liveProgress"] {
-                assert!(messages[key].as_str().is_some_and(|text| !text.is_empty()));
-            }
-            assert!(messages["errors"]["generic"].is_string());
-        }
-    }
 
     #[test]
     fn markers_can_move_and_must_stay_balanced() {

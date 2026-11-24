@@ -113,15 +113,17 @@ pub fn run() {
             #[cfg(windows)]
             f95::translation::f95_test_translation,
             #[cfg(windows)]
-            f95::translation::f95_refresh_interface_language,
+            f95::translation::f95_translate_reader,
             #[cfg(windows)]
-            f95::f95_open_thread,
+            f95::reader::f95_open_reader,
+            #[cfg(windows)]
+            f95::reader::f95_position_reader,
             #[cfg(windows)]
             f95::f95_scan_thread,
             #[cfg(windows)]
             f95::f95_stop_scan,
             #[cfg(windows)]
-            f95::f95_open_post,
+            f95::reader::f95_close_reader,
             #[cfg(windows)]
             f95::downloads::f95_download_attachment,
             #[cfg(windows)]

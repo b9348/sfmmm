@@ -19,7 +19,7 @@ struct AttachmentDownload {
 
 static ACTIVE_DOWNLOAD: Mutex<Option<AttachmentDownload>> = Mutex::new(None);
 
-fn attachment_id(url: &Url) -> Option<u64> {
+pub(super) fn attachment_id(url: &Url) -> Option<u64> {
     if !url.username().is_empty() || url.password().is_some() {
         return None;
     }

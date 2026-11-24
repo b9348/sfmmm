@@ -1,5 +1,6 @@
 pub(crate) mod downloads;
 pub(crate) mod reactions;
+pub(crate) mod reader;
 pub(crate) mod translation;
 
 use rusqlite::{params, Connection, OptionalExtension};
@@ -23,8 +24,10 @@ pub(crate) fn handle_window_event(window: &tauri::Window, event: &tauri::WindowE
             let _ = window.hide();
         }
         tauri::WindowEvent::Destroyed if window.label() == "main" => {
-            if let Some(browser) = window.app_handle().get_webview_window(LABEL) {
-                let _ = browser.destroy();
+            for label in [reader::LABEL, LABEL] {
+                if let Some(browser) = window.app_handle().get_webview_window(label) {
+                    let _ = browser.destroy();
+                }
             }
         }
         _ => {}
@@ -823,11 +826,6 @@ async fn open_account_window(window: WebviewWindow, register: bool) -> Result<()
         return Ok(());
     }
     LOGIN_PAGE_READY.store(false, Ordering::Relaxed);
-    let profile = app
-        .path()
-        .app_local_data_dir()
-        .map_err(|_| "windowOpen")?
-        .join("f95-profile");
     let mut builder = WebviewWindowBuilder::new(app, LABEL, WebviewUrl::External(destination))
         .title("F95Zone")
         .visible(false)
@@ -838,10 +836,8 @@ async fn open_account_window(window: WebviewWindow, register: bool) -> Result<()
                 LOGIN_PAGE_READY.store(true, Ordering::Relaxed);
             }
         })
-        .menu(translation::menu(app).map_err(|_| "windowOpen")?)
-        .on_menu_event(translation::handle_menu)
         .inner_size(980.0, 720.0)
-        .data_directory(profile)
+        .data_directory(browser_profile(app)?)
         .devtools(false)
         .on_navigation(|url| {
             url.origin().ascii_serialization() == ORIGIN
@@ -850,13 +846,8 @@ async fn open_account_window(window: WebviewWindow, register: bool) -> Result<()
         .on_new_window(|_, _| NewWindowResponse::Deny)
         .on_download(downloads::handle_download);
 
-    if let Some(url) = std::env::var("SFMMM_F95_PROXY")
-        .ok()
-        .and_then(|value| Url::parse(&value).ok())
-    {
-        if matches!(url.scheme(), "http" | "socks5") {
-            builder = builder.proxy_url(url);
-        }
+    if let Some(url) = browser_proxy() {
+        builder = builder.proxy_url(url);
     }
     let browser = builder.build().map_err(|_| "windowOpen")?;
     LOGIN_WINDOW_PENDING.store(!register, Ordering::Relaxed);
@@ -867,6 +858,20 @@ async fn open_account_window(window: WebviewWindow, register: bool) -> Result<()
         *LOGIN_REQUESTED_AT.lock().map_err(|_| "windowOpen")? = Some(std::time::Instant::now());
     }
     Ok(())
+}
+
+fn browser_profile(app: &tauri::AppHandle) -> Result<std::path::PathBuf, &'static str> {
+    app.path()
+        .app_local_data_dir()
+        .map(|path| path.join("f95-profile"))
+        .map_err(|_| "windowOpen")
+}
+
+fn browser_proxy() -> Option<Url> {
+    std::env::var("SFMMM_F95_PROXY")
+        .ok()
+        .and_then(|value| Url::parse(&value).ok())
+        .filter(|url| matches!(url.scheme(), "http" | "socks5"))
 }
 
 fn show_login_window(browser: &WebviewWindow) -> Result<(), &'static str> {
@@ -935,6 +940,9 @@ fn browser_session(
 pub async fn f95_sign_out(window: WebviewWindow) -> Result<&'static str, &'static str> {
     require_main(&window)?;
     let _work = BROWSER_WORK.lock().await;
+    if let Some(reader) = window.app_handle().get_webview_window(reader::LABEL) {
+        reader.destroy().map_err(|_| "windowOpen")?;
+    }
     if let Some(browser) = window.app_handle().get_webview_window(LABEL) {
         browser
             .clear_all_browsing_data()
@@ -945,40 +953,6 @@ pub async fn f95_sign_out(window: WebviewWindow) -> Result<&'static str, &'stati
     LOGIN_WAITING_FOR_PAGE.store(false, Ordering::Relaxed);
     downloads::clear_attachment_download();
     Ok("signedOut")
-}
-
-#[tauri::command]
-pub async fn f95_open_post(window: WebviewWindow, post_id: String) -> Result<(), &'static str> {
-    require_main(&window)?;
-    let _work = BROWSER_WORK.lock().await;
-    let id = post_id
-        .parse::<u64>()
-        .ok()
-        .filter(|id| *id > 0)
-        .ok_or("postOpen")?;
-    let browser = signed_in_browser(&window)?;
-    let url = Url::parse(&format!("{ORIGIN}/posts/{id}/")).map_err(|_| "postOpen")?;
-    browser.navigate(url).map_err(|_| "postOpen")?;
-    LOGIN_WINDOW_PENDING.store(false, Ordering::Relaxed);
-    browser.show().map_err(|_| "postOpen")?;
-    browser.set_focus().map_err(|_| "postOpen")?;
-    Ok(())
-}
-
-#[tauri::command]
-pub async fn f95_open_thread(
-    window: WebviewWindow,
-    thread_url: String,
-) -> Result<(), &'static str> {
-    require_main(&window)?;
-    let _work = BROWSER_WORK.lock().await;
-    let (url, _) = parse_thread(&thread_url)?;
-    let browser = signed_in_browser(&window)?;
-    browser.navigate(url).map_err(|_| "postOpen")?;
-    LOGIN_WINDOW_PENDING.store(false, Ordering::Relaxed);
-    browser.show().map_err(|_| "postOpen")?;
-    browser.set_focus().map_err(|_| "postOpen")?;
-    Ok(())
 }
 
 #[tauri::command]
