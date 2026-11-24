@@ -7,6 +7,7 @@ import { EmptyState } from '../../components/common/EmptyState'
 import { ListToolbar } from '../../components/common/ListToolbar'
 import { Pagination } from '../../components/common/Pagination'
 import { useGridColumns } from '../../hooks/useGridColumns'
+import { useMouseBackButton } from '../../hooks/useMouseBackButton'
 import { useF95BrowseStyles, useF95CardStyles } from './browseStyles'
 import { CachedF95Post } from './CachedF95Post'
 import { F95TranslationSettings } from '../settings/F95TranslationSettings'
@@ -136,6 +137,25 @@ export function F95Page({ active = true, likedOnly = false }) {
   const sample = selectedThread ? scans[selectedThread.url] : null
   const contentMode = forceContent || sample?.mode === 'content'
   const reading = Boolean(cachedPost || original || accountPage)
+
+  // 侧键返回：复用 App 顶层唯一监听的分发机制，按最上层详情逐层关闭（与返回按钮同语义）。
+  const handleMouseBack = useCallback(() => {
+    if (accountPage) {
+      setAccountPage(null)
+      return true
+    }
+    if (original) {
+      setOriginal(null)
+      return true
+    }
+    if (cachedPost) {
+      setCachedPost(null)
+      return true
+    }
+    return false
+  }, [accountPage, original, cachedPost])
+  useMouseBackButton(handleMouseBack, { active })
+
   const activityLabel = fetchingOpening ? t('f95.cachingOpening')
     : discovering ? t('f95.discovering')
     : updatingThreads ? t('f95.updatingThreads')
