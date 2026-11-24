@@ -2,6 +2,9 @@
   "f95": {
     "translation": {
       "settingsTitle": "AI translation",
+      "liveTranslate": "Translate post",
+      "liveToggle": "Toggle translation",
+      "liveProgress": "Translating…",
       "endpoint": "API endpoint",
       "model": "Model name",
       "language": "Target language",

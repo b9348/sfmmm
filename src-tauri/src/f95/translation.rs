@@ -572,11 +572,56 @@ async fn translate(
     }
 }
 
+fn interface_language(app: &tauri::AppHandle) -> String {
+    crate::db::subscribe::open_sqlite(app)
+        .ok()
+        .and_then(|db| {
+            db.query_row(
+                "SELECT value FROM config WHERE key = 'language'",
+                [],
+                |row| row.get(0),
+            )
+            .ok()
+        })
+        .unwrap_or_else(|| "en".into())
+}
+
+fn live_messages(language: &str) -> &'static serde_json::Value {
+    use std::sync::OnceLock;
+
+    static ZH: OnceLock<serde_json::Value> = OnceLock::new();
+    static EN: OnceLock<serde_json::Value> = OnceLock::new();
+    static JA: OnceLock<serde_json::Value> = OnceLock::new();
+    let (messages, source) = match language {
+        "zh" => (&ZH, include_str!("../../../src/i18n/locales/zh.json")),
+        "ja" => (&JA, include_str!("../../../src/i18n/locales/ja.json")),
+        _ => (&EN, include_str!("../../../src/i18n/locales/en.json")),
+    };
+    messages.get_or_init(|| {
+        let mut locale: serde_json::Value =
+            serde_json::from_str(source).expect("valid SFMMM locale");
+        locale["f95"]["translation"].take()
+    })
+}
+
 pub(super) fn menu(app: &tauri::AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
+    let messages = live_messages(&interface_language(app));
     MenuBuilder::new(app)
-        .text(TRANSLATE_MENU, "翻译当前楼层 / Translate post")
-        .text(TOGGLE_MENU, "显示或隐藏译文 / Toggle translation")
+        .text(TRANSLATE_MENU, messages["liveTranslate"].as_str().unwrap())
+        .text(TOGGLE_MENU, messages["liveToggle"].as_str().unwrap())
         .build()
+}
+
+#[tauri::command]
+pub async fn f95_refresh_interface_language(window: WebviewWindow) -> Result<(), &'static str> {
+    require_main(&window)?;
+    let app = window.app_handle();
+    if let Some(browser) = app.get_webview_window(LABEL) {
+        browser
+            .set_menu(menu(app).map_err(|_| "windowOpen")?)
+            .map_err(|_| "windowOpen")?;
+    }
+    Ok(())
 }
 
 #[derive(Deserialize)]
@@ -621,7 +666,10 @@ async fn translate_live(app: tauri::AppHandle, browser: WebviewWindow) {
         "function createTranslationLayout",
         1,
     );
-    let script = format!("({LIVE})(({layout})(), {key})");
+    let locale = live_messages(&interface_language(&app));
+    let messages =
+        serde_json::json!({"progress": locale["liveProgress"], "errors": locale["errors"]});
+    let script = format!("({LIVE})(({layout})(), {key}, {messages})");
     let (tx, rx) = tokio::sync::oneshot::channel();
     let tx = Mutex::new(Some(tx));
     if browser
@@ -657,6 +705,22 @@ async fn translate_live(app: tauri::AppHandle, browser: WebviewWindow) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn live_translation_uses_each_interface_language() {
+        for (language, label) in [
+            ("zh", "翻译当前楼层"),
+            ("en", "Translate post"),
+            ("ja", "現在の投稿を翻訳"),
+        ] {
+            let messages = live_messages(language);
+            assert_eq!(messages["liveTranslate"], label);
+            for key in ["liveToggle", "liveProgress"] {
+                assert!(messages[key].as_str().is_some_and(|text| !text.is_empty()));
+            }
+            assert!(messages["errors"]["generic"].is_string());
+        }
+    }
 
     #[test]
     fn markers_can_move_and_must_stay_balanced() {

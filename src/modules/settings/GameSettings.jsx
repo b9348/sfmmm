@@ -599,11 +599,14 @@ export function GameSettings({ config, onConfigChange, appUpdateInfo }) {
           <Text className={styles.itemDesc}>{t('settings.languageDesc')}</Text>
         </div>
         <div className={styles.itemControl}>
-          <Select value={language} onChange={(e) => {
+          <Select value={language} onChange={async (e) => {
             const newLang = e.target.value
             setLanguage(newLang)
             i18n.changeLanguage(newLang)
-            saveConfig({ language: newLang })
+            await saveConfig({ language: newLang })
+            if (isWindows) {
+              invoke('f95_refresh_interface_language').catch(error => console.warn('F95 menu language update failed:', error))
+            }
           }} style={{ width: '200px' }}>
             {languageOptions.map(opt => (
               <option key={opt.value} value={opt.value}>{opt.label}</option>

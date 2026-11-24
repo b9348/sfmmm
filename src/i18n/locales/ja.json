@@ -2,6 +2,9 @@
   "f95": {
     "translation": {
       "settingsTitle": "AI 翻訳",
+      "liveTranslate": "現在の投稿を翻訳",
+      "liveToggle": "翻訳文の表示切替",
+      "liveProgress": "翻訳中…",
       "endpoint": "API アドレス",
       "model": "モデル名",
       "language": "翻訳先の言語",

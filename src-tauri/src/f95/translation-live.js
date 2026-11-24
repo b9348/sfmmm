@@ -1,4 +1,4 @@
-(layout, key) => {
+(layout, key, messages) => {
   if (location.origin !== 'https://f95zone.to' || !location.pathname.startsWith('/threads/')) return null
   window.__sfmmmLiveTranslation ??= {
     records: new Map(),
@@ -11,14 +11,8 @@
       const record = this.records.get(job)
       if (!record) return
       record.running = false
-      record.status.textContent = ({
-        noKey: '请在 SFMMM 设置里配置翻译 API / Configure the translation API in SFMMM Settings.',
-        connection: '翻译连接失败 / Could not connect to the translation service.',
-        apiAuth: '翻译密钥无效 / Translation API authentication failed.',
-        rateLimit: '翻译请求过多 / Translation API rate limit reached.',
-        busy: '其他翻译正在进行 / Another translation is running.',
-        partial: '部分段落翻译失败，可再次点击重试 / Some paragraphs failed. Translate again to retry.',
-      })[error] ?? (error ? '翻译失败 / Could not translate this post.' : '')
+      const errors = record.messages.errors
+      record.status.textContent = error ? (errors[error] ?? errors.generic) : ''
     },
     toggle() {
       const record = this.records.get(this.latest)
@@ -55,9 +49,9 @@
   const status = document.createElement('div')
   status.dataset.sfmmmTranslationStatus = ''
   status.setAttribute('role', 'status')
-  status.textContent = '翻译中… / Translating…'
+  status.textContent = messages.progress
   body.before(status)
-  page.records.set(key, { key, post, view, status, running: true, visible: true })
+  page.records.set(key, { key, post, view, status, messages, running: true, visible: true })
   page.latest = key
   return { postId: id, parts: view.parts }
 }

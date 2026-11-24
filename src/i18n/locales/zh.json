@@ -2,6 +2,9 @@
   "f95": {
     "translation": {
       "settingsTitle": "AI 翻译",
+      "liveTranslate": "翻译当前楼层",
+      "liveToggle": "显示或隐藏译文",
+      "liveProgress": "翻译中…",
       "endpoint": "API 地址",
       "model": "模型名称",
       "language": "目标语言",

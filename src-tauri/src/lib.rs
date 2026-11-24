@@ -113,6 +113,8 @@ pub fn run() {
             #[cfg(windows)]
             f95::translation::f95_test_translation,
             #[cfg(windows)]
+            f95::translation::f95_refresh_interface_language,
+            #[cfg(windows)]
             f95::f95_open_thread,
             #[cfg(windows)]
             f95::f95_scan_thread,
