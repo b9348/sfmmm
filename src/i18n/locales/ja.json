@@ -21,6 +21,10 @@
     },
     "translation": {
       "settingsTitle": "AI 翻訳",
+      "service": "翻訳サービス",
+      "serviceCustom": "カスタム API（キー必要）",
+      "serviceFree": "無料サービス（キー不要）",
+      "freeNote": "無料サービスは Immersive Translate が提供し、キーは不要です。テキストは公開ゲートウェイに送信されます。",
       "liveTranslate": "現在の投稿を翻訳",
       "liveToggle": "翻訳文の表示切替",
       "liveProgress": "翻訳中…",
@@ -41,6 +45,9 @@
       "progress": "翻訳中 {{count}} / {{total}}",
       "errors": {
         "generic": "翻訳に失敗しました。再試行してください。",
+        "freeNet": "無料翻訳サービスに接続できません。ネットワークを確認して再試行してください。",
+        "freeReject": "無料ゲートウェイがリクエストを拒否しました。後で試すか、カスタム API に切り替えてください。",
+        "freeQuota": "無料枠を使い切りました。後で試すか、カスタム API に切り替えてください。",
         "noKey": "設定で翻訳 API キーを入力してください。",
         "endpoint": "API アドレスが無効です。HTTPS またはローカルの HTTP アドレスを使用してください。",
         "settings": "翻訳設定を読み込みまたは保存できませんでした。",

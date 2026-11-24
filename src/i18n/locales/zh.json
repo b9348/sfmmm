@@ -21,6 +21,10 @@
     },
     "translation": {
       "settingsTitle": "AI 翻译",
+      "service": "翻译服务",
+      "serviceCustom": "自定义 API（需密钥）",
+      "serviceFree": "免费服务（无需密钥）",
+      "freeNote": "免费服务由沉浸式翻译提供，无需密钥；文本会发送至其公共网关。",
       "liveTranslate": "翻译当前楼层",
       "liveToggle": "显示或隐藏译文",
       "liveProgress": "翻译中…",
@@ -41,6 +45,9 @@
       "progress": "翻译中 {{count}} / {{total}}",
       "errors": {
         "generic": "翻译失败，请重试。",
+        "freeNet": "无法连接免费翻译服务，请检查网络后重试。",
+        "freeReject": "免费网关拒绝了请求，请稍后重试或改用自定义 API。",
+        "freeQuota": "免费额度已用尽，请稍后重试或改用自定义 API。",
         "noKey": "请先在设置里填写翻译 API 密钥。",
         "endpoint": "API 地址无效。请使用 HTTPS，或本机 HTTP 地址。",
         "settings": "无法读取或保存翻译设置。",

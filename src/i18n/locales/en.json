@@ -21,6 +21,10 @@
     },
     "translation": {
       "settingsTitle": "AI translation",
+      "service": "Translation service",
+      "serviceCustom": "Custom API (key required)",
+      "serviceFree": "Free service (no key)",
+      "freeNote": "The free service is provided by Immersive Translate and needs no key; text is sent to its public gateway.",
       "liveTranslate": "Translate post",
       "liveToggle": "Toggle translation",
       "liveProgress": "Translating…",
@@ -41,6 +45,9 @@
       "progress": "Translating {{count}} / {{total}}",
       "errors": {
         "generic": "Translation failed. Try again.",
+        "freeNet": "Cannot connect to the free translation service. Check your network and try again.",
+        "freeReject": "The free gateway rejected the request. Try again later or switch to a custom API.",
+        "freeQuota": "The free quota is used up. Try later or switch to a custom API.",
         "noKey": "Enter the translation API key in Settings.",
         "endpoint": "Invalid API endpoint. Use HTTPS or a local HTTP address.",
         "settings": "Could not read or save translation settings.",
