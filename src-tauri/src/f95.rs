@@ -1,4 +1,5 @@
 pub(crate) mod downloads;
+pub(crate) mod proxy;
 pub(crate) mod reactions;
 pub(crate) mod reader;
 pub(crate) mod translation;
@@ -853,11 +854,8 @@ fn browser_profile(app: &tauri::AppHandle) -> Result<std::path::PathBuf, &'stati
         .map_err(|_| "windowOpen")
 }
 
-fn browser_proxy() -> Option<Url> {
-    std::env::var("SFMMM_F95_PROXY")
-        .ok()
-        .and_then(|value| Url::parse(&value).ok())
-        .filter(|url| matches!(url.scheme(), "http" | "socks5"))
+fn browser_proxy(app_handle: &tauri::AppHandle) -> Option<Url> {
+    proxy::effective_proxy_url(app_handle)
 }
 
 #[derive(serde::Serialize)]

@@ -1,5 +1,24 @@
 {
   "f95": {
+    "proxy": {
+      "settingsTitle": "F95 代理",
+      "host": "代理主机",
+      "port": "端口",
+      "save": "保存",
+      "clear": "清除代理",
+      "saved": "代理已保存。下次打开 F95 窗口时生效。",
+      "cleared": "代理已清除。下次打开 F95 窗口时生效。",
+      "note": "仅用于访问 F95，支持 HTTP 代理；清除后恢复直连。",
+      "errors": {
+        "host": "代理主机无效。请填写域名或 IP，不要带协议或路径。",
+        "port": "端口无效。请输入 1-65535 之间的数字。",
+        "generic": "代理设置保存失败，请重试。",
+        "proxyRead": "无法读取代理设置。",
+        "proxyWrite": "无法保存代理设置。",
+        "windowOpen": "无法关闭现有 F95 窗口，请手动关闭后重试。",
+        "unexpected": "此操作只能从主窗口发起。"
+      }
+    },
     "translation": {
       "settingsTitle": "AI 翻译",
       "liveTranslate": "翻译当前楼层",

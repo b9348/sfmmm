@@ -55,7 +55,7 @@ pub(super) fn pane_builder<'a>(
         .devtools(false)
         .on_new_window(|_, _| NewWindowResponse::Deny)
         .on_download(downloads::handle_download);
-    if let Some(proxy) = browser_proxy() {
+    if let Some(proxy) = browser_proxy(app) {
         builder = builder.proxy_url(proxy);
     }
     Ok(builder)

@@ -32,6 +32,7 @@ import { checkVersion, checkGitHubUpdate, prepareUpdate, applyUpdate, getUpdateS
 import APP_VERSION from '../../version.js'
 import { DownloadProgress } from '../../components'
 import { F95CacheSettings } from './F95CacheSettings'
+import { F95ProxySettings } from './F95ProxySettings'
 import { F95TranslationSettings } from './F95TranslationSettings'
 import { usePlatform } from '../../hooks/usePlatform'
 
@@ -709,6 +710,7 @@ export function GameSettings({ config, onConfigChange, appUpdateInfo }) {
 
       {isWindows && <>
         <F95CacheSettings inline />
+        <F95ProxySettings inline />
         <F95TranslationSettings inline />
       </>}
 

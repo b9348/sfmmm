@@ -101,6 +101,10 @@ pub fn run() {
             #[cfg(windows)]
             f95::reactions::f95_set_post_like,
             #[cfg(windows)]
+            f95::proxy::f95_proxy_settings,
+            #[cfg(windows)]
+            f95::proxy::f95_save_proxy_settings,
+            #[cfg(windows)]
             f95::translation::f95_translation_settings,
             #[cfg(windows)]
             f95::translation::f95_save_translation_settings,

@@ -81,8 +81,8 @@ const useStyles = makeStyles({
   },
 })
 
-// tab 顺序即预加载链：当前 tab 激活时预挂载下一个（云→讨论→我的→订阅）
-const TABS = ['browse', 'discuss', 'my', 'records', 'f95']
+// tab 顺序即预加载链：当前 tab 激活时预挂载下一个（云→讨论→F95→我的→订阅）
+const TABS = ['browse', 'discuss', 'f95', 'my', 'records']
 // 手机端没有下载安装能力，「订阅记录」页（桌面下载任务列表）整页不挂载
 const MOBILE_TABS = ['browse', 'discuss', 'my']
 
@@ -214,7 +214,6 @@ export function Workshop({ initialModId, initialCommentId, onConsumeNavTarget })
           onTabSelect={handleTabSelect}
         >
           <Tab value="browse" icon={isNarrow ? undefined : <Cloud24Regular />}>{t('workshop.cloud')}</Tab>
-          {isWindows && <Tab value="f95">{t('f95.title')}</Tab>}
           <Tab value="discuss" icon={isNarrow ? undefined : <Comment24Regular />}>
             <span className={styles.tabLabel}>
               {t('nav.discuss')}
@@ -224,6 +223,7 @@ export function Workshop({ initialModId, initialCommentId, onConsumeNavTarget })
               </span>
             </span>
           </Tab>
+          {isWindows && <Tab value="f95">{t('f95.title')}</Tab>}
           <Tab value="my" icon={isNarrow ? undefined : <Person24Regular />}>{t('workshop.mine')}</Tab>
           {!isMobile && <Tab value="records" icon={isNarrow ? undefined : <ArrowSync24Regular />}>{t('nav.subscriptions')}</Tab>}
         </TabList>

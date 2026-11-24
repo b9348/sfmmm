@@ -1,5 +1,24 @@
 {
   "f95": {
+    "proxy": {
+      "settingsTitle": "F95 proxy",
+      "host": "Proxy host",
+      "port": "Port",
+      "save": "Save",
+      "clear": "Clear proxy",
+      "saved": "Proxy saved. It will apply the next time you open an F95 window.",
+      "cleared": "Proxy cleared. It will apply the next time you open an F95 window.",
+      "note": "Used only for accessing F95. HTTP proxies are supported; clear to connect directly.",
+      "errors": {
+        "host": "Invalid proxy host. Use a domain or IP without protocol or path.",
+        "port": "Invalid port. Enter a number between 1 and 65535.",
+        "generic": "Could not save the proxy settings. Please try again.",
+        "proxyRead": "Could not read the proxy settings.",
+        "proxyWrite": "Could not save the proxy settings.",
+        "windowOpen": "Could not close the existing F95 window. Close it manually and retry.",
+        "unexpected": "This action can only be started from the main window."
+      }
+    },
     "translation": {
       "settingsTitle": "AI translation",
       "liveTranslate": "Translate post",
